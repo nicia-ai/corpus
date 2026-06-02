@@ -1,0 +1,22 @@
+node_modules
+.claude
+.wrangler
+.dev.vars
+.env
+.env.*
+dist
+dist/
+worker-configuration.d.ts
+*.log
+.DS_Store
+.tanstack/
+.gstack/
+*.sqlite
+*.sqlite-journal
+.idea/
+.vscode/
+*.swp
+# Transient scratch from `pnpm check:do-migrations` (cleaned in finally;
+# ignored so a crashed run can't leak into the tree).
+.do-mig-check/
+.drizzle.do.check.*.config.ts

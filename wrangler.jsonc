@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "corpus",
+  "main": "src/server.ts",
+  "compatibility_date": "2026-05-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "logs": { "enabled": true } },
+  "dev": { "port": 8787 },
+  // Data plane: one ProjectStore instance per Project (TypeGraph +
+  // Drizzle co-located so the save path commits as one
+  // `ctx.storage.transaction`). Plus one EventLogStore per Project
+  // with its OWN SQLite for the append-only instrumentation event
+  // stream — separate storage budget so durable events never compete
+  // with canonical documents, collections, and blobs.
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROJECT_STORE", "class_name": "ProjectStore" },
+      { "name": "EVENT_LOG_STORE", "class_name": "EventLogStore" },
+    ],
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProjectStore"] },
+    { "tag": "v2", "new_sqlite_classes": ["EventLogStore"] },
+  ],
+  // Low-frequency control-plane + data-plane retention sweep (the
+  // `scheduled` handler in src/server.ts). Hourly: dead-row GC, not
+  // latency-sensitive. Self-hosters inherit GC by default.
+  "triggers": { "crons": ["0 * * * *"] },
+  // Control plane: Better Auth + organization + project + membership in D1.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "corpus-control",
+      "database_id": "PLACEHOLDER_RUN_wrangler_d1_create",
+      "migrations_dir": "./drizzle",
+    },
+  ],
+  // Dev-only. Production sets BETTER_AUTH_SECRET via `wrangler secret put`.
+  "vars": {
+    "BETTER_AUTH_SECRET": "dev-only-secret-change-me-min-32-chars-long",
+    "BETTER_AUTH_URL": "http://localhost:8787",
+  },
+}

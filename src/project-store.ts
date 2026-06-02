@@ -1,0 +1,1083 @@
+import { createStoreWithSchema, type Store } from "@nicia-ai/typegraph";
+import { createSqliteBackend } from "@nicia-ai/typegraph/sqlite";
+import { DurableObject } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/durable-sqlite";
+import { migrate } from "drizzle-orm/durable-sqlite/migrator";
+
+import { ledgerMigrations } from "../drizzle-do/migrations";
+
+import type { AssembledCollection } from "./corpus";
+import type { LedgerDb } from "./db";
+import { ConflictError, isUniqueViolation, RollbackProbe } from "./errors";
+import { type CanonicalGraph, canonicalGraph } from "./graph";
+import {
+  asCollectionSlug,
+  type CollectionSlug,
+  type DocumentSlug,
+  type FolderSlug,
+  asProjectId,
+  type CallerRef,
+  type ProjectId,
+} from "./ids";
+import {
+  type CommandOutcome,
+  collectionSnapshotMembers,
+  type ProjectCommandContext,
+} from "./project-store/command";
+import {
+  exportBundleProjection,
+  importBundleCommand,
+} from "./project-store/commands/bundle";
+import {
+  attachDocumentCommand,
+  attachFolderToCollectionCommand,
+  createCollectionCommand,
+  detachDocumentCommand,
+  detachFolderFromCollectionCommand,
+  reorderCollectionDocumentsCommand,
+  setFolderLinkDeliveryCommand,
+  setMemberDeliveryCommand,
+  updateCollectionCommand,
+} from "./project-store/commands/collections";
+import {
+  archiveDocumentsCommand,
+  archiveOneDocumentCommand,
+  ImportAbort,
+  importDocumentAtPathCommand,
+  renameDocumentCommand,
+  renameFilenameCommand,
+  saveDocumentCommand,
+} from "./project-store/commands/documents";
+import {
+  createFolderCommand,
+  deleteFolderCommand,
+  moveFolderCommand,
+  placeDocumentInFolderCommand,
+  placeDocumentsInFolderCommand,
+  renameFolderCommand,
+} from "./project-store/commands/folders";
+import { linkImportedRootFolderCommand } from "./project-store/commands/import-link";
+import { seedExampleCommand } from "./project-store/commands/seed";
+import type {
+  CollectionOutline,
+  DocumentHistoryEntry,
+  ImportAndLinkInput,
+  ImportAndLinkResult,
+  DocumentSnapshot,
+  ImportDocResult,
+  ImportResult,
+  ImportSummary,
+  ProjectUsageSnapshot,
+  ReapResult,
+  RenameDocumentInput,
+  RenameFilenameInput,
+  RenameFilenameResult,
+  SaveDocumentInput,
+  SaveResult,
+  SeedResult,
+  UpdateCollectionInput,
+} from "./project-store/contracts";
+import { ProjectInstrumentation } from "./project-store/outbox";
+import {
+  collectionMembersProjection,
+  collectionMetaProjection,
+  collectionOutlineProjection,
+  collectionStructureProjection,
+  documentHistoryProjection,
+  getDocumentProjection,
+  listAttachmentsProjection,
+  listCollectionsProjection,
+  listDocumentsProjection,
+  listDocumentSlugsProjection,
+  readCollectionProjection,
+  resolvedViews,
+  usageSnapshotProjection,
+  verifyHistoryProjection,
+} from "./project-store/queries";
+import { reapExpiredRecords } from "./project-store/retention";
+import type { ProjectUnit } from "./project-store/unit";
+import type { Bundle, BundleSource } from "./store/domain/bundle";
+import {
+  DEFAULT_COLLECTION_DELIVERY,
+  type CollectionDelivery,
+} from "./store/domain/collection-expand";
+import { events as buildEvent } from "./store/domain/instrumentation-events";
+import { commonRootSegment } from "./store/domain/paths";
+import type { RetentionPolicy } from "./store/domain/retention";
+import type { VerifyResult } from "./store/domain/verify";
+import { collectionVersionSnapshot } from "./store/domain/versions";
+import type { GraphHandle } from "./store/handle";
+import { BlobStore } from "./store/repos/blob-store";
+import { ChangeLog, type RecentChange } from "./store/repos/change-log";
+import {
+  CollectionGraph,
+  type CollectionMeta,
+} from "./store/repos/collection-graph";
+import { DocumentRepo } from "./store/repos/document-repo";
+import {
+  type DeleteFolderResult,
+  FolderRepo,
+  type FolderView,
+  type MoveFolderResult,
+  type PlaceDocumentResult,
+  type RenameFolderResult,
+} from "./store/repos/folder-repo";
+import { InstrumentationOutbox } from "./store/repos/instrumentation-outbox";
+import { VersionRepo } from "./store/repos/version-repo";
+import { sha256, slugify } from "./util";
+
+export type {
+  CollectionOutline,
+  DocumentHistoryEntry,
+  ImportAndLinkInput,
+  ImportAndLinkResult,
+  ImportCollectionLink,
+  ImportDocResult,
+  ImportResult,
+  ImportSummary,
+  ProjectUsageSnapshot,
+  ReapResult,
+  RenameDocumentInput,
+  RenameFilenameInput,
+  RenameFilenameResult,
+  SaveDocumentInput,
+  SaveResult,
+  SeedResult,
+  UpdateCollectionInput,
+} from "./project-store/contracts";
+
+type Unit = ProjectUnit;
+
+// The single, deliberate unsafe cast in the system. TypeGraph 0.26 and the
+// Drizzle ledger ride the SAME do-sqlite handle (storage handle or the
+// in-transaction tx.sql); the structural mismatch with LedgerDb is
+// unavoidable and is contained to exactly this function.
+function asLedgerDb(handle: unknown): LedgerDb {
+  return handle as LedgerDb;
+}
+
+// Stable, deterministic serialization of a {slug: docVersion} map so
+// two reads with the same version-set produce the same fingerprint
+// regardless of object key order. Algorithm is fixed (sort keys, join
+// `${k}=${v}` with comma) so it agrees byte-for-byte with the matching
+// fingerprint inside `idempotencyKey()` for read events.
+function fingerprintVersions(map: Readonly<Record<string, number>>): string {
+  return Object.keys(map)
+    .sort()
+    .map((k) => `${k}=${String(map[k] ?? 0)}`)
+    .join(",");
+}
+
+// One ProjectStore instance per Project. TypeGraph (Document/
+// DocumentVersion/Collection/CollectionVersion/edges) and the Drizzle
+// content/event ledger share this DO's SQLite, so every mutation is one
+// atomic ctx.storage.transaction (TypeGraph 0.26 do-sqlite). This class
+// orchestrates; persistence lives in store/repos, pure rules in
+// store/domain. The durable instrumentation event stream lives in a
+// sibling per-Project EventLogStore DO (own storage budget); save
+// write commands append local change_events + an instrumentation_outbox row
+// atomically with the underlying mutation, then drain that outbox to the
+// sibling per-Project EventLogStore after commit. The EventLogStore gives the
+// audit stream a queryable source of truth without splitting the save tx.
+export class ProjectStore extends DurableObject<Env> {
+  private store: Store<CanonicalGraph> | undefined;
+  private initPromise: Promise<Store<CanonicalGraph>> | undefined;
+  // The DO's storage is stable for its lifetime, so the read-side ledger
+  // handle is built once (writes use the tx-scoped handle).
+  private ledger: LedgerDb | undefined;
+  // The content-keyed link lens: a document's relative-link set is a
+  // pure function of its immutable bytes, so it is parsed once per
+  // contentHash and never invalidated (content never mutates).
+  private readonly parsedLinksByHash = new Map<string, readonly string[]>();
+  // Per-(callerRef, collectionSlug) version-fingerprint cache. A
+  // routine repeat poll with no intervening edit produces the same
+  // fingerprint as the prior cached read, so the cross-DO append is
+  // skipped entirely. The cache is ephemeral (DO restart loses it);
+  // a re-emit after restart collapses at the EventLogStore via the
+  // unique idempotency_key, so the projection never double-counts.
+  // Bounded by the active set of callers × collections.
+  private readonly readDedupCache = new Map<string, string>();
+  private instrumentationOutbox: ProjectInstrumentation | undefined;
+
+  private ledgerDb(): LedgerDb {
+    return (this.ledger ??= asLedgerDb(drizzle(this.ctx.storage)));
+  }
+
+  // The Project id this DO instance is addressed by — recovered from
+  // `idFromName(projectId)` at the multi-tenant boundary (`storeFor`).
+  // Empty string is the never-named DO case (tests that fetch a DO by
+  // raw id rather than by name).
+  private projectId(): ProjectId {
+    return asProjectId(this.ctx.id.name ?? "");
+  }
+
+  private instrumentation(): ProjectInstrumentation {
+    return (this.instrumentationOutbox ??= new ProjectInstrumentation({
+      env: this.env,
+      projectId: () => this.projectId(),
+      read: () => this.read(),
+      write: (fn) => this.write(fn),
+      scheduleAlarm: () => this.ctx.storage.setAlarm(Date.now() + 30_000),
+    }));
+  }
+
+  private commandContext(u: Unit, now: string): ProjectCommandContext {
+    return {
+      u,
+      now,
+      hash: sha256,
+      collection: {
+        resolvedViews,
+        snapshot: (unit, slug, changedBy, changedAt) =>
+          this.snapshotCollection(unit, slug, changedBy, changedAt),
+      },
+    };
+  }
+
+  private async writeCommand<T>(
+    now: string,
+    fn: (ctx: ProjectCommandContext) => Promise<CommandOutcome<T>>,
+  ): Promise<CommandOutcome<T>> {
+    const outcome = await this.write(async (u) => {
+      const out = await fn(this.commandContext(u, now));
+      await this.instrumentation().recordChanges(u, out.changes);
+      if (out.rollbackAfterRecord === true) throw new RollbackProbe();
+      return out;
+    });
+    await this.instrumentation().drain();
+    return outcome;
+  }
+
+  override async alarm(): Promise<void> {
+    await this.instrumentation().drain();
+  }
+
+  // — Read-path event emission ————————————————————————————————————————
+
+  // Record an MCP read for the freshness moment. The scoped executor
+  // hands us the CallerRef, the bound collectionSlug, and the
+  // version-set the read actually saw. We emit at most ONE event per
+  // state change:
+  //   * first time this caller reads this collection → `read.first`
+  //   * subsequent read whose captured-version-set differs from the
+  //     prior cached fingerprint → `read.after-edit`
+  //   * subsequent read with the same fingerprint → no event
+  // Failures are logged and swallowed — same posture as save events.
+  async recordRead(
+    callerRef: CallerRef,
+    collectionSlug: string,
+    versionCapturedAtRead: Readonly<Record<string, number>>,
+  ): Promise<void> {
+    const cacheKey = `${callerRef}|${collectionSlug}`;
+    const fingerprint = fingerprintVersions(versionCapturedAtRead);
+    const prior = this.readDedupCache.get(cacheKey);
+    if (prior === fingerprint) return;
+    const event =
+      prior === undefined
+        ? buildEvent.readFirst({
+            callerRef,
+            collectionSlug,
+            versionCapturedAtRead,
+          })
+        : buildEvent.readAfterEdit({
+            callerRef,
+            collectionSlug,
+            versionCapturedAtRead,
+          });
+    // Emit BEFORE updating the cache. If emit transiently fails the
+    // cache stays at the prior fingerprint, so a subsequent poll
+    // retries; setting the cache first poisons it forever for the
+    // duration of this DO's lifetime. The append's
+    // `onConflictDoNothing` idempotency-key check makes a successful
+    // re-attempt collapse to the same monotonic id.
+    const emitted = await this.instrumentation().emit(event);
+    if (emitted) this.readDedupCache.set(cacheKey, fingerprint);
+  }
+
+  // Emitted once per `respondMcp` from the request edge — at most one
+  // network call per request per CallerRef. The EventLogStore's
+  // idempotency_key (`caller.connected:<callerRef>`) collapses every
+  // subsequent connect of the same caller to the original monotonic
+  // id, so the projection's "second distinct caller connected" signal
+  // latches exactly once.
+  async recordCallerConnected(callerRef: CallerRef): Promise<void> {
+    await this.instrumentation().emit(
+      buildEvent.callerConnected({ callerRef }),
+    );
+  }
+
+  // Lazy, idempotent init. The ledger schema (content_blobs,
+  // change_events) is applied by the Drizzle DO migrator from the
+  // generated bundle — drizzle-kit is the single source of this DDL
+  // (src/db.ts → `pnpm db:generate:do`). The migrator runs DDL in its
+  // own DO transaction, BEFORE TypeGraph init, so it never touches a
+  // TypeGraph enlisted transaction. TypeGraph then bootstraps its own
+  // node/edge tables.
+  private async ensureStore(): Promise<Store<CanonicalGraph>> {
+    if (this.store) return this.store;
+    this.initPromise ??= (async () => {
+      await migrate(this.ledgerDb(), ledgerMigrations);
+      const backend = createSqliteBackend(drizzle(this.ctx.storage));
+      const [store] = await createStoreWithSchema(canonicalGraph, backend);
+      this.store = store;
+      return store;
+    })();
+    return this.initPromise;
+  }
+
+  private unit(graph: GraphHandle, ledger: LedgerDb): Unit {
+    return {
+      docs: new DocumentRepo(graph),
+      cols: new CollectionGraph(graph),
+      folders: new FolderRepo(graph),
+      log: new ChangeLog(ledger),
+      blobs: new BlobStore(ledger),
+      versions: new VersionRepo(graph),
+      outbox: new InstrumentationOutbox(ledger),
+    };
+  }
+
+  // The only place a transaction opens.
+  private async write<T>(fn: (u: Unit) => Promise<T>): Promise<T> {
+    const store = await this.ensureStore();
+    return store.transaction((tx) => fn(this.unit(tx, asLedgerDb(tx.sql))));
+  }
+
+  // Non-transactional unit for reads — same repo API, storage handle.
+  private async read(): Promise<Unit> {
+    const store = await this.ensureStore();
+    return this.unit(store, this.ledgerDb());
+  }
+
+  // Tear down all of this project's data (reconcile sweep, after a
+  // project soft-delete). Idempotent.
+  async purge(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+    this.store = undefined;
+    this.initPromise = undefined;
+    this.ledger = undefined;
+  }
+
+  // — Reads ——————————————————————————————————————————————————————————
+
+  async getDocument(slug: DocumentSlug): Promise<DocumentSnapshot | undefined> {
+    return getDocumentProjection(await this.read(), slug);
+  }
+
+  async listDocuments(): Promise<
+    readonly {
+      slug: string;
+      title: string;
+      docVersion: number;
+      size: number;
+      filename: string;
+      path: string;
+      folderSlug: string | null;
+      updatedAt: string;
+    }[]
+  > {
+    return listDocumentsProjection(await this.read());
+  }
+
+  async listDocumentSlugs(): Promise<string[]> {
+    return listDocumentSlugsProjection(await this.read());
+  }
+
+  async listCollections(): Promise<readonly CollectionMeta[]> {
+    return listCollectionsProjection(await this.read());
+  }
+
+  async usageSnapshot(): Promise<ProjectUsageSnapshot> {
+    return usageSnapshotProjection(await this.read());
+  }
+
+  // Single-collection head-node lookup — for callers that need
+  // name/description/budget but not the resolved member structure (e.g.
+  // the MCP setup page's prompt template). One DO read, no folder
+  // subtree walk, no blob hydration.
+  async collectionMeta(collectionSlug: CollectionSlug): Promise<
+    | { found: false }
+    | {
+        found: true;
+        name: string;
+        description?: string;
+        alwaysIncludeBudgetTokens: number;
+      }
+  > {
+    return collectionMetaProjection(await this.read(), collectionSlug);
+  }
+
+  async readCollection(collectionSlug: CollectionSlug): Promise<
+    | { found: false }
+    | ({
+        found: true;
+        name: string;
+        description?: string;
+      } & AssembledCollection)
+  > {
+    return readCollectionProjection(await this.read(), collectionSlug);
+  }
+
+  // The resolved member slug set of a collection (direct + folder-
+  // expanded), for the MCP soft relevance scope: `list_documents` /
+  // `read_document` filter to this set when an agent declares the
+  // collection it is working in. Shares `resolvedViews` with
+  // `readCollection` so the scope cannot disagree with what would be
+  // assembled, but skips blob hydration + corpus assembly — the scope
+  // check needs only slugs. `undefined` = no such collection.
+  async collectionMembers(
+    collectionSlug: CollectionSlug,
+  ): Promise<readonly string[] | undefined> {
+    return collectionMembersProjection(await this.read(), collectionSlug);
+  }
+
+  // The collection-builder view: the resolved member order plus
+  // *provenance* — which members are there via a direct `includes`
+  // edge (individually detachable / reorderable) vs pulled in by a
+  // linked folder (the folder is the unit; the doc is read-only here).
+  // Separate from `readCollection` so the MCP / bundle paths (which
+  // route through `resolvedViews` directly) are untouched.
+  async collectionStructure(collectionSlug: CollectionSlug): Promise<
+    | { found: false }
+    | {
+        found: true;
+        name: string;
+        description?: string;
+        alwaysIncludeBudgetTokens: number;
+        folders: readonly Readonly<{
+          slug: string;
+          name: string;
+          position: number;
+          delivery: CollectionDelivery;
+        }>[];
+        members: readonly Readonly<{
+          slug: string;
+          title: string;
+          docVersion: number;
+          size: number;
+          updatedAt: string;
+          direct: boolean;
+          position: number;
+          delivery: CollectionDelivery;
+          viaFolder?: string;
+        }>[];
+      }
+  > {
+    return collectionStructureProjection(await this.read(), collectionSlug);
+  }
+
+  // Flat edge list (collection → document, with position) for the
+  // whole project — the project-graph data source. Deliberately lean:
+  // reuses `cols.ordered` (Document heads only) and never resolves
+  // blob bytes, so it stays cheap even though `readCollection` (which
+  // assembles full corpus text) shares the same accessor.
+  async listAttachments(): Promise<
+    readonly Readonly<{
+      collectionSlug: string;
+      documentSlug: string;
+      position: number;
+    }>[]
+  > {
+    return listAttachmentsProjection(await this.read());
+  }
+
+  async recentChanges(limit: number): Promise<readonly RecentChange[]> {
+    return (await this.read()).log.recent(limit);
+  }
+
+  async lastEventId(): Promise<number> {
+    return (await this.read()).log.lastEventId();
+  }
+
+  async versionCount(slug: DocumentSlug): Promise<number> {
+    return (await this.read()).versions.versionCount(slug);
+  }
+
+  // The DocumentVersion chain for one document, newest first, each
+  // version's body resolved from the content store. A version whose blob
+  // was reaped by retention still appears (lineage is the version nodes,
+  // not the blobs) with retained:false and empty markdown — the UI shows
+  // a placeholder and cannot diff it.
+  async documentHistory(
+    slug: DocumentSlug,
+  ): Promise<readonly DocumentHistoryEntry[]> {
+    return documentHistoryProjection(await this.read(), slug);
+  }
+
+  // Walk the content-addressed chain (whole project, or one document)
+  // and re-derive every invariant it promises. Reuses the same pure
+  // verifier the MCP tool and CLI surface.
+  async verifyHistory(slug?: DocumentSlug): Promise<VerifyResult> {
+    return verifyHistoryProjection(await this.read(), slug);
+  }
+
+  // — Retention ——————————————————————————————————————————————————————
+
+  // Reap records past the Project's retention window. One atomic tx so
+  // the version-node, edge, change-event, and blob deletions cannot tear.
+  // Heads and versions still pinned by a live CollectionVersion are never
+  // reaped, so `getDocument` and `verifyHistory` stay green afterwards.
+  // Blobs go only when no surviving Document/DocumentVersion references
+  // the hash. An absent window = "forever" (that pass is skipped).
+  // `nowMs` is a test-only clock seam (mirrors `__failAfterWrites`);
+  // production uses the wall clock.
+  async reapExpired(
+    retention: RetentionPolicy,
+    nowMs?: number,
+  ): Promise<ReapResult> {
+    const now = nowMs ?? Date.now();
+    return this.write((u) => reapExpiredRecords(u, retention, now));
+  }
+
+  // — Bundle export / import ————————————————————————————————————————
+
+  // Serialize the whole Project to the portable bundle contract.
+  // Deterministic ordering everywhere so export → import → export is
+  // byte-identical (the alignment test).
+  async exportBundle(source: BundleSource): Promise<Bundle> {
+    const u = await this.read();
+    return exportBundleProjection(u, source, resolvedViews);
+  }
+
+  // Rebuild a Project from a bundle in one atomic tx. The root hash is
+  // recomputed and must match (tamper / drift rejection) before any
+  // write. Dependency order: blobs → document head → its version chain
+  // (the `versions_of` edge needs the head node) → collections
+  // (`includes` edges + the `CollectionVersion` snapshot, members
+  // pinned verbatim).
+  async importBundle(bundle: Bundle): Promise<ImportResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      importBundleCommand(ctx, bundle),
+    );
+    return outcome.result;
+  }
+
+  // — Writes ————————————————————————————————————————————————————————
+
+  // The 409 / rollback / racing-duplicate taxonomy → structured result.
+  private async saveError(
+    err: unknown,
+    input: SaveDocumentInput,
+  ): Promise<SaveResult> {
+    if (err instanceof RollbackProbe) return { ok: false, rolledBack: true };
+    if (err instanceof ConflictError) {
+      return { ok: false, conflict: true, currentVersion: err.currentVersion };
+    }
+    // A racing N+1: both saves create `DocumentVersion (slug, N+1)`; the
+    // loser hits the node-unique constraint (TypeGraph UniquenessError)
+    // and its whole enlisted tx rolls back. Map to the same 409.
+    if (isUniqueViolation(err)) {
+      const head = await this.getDocument(input.slug);
+      return {
+        ok: false,
+        conflict: true,
+        currentVersion: head?.docVersion ?? input.clientVersion,
+      };
+    }
+    throw err;
+  }
+
+  async saveDocument(input: SaveDocumentInput): Promise<SaveResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand(now, (ctx) =>
+        saveDocumentCommand(ctx, input),
+      );
+      return { ok: true, docVersion: outcome.result.docVersion };
+    } catch (err) {
+      return this.saveError(err, input);
+    }
+  }
+
+  // Rename a document = a title-only head-pointer edit. Distinct from
+  // saveDocument: no blob, no DocumentVersion, no docVersion bump — the
+  // content-addressed chain is untouched, so verifyHistory stays green.
+  // ok:false only when the document is absent; an unchanged title is
+  // an idempotent ok:true no-op (no event, mirrors createCollection).
+  // The rename still fans out to collections that include the doc so
+  // subscribed agents see the new title.
+  async renameDocument(input: RenameDocumentInput): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      renameDocumentCommand(ctx, input),
+    );
+    return { ok: outcome.result.status !== "missing" };
+  }
+
+  // First-class `filename` rename. Shares `renameDocument`'s head-edit
+  // primitive (no blob / DocumentVersion / docVersion bump) but is a
+  // DISTINCT op: a filename change is a path-map mutation — every
+  // document that links the renamed file by a relative path now
+  // resolves differently with NO byte change in those sources — so it
+  // composes the doc-event delivery with the coarse path-map fan-out
+  // (`renameDocument`, title-only, deliberately does NOT fan out).
+  // Sibling-namespace uniqueness is the same cross-type (folder|doc)
+  // segment rule `placeDocument` enforces; race-free inside this tx
+  // because the DO serializes requests per Project.
+  async renameFilename(
+    input: RenameFilenameInput,
+  ): Promise<RenameFilenameResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      renameFilenameCommand(ctx, input),
+    );
+    return outcome.result;
+  }
+
+  async createCollection(input: {
+    slug: CollectionSlug;
+    name: string;
+    description?: string;
+    alwaysIncludeBudgetTokens?: number;
+    changedBy: string;
+  }): Promise<{ slug: CollectionSlug }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      createCollectionCommand(ctx, input),
+    );
+    return outcome.result;
+  }
+
+  // Edit a collection's name/description. Membership is unchanged, so
+  // NO new `CollectionVersion` is cut (head-node metadata only) and
+  // slug — the identity pinned in every `CollectionVersion` / the
+  // bundle sort key — is never touched. ok:false only when the
+  // collection is absent; an unchanged name+description is an
+  // idempotent ok:true no-op.
+  async updateCollection(
+    input: UpdateCollectionInput,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      updateCollectionCommand(ctx, input),
+    );
+    return { ok: outcome.result.status !== "missing" };
+  }
+
+  // The agent-facing folder projection: tree-ordered documents with
+  // derived paths and resolved relative links — the whole hierarchy +
+  // link graph in one read. Canonical bytes are never rewritten; links
+  // are resolved here against the current path map.
+  async collectionOutline(
+    collectionSlug: CollectionSlug,
+  ): Promise<CollectionOutline> {
+    return collectionOutlineProjection(
+      await this.read(),
+      collectionSlug,
+      this.parsedLinksByHash,
+    );
+  }
+
+  // Attach (or re-position) a document in a collection. A new edge emits
+  // collection.attached; moving an existing one collection.reordered.
+  async attachDocument(
+    collectionSlug: CollectionSlug,
+    documentSlug: DocumentSlug,
+    position: number,
+    changedBy: string,
+    delivery: CollectionDelivery = DEFAULT_COLLECTION_DELIVERY,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      attachDocumentCommand(ctx, {
+        collectionSlug,
+        documentSlug,
+        position,
+        delivery,
+        changedBy,
+      }),
+    );
+    return outcome.result;
+  }
+
+  // Membership-affecting change → fresh immutable CollectionVersion, exactly
+  // like attach. `mutate` performs the edge change and returns the
+  // CollectionChange (or undefined for a no-op); the snapshot + ledger
+  // append are shared so detach and reorder can't drift from attach.
+  // Cut a fresh immutable CollectionVersion from the current resolved
+  // expansion. The single place a snapshot is taken — every
+  // membership-affecting path (attach/detach/reorder, and folder
+  // delete's link release) routes through here so a collection's
+  // latest `CollectionVersion` never lags what `readCollection` /
+  // `exportBundle` show.
+  private async snapshotCollection(
+    u: Unit,
+    collectionSlug: CollectionSlug,
+    changedBy: string,
+    now: string,
+  ): Promise<void> {
+    const colNode = await u.cols.findCollection(collectionSlug);
+    const views = await resolvedViews(u, collectionSlug);
+    if (colNode === undefined || views === undefined) return;
+    const nextColVersion =
+      (await u.versions.latestCollectionVersion(collectionSlug)) + 1;
+    await u.versions.appendCollectionVersion(
+      colNode.id,
+      collectionVersionSnapshot({
+        collectionSlug,
+        collectionVersion: nextColVersion,
+        members: collectionSnapshotMembers(views),
+        changedAt: now,
+        changedBy,
+      }),
+    );
+  }
+
+  // Remove a document from a collection. No-op (ok:false) when the
+  // edge wasn't there, so a double-click can't double-snapshot.
+  async detachDocument(
+    collectionSlug: CollectionSlug,
+    documentSlug: DocumentSlug,
+    changedBy: string,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      detachDocumentCommand(ctx, {
+        collectionSlug,
+        documentSlug,
+        changedBy,
+      }),
+    );
+    return outcome.result;
+  }
+
+  // ok:false = it didn't exist or was already archived.
+  async archiveDocument(
+    slug: DocumentSlug,
+    changedBy: string,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      archiveOneDocumentCommand(ctx, { slug, changedBy }),
+    );
+    return { ok: outcome.result.archived };
+  }
+
+  // Bulk soft-delete: one atomic tx over the selected slugs (all-or-
+  // nothing). Missing / already-archived slugs are skipped, not errors;
+  // `archived` is how many were actually archived.
+  async archiveDocuments(
+    slugs: readonly DocumentSlug[],
+    changedBy: string,
+  ): Promise<{ archived: number }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      archiveDocumentsCommand(ctx, { slugs, changedBy }),
+    );
+    return outcome.result;
+  }
+
+  // Set the absolute order of a collection's documents (the UI sends
+  // the full current membership in the new order). One snapshot,
+  // one event.
+  async reorderCollectionDocuments(
+    collectionSlug: CollectionSlug,
+    orderedDocumentSlugs: readonly DocumentSlug[],
+    changedBy: string,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      reorderCollectionDocumentsCommand(ctx, {
+        collectionSlug,
+        orderedDocumentSlugs,
+        changedBy,
+      }),
+    );
+    return outcome.result;
+  }
+
+  // Flip a document member's delivery tier (core ↔ reference) WITHOUT
+  // re-attaching. A tier change is membership-affecting (the resolved
+  // corpus changes), so it cuts a fresh CollectionVersion + event via the
+  // shared mutation path — but it must NOT go through attach, whose
+  // position argument (the caller only has the *resolved* index, not
+  // the stored edge position) would corrupt member order in
+  // folder-linked collections. `ok:false` when the doc isn't a member
+  // or is already that tier.
+  async setMemberDelivery(
+    collectionSlug: CollectionSlug,
+    documentSlug: DocumentSlug,
+    delivery: CollectionDelivery,
+    changedBy: string,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      setMemberDeliveryCommand(ctx, {
+        collectionSlug,
+        documentSlug,
+        delivery,
+        changedBy,
+      }),
+    );
+    return outcome.result;
+  }
+
+  // Folder-link counterpart of `setMemberDelivery`.
+  async setFolderLinkDelivery(
+    collectionSlug: CollectionSlug,
+    folderSlug: FolderSlug,
+    delivery: CollectionDelivery,
+    changedBy: string,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      setFolderLinkDeliveryCommand(ctx, {
+        collectionSlug,
+        folderSlug,
+        delivery,
+        changedBy,
+      }),
+    );
+    return outcome.result;
+  }
+
+  // Attach (or re-position) a folder→collection link. Membership-affecting
+  // → a fresh CollectionVersion is cut via the shared resolved() snapshot
+  // path, exactly like a document attach.
+  async attachFolderToCollection(
+    collectionSlug: CollectionSlug,
+    folderSlug: FolderSlug,
+    position: number,
+    changedBy: string,
+    delivery: CollectionDelivery = DEFAULT_COLLECTION_DELIVERY,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      attachFolderToCollectionCommand(ctx, {
+        collectionSlug,
+        folderSlug,
+        position,
+        delivery,
+        changedBy,
+      }),
+    );
+    return outcome.result;
+  }
+
+  async detachFolderFromCollection(
+    collectionSlug: CollectionSlug,
+    folderSlug: FolderSlug,
+    changedBy: string,
+  ): Promise<{ ok: boolean }> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      detachFolderFromCollectionCommand(ctx, {
+        collectionSlug,
+        folderSlug,
+        changedBy,
+      }),
+    );
+    return outcome.result;
+  }
+
+  // — Folders ————————————————————————————————————————————————————————
+  //
+  // Authoring-plane organization (single-parent tree). Mutations are
+  // web / server-fn only (MCP stays read-only). A path-space mutation
+  // (rename / move / delete-rehome / re-place) changes the resolved
+  // expansion of every folder-linking collection without changing any
+  // single document — so we fan out a coarse `collection.reordered`
+  // event to those collections. `readCollection` re-resolves the tree
+  // on the next read, so the event is purely audit/notification.
+
+  // Slug is derived from the name at creation (collision-suffixed
+  // against existing folder slugs) and stable thereafter — renames
+  // change `name` only, never the slug. A new (empty) folder changes no
+  // existing expansion, so creation needs no fan-out.
+  async createFolder(
+    name: string,
+    parentSlug: FolderSlug | null,
+  ): Promise<
+    Readonly<
+      { ok: true; slug: string } | { ok: false; reason: "segment-collision" }
+    >
+  > {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      createFolderCommand(ctx, { name, parentSlug }),
+    );
+    return outcome.result;
+  }
+
+  renameFolder(
+    slug: FolderSlug,
+    name: string,
+    changedBy: string,
+  ): Promise<RenameFolderResult> {
+    const now = new Date().toISOString();
+    return this.writeCommand(now, (ctx) =>
+      renameFolderCommand(ctx, { slug, name, changedBy }),
+    ).then((outcome) => outcome.result);
+  }
+
+  moveFolder(
+    slug: FolderSlug,
+    newParentSlug: FolderSlug | null,
+    changedBy: string,
+  ): Promise<MoveFolderResult> {
+    const now = new Date().toISOString();
+    return this.writeCommand(now, (ctx) =>
+      moveFolderCommand(ctx, { slug, newParentSlug, changedBy }),
+    ).then((outcome) => outcome.result);
+  }
+
+  // Delete releases each linking collection's `includes_folder` edge;
+  // that is a membership change, so those collections get a fresh
+  // snapshot in the SAME tx (otherwise they'd drop out of the
+  // folder-linked set and `exportBundle` would serve a stale pre-delete
+  // snapshot). Other still-folder-linked collections get the coarse
+  // path-map signal.
+  async deleteFolder(
+    slug: FolderSlug,
+    changedBy: string,
+  ): Promise<DeleteFolderResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      deleteFolderCommand(ctx, { slug, changedBy }),
+    );
+    return outcome.result;
+  }
+
+  placeDocumentInFolder(
+    documentSlug: DocumentSlug,
+    folderSlug: FolderSlug | null,
+    changedBy: string,
+  ): Promise<PlaceDocumentResult> {
+    const now = new Date().toISOString();
+    return this.writeCommand(now, (ctx) =>
+      placeDocumentInFolderCommand(ctx, {
+        documentSlug,
+        folderSlug,
+        changedBy,
+      }),
+    ).then((outcome) => outcome.result);
+  }
+
+  // Bulk move into one folder, best-effort in a single tx: a per-doc
+  // collision is a no-op (placeDocument never mutates on failure), so the
+  // ones that can move do, and the rest are counted. One fan-out after,
+  // forwarded to the durable instrumentation stream post-commit.
+  async placeDocumentsInFolder(
+    documentSlugs: readonly DocumentSlug[],
+    folderSlug: FolderSlug | null,
+    changedBy: string,
+  ): Promise<Readonly<{ moved: number; failed: number }>> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      placeDocumentsInFolderCommand(ctx, {
+        documentSlugs,
+        folderSlug,
+        changedBy,
+      }),
+    );
+    return outcome.result;
+  }
+
+  async listFolders(): Promise<readonly FolderView[]> {
+    return (await this.read()).folders.listAll();
+  }
+
+  // Bulk folder upload, ONE document at a time. The whole per-document
+  // import — ensure ancestor folders → resolve/reuse slug → append a
+  // DocumentVersion → place the `in_folder` edge — is a single atomic
+  // `write()`. A tree upload is N of these (bounded per-document
+  // atomicity, never one giant tx). Idempotent on the derived path: a
+  // re-upload resolves to the existing document at that path and bumps
+  // its version; a fresh path mints a stable, collision-suffixed slug.
+  // A folder/document segment collision throws ImportAbort → the whole
+  // unit rolls back (nothing partially written).
+  async importDocumentAtPath(
+    input: Readonly<{ path: string; markdown: string; changedBy: string }>,
+  ): Promise<ImportDocResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand(now, (ctx) =>
+        importDocumentAtPathCommand(ctx, input),
+      );
+      return outcome.result;
+    } catch (err) {
+      if (err instanceof ImportAbort) {
+        return { ok: false, reason: err.reason };
+      }
+      throw err;
+    }
+  }
+
+  // Drive a whole tree upload: N independent atomic imports (one
+  // write() each — never one giant tx). Processed in the given order so
+  // ancestor folders are reused as they appear; aggregates a summary.
+  async importDocuments(
+    entries: readonly Readonly<{ path: string; markdown: string }>[],
+    changedBy: string,
+  ): Promise<ImportSummary> {
+    let created = 0;
+    let updated = 0;
+    const failed: { path: string; reason: string }[] = [];
+    for (const e of entries) {
+      const r = await this.importDocumentAtPath({
+        path: e.path,
+        markdown: e.markdown,
+        changedBy,
+      });
+      if (r.ok) {
+        if (r.created) created += 1;
+        else updated += 1;
+      } else {
+        failed.push({ path: e.path, reason: r.reason });
+      }
+    }
+    return { created, updated, failed };
+  }
+
+  async importDocumentsAndLink(
+    input: ImportAndLinkInput,
+  ): Promise<ImportAndLinkResult> {
+    const summary = await this.importDocuments(input.entries, input.changedBy);
+    const link = input.link;
+    // Link only when every entry shares one top-level folder — that's the
+    // single linkable unit. Mixed-prefix inputs (a caller bypassing the
+    // client's reRoot) get linkedTo:undefined rather than silently linking
+    // whichever folder entries[0] happened to belong to.
+    const rootFolderName = commonRootSegment(input.entries);
+    if (
+      link.mode === "none" ||
+      rootFolderName === undefined ||
+      summary.created + summary.updated === 0
+    ) {
+      return { summary, linkedTo: undefined };
+    }
+
+    const collectionSlug =
+      link.mode === "existing"
+        ? link.slug
+        : asCollectionSlug(slugify(link.name));
+    const now = new Date().toISOString();
+    const linked = await this.writeCommand(now, (ctx) =>
+      linkImportedRootFolderCommand(ctx, {
+        rootFolderName,
+        collectionSlug,
+        link,
+        delivery: "reference",
+        changedBy: input.changedBy,
+      }),
+    );
+    return { summary, linkedTo: linked.result.linkedTo };
+  }
+
+  // The example project: refund-policy + product + brand-voice,
+  // Support + Sales collections. refund-policy linked into BOTH (the
+  // shared-node "no copies" teaching moment); product and brand-voice
+  // into Sales only (present, not stranded). One atomic tx over all
+  // writes — a partial seed (the broken half-graph) is impossible.
+  // No-op if the project already has any document or collection, so a
+  // double-click on a populated project never errors on a brand-new
+  // user's first action.
+  async seedExample(changedBy: string): Promise<SeedResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      seedExampleCommand(ctx, changedBy),
+    );
+    return outcome.result;
+  }
+}

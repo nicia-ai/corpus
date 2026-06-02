@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+/* Self-hosted Geist (DESIGN.md): no Google Fonts CDN — consistent with the
+ * no-external-dependency posture of the Workers bundle. The variable woff2
+ * are vendored at public/fonts/ (OFL-1.1, see public/fonts/OFL.txt). */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+}
+
+@theme {
+  --font-sans:
+    "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono:
+    "Geist Mono", ui-monospace, "SF Mono", "Cascadia Code", monospace;
+}
+
+/* Data-dense node cards / version chips must not jitter column width
+ * (DESIGN.md typography). */
+body {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rendered-markdown reader surface. One place owns document typography so
+ * the read view and the edit preview are byte-identical. Values are
+ * DESIGN.md tokens (slate ramp, single blue accent, 8px spacing, type
+ * scale) — not Tailwind utilities, so prose stays decoupled from class
+ * churn. Decoration stays minimal: the project graph is the only figure. */
+@layer components {
+  .md {
+    color: #0f172a;
+    font-size: 1.125rem;
+    line-height: 1.5;
+  }
+  .md > :first-child {
+    margin-top: 0;
+  }
+  .md > :last-child {
+    margin-bottom: 0;
+  }
+  .md h1,
+  .md h2,
+  .md h3,
+  .md h4,
+  .md h5,
+  .md h6 {
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 32px 0 8px;
+  }
+  .md h1 {
+    font-size: 1.5rem;
+  }
+  .md h2 {
+    font-size: 1.25rem;
+  }
+  .md h3,
+  .md h4,
+  .md h5,
+  .md h6 {
+    font-size: 1.125rem;
+  }
+  .md p {
+    margin: 16px 0;
+  }
+  .md ul,
+  .md ol {
+    margin: 16px 0;
+    padding-left: 24px;
+  }
+  .md ul {
+    list-style: disc;
+  }
+  .md ol {
+    list-style: decimal;
+  }
+  .md li {
+    margin: 4px 0;
+  }
+  .md li::marker {
+    color: #64748b;
+  }
+  .md input[type="checkbox"] {
+    margin-right: 8px;
+    accent-color: #2563eb;
+  }
+  .md a {
+    color: #2563eb;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .md a:hover {
+    color: #1d4ed8;
+  }
+  .md strong {
+    font-weight: 600;
+  }
+  .md em {
+    font-style: italic;
+  }
+  .md blockquote {
+    margin: 16px 0;
+    padding: 4px 0 4px 16px;
+    border-left: 2px solid #cbd5e1;
+    color: #64748b;
+  }
+  .md code {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    background: #f1f5f9;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .md pre {
+    margin: 16px 0;
+    padding: 16px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  .md pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.875rem;
+  }
+  .md hr {
+    margin: 32px 0;
+    border: 0;
+    border-top: 1px solid #e2e8f0;
+  }
+  .md table {
+    margin: 16px 0;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .md th,
+  .md td {
+    border: 1px solid #e2e8f0;
+    padding: 8px;
+    text-align: left;
+  }
+  .md th {
+    background: #f8fafc;
+    font-weight: 500;
+  }
+  .md img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+  }
+}

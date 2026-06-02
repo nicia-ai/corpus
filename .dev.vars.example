@@ -1,0 +1,44 @@
+# Local development secrets. Copy to `.dev.vars` (gitignored) and fill in.
+# `.dev.vars` is Cloudflare's local secret store; values here override the
+# `vars` block in wrangler.jsonc for `wrangler dev`. In production set the
+# same names with `wrangler secret put <NAME>`.
+
+# Optional Google OAuth. Set BOTH to add a "Continue with Google" button to
+# sign-in / sign-up; leave both unset to keep email/password only. Obtain a
+# client id/secret from a Google Cloud "OAuth 2.0 Client ID" (Web
+# application) whose authorized redirect URI is
+# <BETTER_AUTH_URL>/api/auth/callback/google
+# (e.g. http://localhost:8787/api/auth/callback/google for local dev).
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
+# Optional PostHog product analytics. Set POSTHOG_KEY to your project's
+# publishable API key (starts with "phc_") to enable client-side analytics —
+# pageviews, identified users, and product events. Leave it unset to ship no
+# analytics and load no third-party script. POSTHOG_HOST defaults to PostHog
+# US cloud; set it for EU cloud (https://eu.i.posthog.com) or self-hosted.
+POSTHOG_KEY=""
+POSTHOG_HOST=""
+
+# Optional in-app support link shown in the sidebar ("Help"). Off by
+# default. Set SUPPORT_URL (a help center / docs / contact form) OR
+# SUPPORT_EMAIL (rendered as a mailto: link); if both are set, SUPPORT_URL
+# wins. SUPPORT_LABEL overrides the default "Help" text. An invalid URL or
+# email disables the link (logged) rather than failing startup.
+SUPPORT_URL=""
+SUPPORT_EMAIL=""
+SUPPORT_LABEL=""
+
+# Optional "Docs" link in the sidebar. Off by default. Set DOCS_URL to a
+# same-origin path (the hosted deploy uses "/docs") or an absolute URL. The
+# OSS app ships no docs site of its own, so self-hosters point this at their
+# own mirror or https://corpus.nicia.ai/docs (or leave it off). Opens in a
+# new tab.
+DOCS_URL=""
+
+# Comma-separated emails granted platform-admin access (product-wide
+# visibility, distinct from org ownership). Bootstraps the first admin by
+# name — set it before signing up, no user-id lookup or restart. Further
+# admins are promoted in-app. Note: this app has no email verification, so
+# on a public deploy claim the admin email by signing up before anyone else.
+ADMIN_EMAILS=""

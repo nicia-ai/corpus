@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "types": ["./worker-configuration.d.ts", "node", "vitest/globals"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    "vite.config.ts",
+    "drizzle.config.ts",
+    "drizzle.do.config.ts",
+    "drizzle.event-log.config.ts",
+    "eslint.config.js",
+    "worker-configuration.d.ts"
+  ]
+}
