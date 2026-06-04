@@ -20,8 +20,8 @@ import { TAGLINE, TAGLINE_LONG } from "@/lib/copy";
 import { useSubmit } from "@/lib/forms";
 import { type Change, getChanges } from "@/lib/server/changes";
 import {
-  type Attachment,
   type ColMeta,
+  type CollectionMember,
   seedExample,
 } from "@/lib/server/collections";
 import { loadDashboard } from "@/lib/server/session";
@@ -72,7 +72,7 @@ function Dashboard() {
       projectId={projectId}
       collections={data.collections}
       docCount={data.documents.length}
-      attachments={data.attachments}
+      members={data.members}
       connectionsByCollection={data.connectionsByCollection}
       changes={data.changes}
     />
@@ -88,7 +88,7 @@ function Home(
     projectId: ProjectId;
     collections: readonly ColMeta[];
     docCount: number;
-    attachments: readonly Attachment[];
+    members: readonly CollectionMember[];
     connectionsByCollection: Readonly<Record<string, number>>;
     changes: readonly Change[];
   }>,
@@ -113,10 +113,11 @@ function Home(
         }
       />
 
+      {/* members feed the per-collection document counts */}
       <CollectionStrip
         projectId={props.projectId}
         collections={collections}
-        attachments={props.attachments}
+        members={props.members}
         connectionsByCollection={props.connectionsByCollection}
         changes={props.changes}
       />
@@ -181,14 +182,14 @@ function CollectionStrip(
   props: Readonly<{
     projectId: ProjectId;
     collections: readonly ColMeta[];
-    attachments: readonly Attachment[];
+    members: readonly CollectionMember[];
     connectionsByCollection: Readonly<Record<string, number>>;
     changes: readonly Change[];
   }>,
 ) {
   const docCount = new Map<string, number>();
-  for (const a of props.attachments) {
-    docCount.set(a.collectionSlug, (docCount.get(a.collectionSlug) ?? 0) + 1);
+  for (const m of props.members) {
+    docCount.set(m.collectionSlug, (docCount.get(m.collectionSlug) ?? 0) + 1);
   }
   const lastActivity = new Map<string, string>();
   for (const c of props.changes) {

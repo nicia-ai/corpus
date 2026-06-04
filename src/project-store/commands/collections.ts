@@ -16,7 +16,11 @@ import {
 } from "../../store/domain/collection-expand";
 import { collectionVersionSnapshot } from "../../store/domain/versions";
 import { DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS } from "../../util";
-import type { CommandOutcome, ProjectCommandContext } from "../command";
+import type {
+  CommandOutcome,
+  DomainChange,
+  ProjectCommandContext,
+} from "../command";
 import type { UpdateCollectionInput } from "../contracts";
 
 export type CreateCollectionCommandInput = Readonly<{
@@ -99,6 +103,48 @@ export async function attachDocumentCommand(
     changedAt: ctx.now,
   });
   return { result: { ok: true }, changes: [change] };
+}
+
+// Attach many documents in one shot, appended after the collection's
+// current members in the given order, with a single snapshot. Documents
+// already in the collection (or archived/missing) are left untouched —
+// idempotent re-upload, no reordering, no duplicate event. The repo's
+// `attachMany` does the membership work in one read pass; this layer
+// turns the result into change events and cuts one CollectionVersion.
+export async function attachDocumentsToCollectionCommand(
+  ctx: ProjectCommandContext,
+  input: Readonly<{
+    collectionSlug: CollectionSlug;
+    documentSlugs: readonly DocumentSlug[];
+    delivery?: CollectionDelivery;
+    changedBy: string;
+  }>,
+): Promise<CommandOutcome<{ attached: number }>> {
+  const delivery = input.delivery ?? DEFAULT_COLLECTION_DELIVERY;
+  const attached = await ctx.u.cols.attachMany(
+    input.collectionSlug,
+    input.documentSlugs,
+    delivery,
+  );
+  if (attached.length === 0) return { result: { attached: 0 }, changes: [] };
+
+  const changes: DomainChange[] = attached.map((a) =>
+    documentAttached({
+      collectionSlug: input.collectionSlug,
+      documentSlug: a.slug,
+      position: a.position,
+      previousPosition: undefined,
+      changedBy: input.changedBy,
+      changedAt: ctx.now,
+    }),
+  );
+  await ctx.collection.snapshot(
+    ctx.u,
+    input.collectionSlug,
+    input.changedBy,
+    ctx.now,
+  );
+  return { result: { attached: attached.length }, changes };
 }
 
 export async function updateCollectionCommand(

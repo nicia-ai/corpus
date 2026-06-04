@@ -87,8 +87,19 @@ export type SeedResult = Readonly<
 // Bulk folder upload, per-document outcome: a fresh path is `created`,
 // a re-uploaded path is a new version of the SAME document
 // (`created: false`) — idempotent on path, never a duplicate.
+// `folderSlug` is the document's immediate parent (null = project root);
+// `createdFolders` are the folder slugs this import minted to place it
+// (empty when every ancestor already existed). Together they let the DO
+// derive the collection-link target from ground truth.
 export type ImportDocResult = Readonly<
-  | { ok: true; slug: string; docVersion: number; created: boolean }
+  | {
+      ok: true;
+      slug: string;
+      docVersion: number;
+      created: boolean;
+      folderSlug: string | null;
+      createdFolders: readonly string[];
+    }
   | { ok: false; reason: "invalid-path" | "segment-collision" }
 >;
 

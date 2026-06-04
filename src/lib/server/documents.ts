@@ -92,15 +92,17 @@ export const getDocumentList = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .handler(async ({ context }): Promise<DocListItem[]> => {
     const store = storeOf(srv(context));
-    const [docs, attachments] = await Promise.all([
+    const [docs, members] = await Promise.all([
       store.listDocuments(),
-      store.listAttachments(),
+      store.listResolvedMembers(),
     ]);
+    // Count the distinct collections each document resolves into —
+    // including membership via a linked folder, not just direct edges.
     const contextsByDoc = new Map<string, Set<string>>();
-    for (const a of attachments) {
-      const set = contextsByDoc.get(a.documentSlug) ?? new Set<string>();
-      set.add(a.collectionSlug);
-      contextsByDoc.set(a.documentSlug, set);
+    for (const m of members) {
+      const set = contextsByDoc.get(m.documentSlug) ?? new Set<string>();
+      set.add(m.collectionSlug);
+      contextsByDoc.set(m.documentSlug, set);
     }
     return docs.map((d) => ({
       slug: asDocumentSlug(d.slug),

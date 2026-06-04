@@ -391,7 +391,12 @@ export function DocumentsPage({
       )}
 
       {empty ? (
-        <EmptyDocuments projectId={projectId} collections={collections} />
+        <EmptyDocuments
+          projectId={projectId}
+          collections={collections}
+          folders={folders}
+          documents={documents}
+        />
       ) : (
         <div
           onDragOver={(e) => {
@@ -466,9 +471,13 @@ export function DocumentsPage({
 function EmptyDocuments({
   projectId,
   collections,
+  folders,
+  documents,
 }: Readonly<{
   projectId: ProjectId;
   collections: readonly ColListItem[];
+  folders: readonly FolderRow[];
+  documents: readonly DocListItem[];
 }>): React.ReactElement {
   return (
     <div className="mx-auto max-w-2xl">
@@ -481,7 +490,12 @@ function EmptyDocuments({
           collection to share with agents.
         </p>
       </div>
-      <DocumentUploader projectId={projectId} collections={collections} />
+      <DocumentUploader
+        projectId={projectId}
+        collections={collections}
+        folders={folders}
+        documents={documents}
+      />
       <p className="mt-6 text-sm text-slate-500">
         Or{" "}
         <Link

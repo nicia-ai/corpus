@@ -20,6 +20,15 @@ export type SiblingSegment = Readonly<{
 
 export type SiblingSelf = Readonly<{ kind: SiblingKind; slug: string }>;
 
+// A folder NAME is a single path segment, so it must not contain a path
+// separator: names are joined with "/" to derive document paths
+// (`derivePath`) and upload destinations, then re-split on "/" — a name
+// like "a/b" would resolve to two nested folders, not one. Mirrors the
+// filename rule (a basename, never a path).
+export function folderNameHasSeparator(name: string): boolean {
+  return name.includes("/") || name.includes("\\");
+}
+
 // Does `candidate` collide with an existing sibling segment? Exact
 // match (binary collation, mirroring the graph's unique constraints).
 // `self` excludes ONLY the same entity (same kind AND slug) — a

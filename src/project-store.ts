@@ -12,6 +12,8 @@ import { ConflictError, isUniqueViolation, RollbackProbe } from "./errors";
 import { type CanonicalGraph, canonicalGraph } from "./graph";
 import {
   asCollectionSlug,
+  asDocumentSlug,
+  asFolderSlug,
   type CollectionSlug,
   type DocumentSlug,
   type FolderSlug,
@@ -56,7 +58,10 @@ import {
   placeDocumentsInFolderCommand,
   renameFolderCommand,
 } from "./project-store/commands/folders";
-import { linkImportedRootFolderCommand } from "./project-store/commands/import-link";
+import {
+  linkImportedDocumentsCommand,
+  linkImportedFolderCommand,
+} from "./project-store/commands/import-link";
 import { seedExampleCommand } from "./project-store/commands/seed";
 import type {
   CollectionOutline,
@@ -85,7 +90,7 @@ import {
   collectionStructureProjection,
   documentHistoryProjection,
   getDocumentProjection,
-  listAttachmentsProjection,
+  resolvedMembersProjection,
   listCollectionsProjection,
   listDocumentsProjection,
   listDocumentSlugsProjection,
@@ -101,8 +106,8 @@ import {
   DEFAULT_COLLECTION_DELIVERY,
   type CollectionDelivery,
 } from "./store/domain/collection-expand";
+import { chooseImportLinkTarget } from "./store/domain/import-link";
 import { events as buildEvent } from "./store/domain/instrumentation-events";
-import { commonRootSegment } from "./store/domain/paths";
 import type { RetentionPolicy } from "./store/domain/retention";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
@@ -471,14 +476,13 @@ export class ProjectStore extends DurableObject<Env> {
   // reuses `cols.ordered` (Document heads only) and never resolves
   // blob bytes, so it stays cheap even though `readCollection` (which
   // assembles full corpus text) shares the same accessor.
-  async listAttachments(): Promise<
-    readonly Readonly<{
-      collectionSlug: string;
-      documentSlug: string;
-      position: number;
-    }>[]
+  // Resolved (collection, document) membership for every collection —
+  // direct + folder-expanded, deduped. Backs all document/collection
+  // count surfaces so a linked folder's docs are counted everywhere.
+  async listResolvedMembers(): Promise<
+    readonly Readonly<{ collectionSlug: string; documentSlug: string }>[]
   > {
-    return listAttachmentsProjection(await this.read());
+    return resolvedMembersProjection(await this.read());
   }
 
   async recentChanges(limit: number): Promise<readonly RecentChange[]> {
@@ -1006,14 +1010,29 @@ export class ProjectStore extends DurableObject<Env> {
 
   // Drive a whole tree upload: N independent atomic imports (one
   // write() each — never one giant tx). Processed in the given order so
-  // ancestor folders are reused as they appear; aggregates a summary.
-  async importDocuments(
+  // ancestor folders are reused as they appear. Aggregates the summary,
+  // every landed document's slug + immediate folder (upload order — the
+  // link step's input), and the set of folders this import created (the
+  // signal for which folder, if any, is a fresh linkable wrapper).
+  private async runImport(
     entries: readonly Readonly<{ path: string; markdown: string }>[],
     changedBy: string,
-  ): Promise<ImportSummary> {
+  ): Promise<
+    Readonly<{
+      summary: ImportSummary;
+      imported: readonly Readonly<{
+        slug: DocumentSlug;
+        folderSlug: FolderSlug | null;
+      }>[];
+      createdFolderSlugs: ReadonlySet<FolderSlug>;
+    }>
+  > {
     let created = 0;
     let updated = 0;
     const failed: { path: string; reason: string }[] = [];
+    const imported: { slug: DocumentSlug; folderSlug: FolderSlug | null }[] =
+      [];
+    const createdFolderSlugs = new Set<FolderSlug>();
     for (const e of entries) {
       const r = await this.importDocumentAtPath({
         path: e.path,
@@ -1023,28 +1042,39 @@ export class ProjectStore extends DurableObject<Env> {
       if (r.ok) {
         if (r.created) created += 1;
         else updated += 1;
+        imported.push({
+          slug: asDocumentSlug(r.slug),
+          folderSlug: r.folderSlug === null ? null : asFolderSlug(r.folderSlug),
+        });
+        for (const f of r.createdFolders)
+          createdFolderSlugs.add(asFolderSlug(f));
       } else {
         failed.push({ path: e.path, reason: r.reason });
       }
     }
-    return { created, updated, failed };
+    return {
+      summary: { created, updated, failed },
+      imported,
+      createdFolderSlugs,
+    };
+  }
+
+  async importDocuments(
+    entries: readonly Readonly<{ path: string; markdown: string }>[],
+    changedBy: string,
+  ): Promise<ImportSummary> {
+    return (await this.runImport(entries, changedBy)).summary;
   }
 
   async importDocumentsAndLink(
     input: ImportAndLinkInput,
   ): Promise<ImportAndLinkResult> {
-    const summary = await this.importDocuments(input.entries, input.changedBy);
-    const link = input.link;
-    // Link only when every entry shares one top-level folder — that's the
-    // single linkable unit. Mixed-prefix inputs (a caller bypassing the
-    // client's reRoot) get linkedTo:undefined rather than silently linking
-    // whichever folder entries[0] happened to belong to.
-    const rootFolderName = commonRootSegment(input.entries);
-    if (
-      link.mode === "none" ||
-      rootFolderName === undefined ||
-      summary.created + summary.updated === 0
-    ) {
+    const { summary, imported, createdFolderSlugs } = await this.runImport(
+      input.entries,
+      input.changedBy,
+    );
+    const { link } = input;
+    if (link.mode === "none" || imported.length === 0) {
       return { summary, linkedTo: undefined };
     }
 
@@ -1053,14 +1083,48 @@ export class ProjectStore extends DurableObject<Env> {
         ? link.slug
         : asCollectionSlug(slugify(link.name));
     const now = new Date().toISOString();
+
+    // Derive the link target from ground truth, never a client flag:
+    // build each document's folder ancestry from the live tree, then ask
+    // the domain rule for the fresh wrapper folder (if any) vs the
+    // documents. This is what makes the folder-vs-documents choice
+    // un-forgeable — a caller cannot point the link at a pre-existing
+    // folder it did not just create.
+    const folders = await this.listFolders();
+    const parentOf = new Map<string, string | null>(
+      folders.map((f) => [f.slug, f.parentSlug]),
+    );
+    const folderChain = (leaf: FolderSlug | null): readonly FolderSlug[] => {
+      const chain: FolderSlug[] = [];
+      const seen = new Set<string>();
+      for (let cur: string | null = leaf; cur !== null && !seen.has(cur); ) {
+        seen.add(cur);
+        chain.unshift(asFolderSlug(cur));
+        cur = parentOf.get(cur) ?? null;
+      }
+      return chain;
+    };
+    const target = chooseImportLinkTarget(
+      imported.map((d) => folderChain(d.folderSlug)),
+      createdFolderSlugs,
+    );
+
     const linked = await this.writeCommand(now, (ctx) =>
-      linkImportedRootFolderCommand(ctx, {
-        rootFolderName,
-        collectionSlug,
-        link,
-        delivery: "reference",
-        changedBy: input.changedBy,
-      }),
+      target.kind === "folder"
+        ? linkImportedFolderCommand(ctx, {
+            folderSlug: target.folderSlug,
+            collectionSlug,
+            link,
+            delivery: "reference",
+            changedBy: input.changedBy,
+          })
+        : linkImportedDocumentsCommand(ctx, {
+            documentSlugs: imported.map((d) => d.slug),
+            collectionSlug,
+            link,
+            delivery: "reference",
+            changedBy: input.changedBy,
+          }),
     );
     return { summary, linkedTo: linked.result.linkedTo };
   }

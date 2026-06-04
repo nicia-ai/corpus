@@ -451,3 +451,53 @@ describe("placeDocumentsInFolder — bulk move", () => {
     expect(read.documents.map((d) => d.slug)).toEqual([]);
   });
 });
+
+describe("listResolvedMembers — folder-aware document counts", () => {
+  it("counts direct + folder-expanded docs, deduped across both", async () => {
+    const w = ws();
+    await w.importDocumentAtPath({
+      path: "a/b/one.md",
+      markdown: "1",
+      changedBy: by,
+    });
+    await w.importDocumentAtPath({
+      path: "a/b/two.md",
+      markdown: "2",
+      changedBy: by,
+    });
+    await w.importDocumentAtPath({
+      path: "loose.md",
+      markdown: "x",
+      changedBy: by,
+    });
+    await w.createCollection({ slug: colSlug("c"), name: "C", changedBy: by });
+    const b = await folderSlugByName(w, "b");
+    await w.attachFolderToCollection(colSlug("c"), b, 1, by); // pulls one, two
+    await w.attachDocument(colSlug("c"), docSlug("loose"), 2, by); // direct
+    await w.attachDocument(colSlug("c"), docSlug("a-b-one"), 3, by); // also direct → dedup
+
+    const forC = (await w.listResolvedMembers())
+      .filter((m) => m.collectionSlug === "c")
+      .map((m) => m.documentSlug)
+      .sort();
+    // one + two via folder, loose direct; one counted once despite two edges.
+    expect(forC).toEqual(["a-b-one", "a-b-two", "loose"]);
+  });
+
+  it("a collection with only a folder link still reports its documents", async () => {
+    const w = ws();
+    await w.importDocumentAtPath({
+      path: "docs/x.md",
+      markdown: "x",
+      changedBy: by,
+    });
+    await w.createCollection({ slug: colSlug("f"), name: "F", changedBy: by });
+    const docs = await folderSlugByName(w, "docs");
+    await w.attachFolderToCollection(colSlug("f"), docs, 1, by);
+
+    const forF = (await w.listResolvedMembers()).filter(
+      (m) => m.collectionSlug === "f",
+    );
+    expect(forF.map((m) => m.documentSlug)).toEqual(["docs-x"]);
+  });
+});

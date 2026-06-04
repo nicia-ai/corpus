@@ -30,26 +30,6 @@ export function basename(relativePath: string): string {
   return segs[segs.length - 1] ?? "";
 }
 
-// The single shared top-level folder name across a batch of paths.
-// `undefined` when entries are empty, any entry is at the project root,
-// or entries span more than one top folder — the importer's link target
-// is exactly the case where every entry lives under one folder.
-export function commonRootSegment(
-  entries: readonly Readonly<{ path: string }>[],
-): string | undefined {
-  if (entries.length === 0) return undefined;
-  let shared: string | undefined;
-  for (const e of entries) {
-    const segs = pathSegments(e.path);
-    if (segs.length < 2) return undefined;
-    const top = segs[0];
-    if (top === undefined) return undefined;
-    if (shared === undefined) shared = top;
-    else if (shared !== top) return undefined;
-  }
-  return shared;
-}
-
 // Default `filename` for a document created without an uploaded file
 // (editor save, bundle import, seed). Keeps `path` derivation working
 // for non-uploaded docs. `slug` is already a safe flat token.

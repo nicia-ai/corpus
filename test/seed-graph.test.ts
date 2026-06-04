@@ -11,7 +11,7 @@ describe("seedExample (atomic, guarded)", () => {
 
     const docs = await w.listDocuments();
     const cols = await w.listCollections();
-    const att = await w.listAttachments();
+    const members = await w.listResolvedMembers();
 
     expect(docs.map((d) => d.slug).sort()).toEqual([
       "brand-voice",
@@ -24,22 +24,22 @@ describe("seedExample (atomic, guarded)", () => {
     ]);
     // The whole point: ONE document, in BOTH collections.
     expect(
-      att
-        .filter((a) => a.documentSlug === "refund-policy")
-        .map((a) => a.collectionSlug)
+      members
+        .filter((m) => m.documentSlug === "refund-policy")
+        .map((m) => m.collectionSlug)
         .sort(),
     ).toEqual(["sales-agent", "support-agent"]);
     // product is present in Sales only (not stranded).
     expect(
-      att
-        .filter((a) => a.documentSlug === "product")
-        .map((a) => a.collectionSlug),
+      members
+        .filter((m) => m.documentSlug === "product")
+        .map((m) => m.collectionSlug),
     ).toEqual(["sales-agent"]);
     // brand-voice is present in Sales only (not stranded).
     expect(
-      att
-        .filter((a) => a.documentSlug === "brand-voice")
-        .map((a) => a.collectionSlug),
+      members
+        .filter((m) => m.documentSlug === "brand-voice")
+        .map((m) => m.collectionSlug),
     ).toEqual(["sales-agent"]);
   });
 
@@ -53,7 +53,8 @@ describe("seedExample (atomic, guarded)", () => {
     });
     expect((await w.listDocuments()).length).toBe(3);
     expect((await w.listCollections()).length).toBe(2);
-    expect((await w.listAttachments()).length).toBe(4);
+    // 4 resolved memberships: refund-policy ×2 + product + brand-voice.
+    expect((await w.listResolvedMembers()).length).toBe(4);
   });
 
   it("refuses to seed when any document already exists", async () => {
@@ -72,12 +73,12 @@ describe("seedExample (atomic, guarded)", () => {
   });
 });
 
-describe("listAttachments", () => {
+describe("listResolvedMembers", () => {
   it("is empty on a fresh project", async () => {
-    expect(await ws().listAttachments()).toEqual([]);
+    expect(await ws().listResolvedMembers()).toEqual([]);
   });
 
-  it("reports position-ordered collection → document edges", async () => {
+  it("reports each resolved collection → document membership", async () => {
     const w = ws();
     await w.saveDocument({
       slug: docSlug("a"),
@@ -87,8 +88,8 @@ describe("listAttachments", () => {
     });
     await w.createCollection({ slug: colSlug("c"), name: "C", changedBy: "u" });
     await w.attachDocument(colSlug("c"), docSlug("a"), 1, "u");
-    expect(await w.listAttachments()).toEqual([
-      { collectionSlug: "c", documentSlug: "a", position: 1 },
+    expect(await w.listResolvedMembers()).toEqual([
+      { collectionSlug: "c", documentSlug: "a" },
     ]);
   });
 });

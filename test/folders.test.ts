@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   appendPosition,
+  folderNameHasSeparator,
   isSelfOrAncestor,
   type SiblingSegment,
   segmentCollides,
@@ -12,6 +13,20 @@ const siblings: readonly SiblingSegment[] = [
   { kind: "folder", slug: "f-docs", segment: "docs" },
   { kind: "document", slug: "d-readme", segment: "readme.md" },
 ];
+
+describe("folderNameHasSeparator", () => {
+  it("flags path separators that would re-split into nested folders", () => {
+    expect(folderNameHasSeparator("a/b")).toBe(true);
+    expect(folderNameHasSeparator("a\\b")).toBe(true);
+    expect(folderNameHasSeparator("/leading")).toBe(true);
+  });
+
+  it("allows ordinary single-segment names", () => {
+    expect(folderNameHasSeparator("docs")).toBe(false);
+    expect(folderNameHasSeparator("My Docs")).toBe(false);
+    expect(folderNameHasSeparator("a.b-c_d")).toBe(false);
+  });
+});
 
 describe("segmentCollides (cross-type sibling namespace)", () => {
   it("collides on an existing folder name", () => {

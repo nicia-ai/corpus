@@ -393,11 +393,13 @@ export class FolderRepo {
     makeFolderSlug: (name: string, taken: ReadonlySet<string>) => FolderSlug,
   ): Promise<
     Readonly<
-      | { ok: true; folderSlug: string | null }
+      | { ok: true; folderSlug: string | null; created: readonly string[] }
       | { ok: false; reason: "segment-collision" }
     >
   > {
-    if (dirSegments.length === 0) return { ok: true, folderSlug: null };
+    if (dirSegments.length === 0) {
+      return { ok: true, folderSlug: null, created: [] };
+    }
 
     // Walk the deepest existing prefix (match child folders by name).
     let parentSlug: string | null = null;
@@ -411,7 +413,9 @@ export class FolderRepo {
       parentSlug = hit.node.slug;
     }
     const remaining = dirSegments.slice(i);
-    if (remaining.length === 0) return { ok: true, folderSlug: parentSlug };
+    if (remaining.length === 0) {
+      return { ok: true, folderSlug: parentSlug, created: [] };
+    }
 
     // The first to-create segment must not collide with an existing
     // document under the deepest existing folder (deeper segments are
@@ -427,6 +431,7 @@ export class FolderRepo {
     const taken = new Set(
       (await findAll((w) => this.g.nodes.Folder.find(w))).map((f) => f.slug),
     );
+    const created: string[] = [];
     for (const seg of remaining) {
       const slug = makeFolderSlug(seg, taken);
       taken.add(slug);
@@ -438,8 +443,9 @@ export class FolderRepo {
       });
       if (!outcome.ok) return { ok: false, reason: outcome.reason };
       parentSlug = outcome.node.slug;
+      created.push(outcome.node.slug);
     }
-    return { ok: true, folderSlug: parentSlug };
+    return { ok: true, folderSlug: parentSlug, created };
   }
 
   // Whole tree as flat views (parent + position), for UI render and
