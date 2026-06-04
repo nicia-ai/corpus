@@ -1,23 +1,32 @@
 import { useRouter } from "@tanstack/react-router";
 import { FolderUp, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { fieldInputClass } from "@/components/Field";
 import { Button } from "@/components/ui/Button";
 import { cardClass, listSurface } from "@/components/ui/Surface";
-import { asCollectionSlug, type CollectionSlug, type ProjectId } from "@/ids";
-import { useSubmit } from "@/lib/forms";
 import {
+  asCollectionSlug,
+  asFolderSlug,
+  type CollectionSlug,
+  type FolderSlug,
+  type ProjectId,
+} from "@/ids";
+import { useSubmit } from "@/lib/forms";
+import type { DocListItem } from "@/lib/server/documents";
+import {
+  type FolderRow,
   type ImportAndLinkResult,
   importDocumentsAndLink,
 } from "@/lib/server/folders";
 import {
   type Collected,
+  type CollectedFile,
   collectFromDataTransfer,
   collectFromFiles,
   commonRoot,
   dropHasFiles,
-  reRoot,
+  placeEntries,
 } from "@/lib/upload/collect";
 import type { ImportCollectionLink } from "@/project-store";
 
@@ -28,31 +37,87 @@ import type { ImportCollectionLink } from "@/project-store";
 // PageHeader so each surface frames the action with its own words.
 
 const MAX_ENTRIES = 5000;
+const ROOT = "" as const;
 
-function defaultFolderName(): string {
-  return `imported-${new Date().toISOString().slice(0, 10)}`;
+type FolderIndex = ReadonlyMap<FolderSlug, FolderRow>;
+
+function indexFolders(folders: readonly FolderRow[]): FolderIndex {
+  return new Map(folders.map((f) => [f.slug, f]));
+}
+
+// Ancestor folder NAMES (root → leaf) for a folder slug; `[]` for the
+// project root. The names are what the importer resolves folders by.
+function folderNamePath(index: FolderIndex, slug: FolderSlug | null): string[] {
+  const out: string[] = [];
+  const seen = new Set<FolderSlug>();
+  for (let cur = slug; cur !== null && !seen.has(cur); ) {
+    const f = index.get(cur);
+    if (f === undefined) break;
+    seen.add(cur);
+    out.unshift(f.name);
+    cur = f.parentSlug;
+  }
+  return out;
+}
+
+// Does a folder already live at this name-path? Cosmetic only — it
+// predicts the link copy ("live folder" vs "documents"); the DO derives
+// the real link target from what the import created, so a stale snapshot
+// here can only mislabel a hint, never the actual link.
+function folderExistsAtPath(
+  index: FolderIndex,
+  segments: readonly string[],
+): boolean {
+  if (segments.length === 0) return false;
+  let parent: FolderSlug | null = null;
+  for (const name of segments) {
+    const hit = [...index.values()].find(
+      (f) => f.parentSlug === parent && f.name === name,
+    );
+    if (hit === undefined) return false;
+    parent = hit.slug;
+  }
+  return true;
+}
+
+function folderOptions(
+  index: FolderIndex,
+): readonly Readonly<{ slug: FolderSlug; label: string }>[] {
+  return [...index.values()]
+    .map((f) => ({
+      slug: f.slug,
+      label: folderNamePath(index, f.slug).join(" / "),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export function DocumentUploader(
   props: Readonly<{
     projectId: ProjectId;
     collections: readonly Readonly<{ slug: CollectionSlug; name: string }>[];
+    folders: readonly FolderRow[];
+    documents: readonly DocListItem[];
     // page mode hands the result back so the route can render a Done
     // summary; inline mode is fire-and-forget — router.invalidate()
     // unmounts the empty state when the new documents land.
     onComplete?: (r: ImportAndLinkResult) => void;
   }>,
 ): React.ReactElement {
-  const { projectId, collections, onComplete } = props;
+  const { projectId, collections, folders, documents, onComplete } = props;
   const router = useRouter();
   const [collected, setCollected] = useState<Collected | null>(null);
   const [dropError, setDropError] = useState<string>();
-  const [folder, setFolder] = useState("");
+  const [destParent, setDestParent] = useState<FolderSlug | null>(null);
+  const [makeNew, setMakeNew] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [keepWrapper, setKeepWrapper] = useState(true);
   const [link, setLink] = useState<ImportCollectionLink>({ mode: "none" });
   const [dragging, setDragging] = useState(false);
   const filesRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
 
+  // A fresh drop is a fresh upload: clear the destination + link choices
+  // so the previous upload's selections never silently carry over.
   function ingest(c: Collected) {
     // A drop the browser handed us files for, but none were readable text
     // (e.g. only binaries) — surface the picker fallback.
@@ -63,27 +128,70 @@ export function DocumentUploader(
       return;
     }
     setDropError(undefined);
+    setDestParent(null);
+    setMakeNew(false);
+    setNewName("");
+    setKeepWrapper(true);
+    setLink({ mode: "none" });
     setCollected(c);
-    setFolder(commonRoot(c.files) ?? defaultFolderName());
   }
 
+  const index = useMemo(() => indexFolders(folders), [folders]);
+  const options = useMemo(() => folderOptions(index), [index]);
+  const existingPaths = useMemo(
+    () => new Set(documents.map((d) => d.path)),
+    [documents],
+  );
+
+  // The upload's own top folder (a dragged folder / zip), if it has one.
+  const uploadRoot = collected !== null ? commonRoot(collected.files) : null;
+  const newTrimmed = makeNew ? newName.trim() : "";
+  const parentNames = useMemo(
+    () => folderNamePath(index, destParent),
+    [index, destParent],
+  );
+  const parentSegments = useMemo(
+    () => (newTrimmed !== "" ? [...parentNames, newTrimmed] : parentNames),
+    [parentNames, newTrimmed],
+  );
+  const dropWrapper = uploadRoot !== null && !keepWrapper;
+  const placed = useMemo<readonly CollectedFile[]>(
+    () =>
+      collected === null
+        ? []
+        : placeEntries(collected.files, parentSegments, dropWrapper),
+    [collected, parentSegments, dropWrapper],
+  );
+
+  // The folder this upload would create for itself (a new named folder,
+  // or a kept upload wrapper) — used only to predict the link copy.
+  const freshWrapperPath =
+    newTrimmed !== ""
+      ? parentSegments
+      : uploadRoot !== null && keepWrapper
+        ? [...parentSegments, uploadRoot]
+        : null;
+  const willLinkFolder =
+    link.mode !== "none" &&
+    freshWrapperPath !== null &&
+    !folderExistsAtPath(index, freshWrapperPath);
+
+  const docCount = placed.length;
+
   const { pending, error, run } = useSubmit(async () => {
-    if (collected === null || collected.files.length === 0) return;
-    const root = folder.trim();
-    if (root === "") throw new Error("Choose a folder name for this upload.");
-    const entries = reRoot(collected.files, root).map((f) => ({
-      path: f.path,
-      markdown: f.text,
-    }));
-    if (entries.length > MAX_ENTRIES) {
+    if (collected === null || placed.length === 0) return;
+    if (makeNew && newTrimmed === "") {
+      throw new Error("Name the new folder, or uncheck “Create a new folder”.");
+    }
+    if (placed.length > MAX_ENTRIES) {
       throw new Error(
-        `That’s ${entries.length} files — split it into uploads of ${MAX_ENTRIES} or fewer.`,
+        `That’s ${placed.length} files — split it into uploads of ${MAX_ENTRIES} or fewer.`,
       );
     }
     const result = await importDocumentsAndLink({
       data: {
         projectId,
-        entries,
+        entries: placed.map((f) => ({ path: f.path, markdown: f.text })),
         link:
           link.mode === "new" ? { mode: "new", name: link.name.trim() } : link,
       },
@@ -182,44 +290,38 @@ export function DocumentUploader(
             void run();
           }}
         >
-          <Review collected={collected} />
+          <Review
+            placed={placed}
+            skipped={collected.skipped}
+            existingPaths={existingPaths}
+          />
 
-          <div>
-            <label
-              htmlFor="folder"
-              className="mb-1 block text-sm font-medium text-slate-700"
-            >
-              Import into folder
-            </label>
-            <input
-              id="folder"
-              value={folder}
-              onChange={(e) => setFolder(e.target.value)}
-              placeholder={defaultFolderName()}
-              className={fieldInputClass()}
-            />
-            <p className="mt-1 text-sm text-slate-500">
-              Everything in this upload lands under one folder you can link to a
-              collection.
-            </p>
-          </div>
+          <DestinationPicker
+            options={options}
+            destParent={destParent}
+            onDestParent={setDestParent}
+            makeNew={makeNew}
+            onMakeNew={setMakeNew}
+            newName={newName}
+            onNewName={setNewName}
+            uploadRoot={uploadRoot}
+            keepWrapper={keepWrapper}
+            onKeepWrapper={setKeepWrapper}
+          />
 
           <LinkPicker
             collections={collections}
             value={link}
             onChange={setLink}
+            willLinkFolder={willLinkFolder}
+            docCount={docCount}
           />
 
           {error && <p className="text-base text-red-600">{error}</p>}
-          <Button
-            type="submit"
-            disabled={pending || collected.files.length === 0}
-          >
+          <Button type="submit" disabled={pending || placed.length === 0}>
             {pending
               ? "Importing…"
-              : `Import ${collected.files.length} document${
-                  collected.files.length === 1 ? "" : "s"
-                }`}
+              : `Import ${docCount} document${docCount === 1 ? "" : "s"}`}
           </Button>
         </form>
       )}
@@ -227,13 +329,24 @@ export function DocumentUploader(
   );
 }
 
-function Review({ collected }: Readonly<{ collected: Collected }>) {
-  const { files, skipped } = collected;
+// Shows the files at their RESOLVED destination paths (what the import
+// will actually write), flagging any that update an existing document at
+// the same path.
+function Review({
+  placed,
+  skipped,
+  existingPaths,
+}: Readonly<{
+  placed: readonly CollectedFile[];
+  skipped: Collected["skipped"];
+  existingPaths: ReadonlySet<string>;
+}>) {
+  const updates = placed.filter((f) => existingPaths.has(f.path)).length;
   return (
     <div>
       <p className="text-base text-slate-700">
-        <span className="font-medium">{files.length}</span> file
-        {files.length === 1 ? "" : "s"} ready
+        <span className="font-medium">{placed.length}</span> file
+        {placed.length === 1 ? "" : "s"} ready
         {skipped.length > 0 && (
           <>
             {" · "}
@@ -241,18 +354,29 @@ function Review({ collected }: Readonly<{ collected: Collected }>) {
           </>
         )}
       </p>
-      {files.length > 0 && (
+      {updates > 0 && (
+        <p className="mt-1 text-sm text-amber-700">
+          {updates} {updates === 1 ? "file updates" : "files update"} an
+          existing document at the same path (a new version, not a duplicate).
+        </p>
+      )}
+      {placed.length > 0 && (
         <ul
           className={listSurface(
             "mt-2 max-h-56 divide-y divide-slate-200 overflow-y-auto",
           )}
         >
-          {files.map((f) => (
+          {placed.map((f) => (
             <li
               key={f.path}
-              className="px-3 py-1.5 font-mono text-sm text-slate-700"
+              className="flex items-center justify-between gap-2 px-3 py-1.5 font-mono text-sm text-slate-700"
             >
-              {f.path}
+              <span className="truncate">{f.path}</span>
+              {existingPaths.has(f.path) && (
+                <span className="shrink-0 font-sans text-xs text-amber-700">
+                  updates existing
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -276,14 +400,124 @@ function Review({ collected }: Readonly<{ collected: Collected }>) {
   );
 }
 
+// Where the upload lands in the folder tree: a parent (root by default
+// or any existing folder), an optional new folder created under it, and
+// — for a folder/zip upload — whether to keep its own top folder or
+// merge its files into the destination.
+function DestinationPicker({
+  options,
+  destParent,
+  onDestParent,
+  makeNew,
+  onMakeNew,
+  newName,
+  onNewName,
+  uploadRoot,
+  keepWrapper,
+  onKeepWrapper,
+}: Readonly<{
+  options: readonly Readonly<{ slug: FolderSlug; label: string }>[];
+  destParent: FolderSlug | null;
+  onDestParent: (v: FolderSlug | null) => void;
+  makeNew: boolean;
+  onMakeNew: (v: boolean) => void;
+  newName: string;
+  onNewName: (v: string) => void;
+  uploadRoot: string | null;
+  keepWrapper: boolean;
+  onKeepWrapper: (v: boolean) => void;
+}>): React.ReactElement {
+  return (
+    <div className="space-y-3">
+      {options.length > 0 && (
+        <div>
+          <label
+            htmlFor="dest"
+            className="mb-1 block text-sm font-medium text-slate-700"
+          >
+            Import into
+          </label>
+          <select
+            id="dest"
+            value={destParent ?? ROOT}
+            onChange={(e) =>
+              onDestParent(
+                e.target.value === ROOT ? null : asFolderSlug(e.target.value),
+              )
+            }
+            className={fieldInputClass()}
+          >
+            <option value={ROOT}>Root</option>
+            {options.map((o) => (
+              <option key={o.slug} value={o.slug}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div>
+        <label className="flex items-center gap-2 text-base text-slate-700">
+          <input
+            type="checkbox"
+            checked={makeNew}
+            onChange={(e) => onMakeNew(e.target.checked)}
+          />
+          Create a new folder here
+        </label>
+        {makeNew && (
+          <input
+            autoFocus
+            value={newName}
+            onChange={(e) => onNewName(e.target.value)}
+            placeholder="Folder name"
+            className={fieldInputClass("mt-2 ml-6 w-[calc(100%-1.5rem)]")}
+          />
+        )}
+      </div>
+
+      {uploadRoot !== null && (
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-slate-700">
+            The uploaded folder
+          </legend>
+          <label className="flex items-center gap-2 text-base text-slate-700">
+            <input
+              type="radio"
+              name="wrapper"
+              checked={keepWrapper}
+              onChange={() => onKeepWrapper(true)}
+            />
+            Keep the folder “{uploadRoot}”
+          </label>
+          <label className="flex items-center gap-2 text-base text-slate-700">
+            <input
+              type="radio"
+              name="wrapper"
+              checked={!keepWrapper}
+              onChange={() => onKeepWrapper(false)}
+            />
+            Add its files to the destination
+          </label>
+        </fieldset>
+      )}
+    </div>
+  );
+}
+
 function LinkPicker({
   collections,
   value,
   onChange,
+  willLinkFolder,
+  docCount,
 }: Readonly<{
   collections: readonly Readonly<{ slug: CollectionSlug; name: string }>[];
   value: ImportCollectionLink;
   onChange: (v: ImportCollectionLink) => void;
+  willLinkFolder: boolean;
+  docCount: number;
 }>) {
   return (
     <fieldset className="space-y-2">
@@ -353,10 +587,15 @@ function LinkPicker({
           ))}
         </select>
       )}
-      <p className="text-sm text-slate-500">
-        Linking the folder is live: files added to it later are in the
-        collection automatically.
-      </p>
+      {value.mode !== "none" && (
+        <p className="text-sm text-slate-500">
+          {willLinkFolder
+            ? "This upload creates a new folder; linking it is live — files added to it later are in the collection automatically."
+            : `The ${docCount} uploaded document${
+                docCount === 1 ? "" : "s"
+              } will be added to the collection.`}
+        </p>
+      )}
     </fieldset>
   );
 }

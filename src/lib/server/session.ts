@@ -21,10 +21,10 @@ import { InternalError } from "@/errors";
 import type { OrganizationId, ProjectId } from "@/ids";
 import { authMiddleware } from "@/lib/middleware";
 import {
-  type Attachment,
-  attachmentMetas,
   type ColMeta,
   colMetas,
+  type CollectionMember,
+  collectionMemberMetas,
 } from "@/lib/server/collections";
 import { type DocMeta, docMetas } from "@/lib/server/documents";
 import { authedUserId } from "@/lib/server/shared";
@@ -40,7 +40,7 @@ import { compact } from "@/util";
 export type DashboardData = Readonly<{
   collections: ColMeta[];
   documents: DocMeta[];
-  attachments: Attachment[];
+  members: CollectionMember[];
   mcpUrl: string;
   connectionsByCollection: Readonly<Record<string, number>>;
 }>;
@@ -275,10 +275,10 @@ export const loadDashboard = createServerFn({ method: "GET" })
       if (ref === undefined) return { authed: true, firstRun: true };
       const store = storeFor(c.env, ref.projectId);
       const db = connectControlDb(c.env.DB);
-      const [cols, documents, attachments, connCounts] = await Promise.all([
+      const [cols, documents, members, connCounts] = await Promise.all([
         store.listCollections(),
         store.listDocuments(),
-        store.listAttachments(),
+        store.listResolvedMembers(),
         countConnectionsByCollection(db, ref.projectId),
       ]);
       return {
@@ -286,7 +286,7 @@ export const loadDashboard = createServerFn({ method: "GET" })
         firstRun: false,
         collections: colMetas(cols),
         documents: docMetas(documents),
-        attachments: attachmentMetas(attachments),
+        members: collectionMemberMetas(members),
         mcpUrl: `${c.env.BETTER_AUTH_URL}/mcp`,
         connectionsByCollection: Object.fromEntries(connCounts),
       };

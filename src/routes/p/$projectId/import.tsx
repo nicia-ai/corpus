@@ -5,15 +5,21 @@ import { showToast } from "@/components/ui/Toast";
 import { DocumentUploader } from "@/features/documents/DocumentUploader";
 import { asProjectId } from "@/ids";
 import { getCollectionList } from "@/lib/server/collections";
+import { getDocumentList } from "@/lib/server/documents";
+import { getFolderList } from "@/lib/server/folders";
 import type { ImportSummary } from "@/project-store";
 
 export const Route = createFileRoute("/p/$projectId/import")({
   component: Import,
-  loader: async ({ params }) => ({
-    collections: await getCollectionList({
-      data: { projectId: params.projectId },
-    }),
-  }),
+  loader: async ({ params }) => {
+    const { projectId } = params;
+    const [collections, folders, documents] = await Promise.all([
+      getCollectionList({ data: { projectId } }),
+      getFolderList({ data: { projectId } }),
+      getDocumentList({ data: { projectId } }),
+    ]);
+    return { collections, folders, documents };
+  },
 });
 
 // Compact summary for the post-import toast, omitting zero parts:
@@ -27,7 +33,7 @@ function importSummary(s: ImportSummary): string {
 }
 
 function Import() {
-  const { collections } = Route.useLoaderData();
+  const { collections, folders, documents } = Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
   const navigate = useNavigate();
 
@@ -40,6 +46,8 @@ function Import() {
       <DocumentUploader
         projectId={projectId}
         collections={collections}
+        folders={folders}
+        documents={documents}
         onComplete={(r) => {
           // Land on Documents so the freshly-imported folder is visible,
           // with the outcome flashed — no bespoke "upload complete" screen.

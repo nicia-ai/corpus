@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { docSlug, freshStore } from "./_helpers";
+import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const freshProject = () => freshStore("upload");
 const by = "uploader";
@@ -18,6 +18,8 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
       slug: "guide-setup-intro",
       docVersion: 1,
       created: true,
+      folderSlug: "setup",
+      createdFolders: ["guide", "setup"],
     });
 
     const folders = await store.listFolders();
@@ -50,6 +52,9 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
       slug: "a-b-note",
       docVersion: 2,
       created: false,
+      folderSlug: "b",
+      // Folders reused by name on re-upload — nothing newly created.
+      createdFolders: [],
     });
 
     expect(await store.listDocumentSlugs()).toEqual(["a-b-note"]);
@@ -130,5 +135,165 @@ describe("bulk folder upload — segment collisions roll back atomically", () =>
     expect(await store.versionCount(docSlug("foo"))).toBe(0);
     expect(await store.getDocument(docSlug("foo"))).toBeUndefined();
     expect(await store.listFolders()).toHaveLength(1);
+  });
+});
+
+// The link TARGET (the whole folder vs. the individual documents) is
+// derived by the DO from what the import actually created — never from a
+// client flag — so these assert behavior per upload shape. Uploads link
+// as reference-tier, so membership is read via collectionMembers (the
+// resolved set); readCollection.documents lists core-tier only.
+describe("bulk folder upload — importDocumentsAndLink (derived link target)", () => {
+  it("a loose file at the root links the document, not a folder", async () => {
+    const store = freshProject();
+    const r = await store.importDocumentsAndLink({
+      entries: [{ path: "readme.md", markdown: "# R" }],
+      link: { mode: "new", name: "Sales" },
+      changedBy: by,
+    });
+    expect(r.summary).toEqual({ created: 1, updated: 0, failed: [] });
+    expect(r.linkedTo).toBe("sales");
+    // No wrapper folder synthesized for a single root-level file.
+    expect(await store.listFolders()).toHaveLength(0);
+    expect(await store.collectionMembers(colSlug("sales"))).toEqual(["readme"]);
+  });
+
+  it("links the uploaded documents to an existing collection, in upload order", async () => {
+    const store = freshProject();
+    await store.createCollection({
+      slug: colSlug("team"),
+      name: "Team",
+      changedBy: by,
+    });
+    const r = await store.importDocumentsAndLink({
+      entries: [
+        { path: "one.md", markdown: "1" },
+        { path: "two.md", markdown: "2" },
+      ],
+      link: { mode: "existing", slug: colSlug("team") },
+      changedBy: by,
+    });
+    expect(r.linkedTo).toBe("team");
+    expect(await store.collectionMembers(colSlug("team"))).toEqual([
+      "one",
+      "two",
+    ]);
+  });
+
+  it("a fresh wrapper folder is linked live — later additions join too", async () => {
+    const store = freshProject();
+    const r = await store.importDocumentsAndLink({
+      entries: [{ path: "guide/intro.md", markdown: "i" }],
+      link: { mode: "new", name: "Docs" },
+      changedBy: by,
+    });
+    expect(r.linkedTo).toBe("docs");
+
+    // A document added to the freshly-created folder later is in the
+    // collection automatically — the live-folder guarantee.
+    await store.importDocumentAtPath({
+      path: "guide/extra.md",
+      markdown: "e",
+      changedBy: by,
+    });
+    const members = await store.collectionMembers(colSlug("docs"));
+    expect([...(members ?? [])].sort()).toEqual(["guide-extra", "guide-intro"]);
+  });
+
+  it("a fresh wrapper nested under an existing folder links the wrapper, not the parent", async () => {
+    const store = freshProject();
+    // Pre-existing `docs` folder with an unrelated document.
+    await store.importDocumentAtPath({
+      path: "docs/old.md",
+      markdown: "o",
+      changedBy: by,
+    });
+    // Upload creates a fresh `docs/proj` wrapper.
+    const r = await store.importDocumentsAndLink({
+      entries: [{ path: "docs/proj/a.md", markdown: "a" }],
+      link: { mode: "new", name: "Proj" },
+      changedBy: by,
+    });
+    expect(r.linkedTo).toBe("proj");
+
+    // Only the fresh wrapper's subtree is linked — `docs/old.md` is not
+    // pulled in — and it is live for later additions under `docs/proj`.
+    await store.importDocumentAtPath({
+      path: "docs/proj/b.md",
+      markdown: "b",
+      changedBy: by,
+    });
+    const members = await store.collectionMembers(colSlug("proj"));
+    expect([...(members ?? [])].sort()).toEqual(["docs-proj-a", "docs-proj-b"]);
+  });
+
+  it("merging into a pre-existing folder links the documents, not the folder (not live)", async () => {
+    const store = freshProject();
+    await store.importDocumentAtPath({
+      path: "docs/old.md",
+      markdown: "o",
+      changedBy: by,
+    });
+    const r = await store.importDocumentsAndLink({
+      entries: [{ path: "docs/new.md", markdown: "n" }],
+      link: { mode: "new", name: "Fresh" },
+      changedBy: by,
+    });
+    expect(r.linkedTo).toBe("fresh");
+    // The pre-existing sibling `docs/old.md` is NOT pulled in...
+    expect(await store.collectionMembers(colSlug("fresh"))).toEqual([
+      "docs-new",
+    ]);
+    // ...and the link is NOT live: a later addition to `docs` does not join.
+    await store.importDocumentAtPath({
+      path: "docs/another.md",
+      markdown: "x",
+      changedBy: by,
+    });
+    expect(await store.collectionMembers(colSlug("fresh"))).toEqual([
+      "docs-new",
+    ]);
+  });
+
+  it("re-uploading the same documents to the same collection adds no duplicates", async () => {
+    const store = freshProject();
+    await store.createCollection({
+      slug: colSlug("team"),
+      name: "Team",
+      changedBy: by,
+    });
+    const link = { mode: "existing", slug: colSlug("team") } as const;
+    await store.importDocumentsAndLink({
+      entries: [{ path: "one.md", markdown: "1" }],
+      link,
+      changedBy: by,
+    });
+    // Re-upload (new version) and re-link to the same collection.
+    const again = await store.importDocumentsAndLink({
+      entries: [{ path: "one.md", markdown: "1b" }],
+      link,
+      changedBy: by,
+    });
+    expect(again.summary).toEqual({ created: 0, updated: 1, failed: [] });
+    // attachMany's present-set dedup: the document stays a single member.
+    expect(await store.collectionMembers(colSlug("team"))).toEqual(["one"]);
+  });
+
+  it("entries spanning more than one top folder link the documents", async () => {
+    const store = freshProject();
+    const r = await store.importDocumentsAndLink({
+      entries: [
+        { path: "a/x.md", markdown: "x" },
+        { path: "b/y.md", markdown: "y" },
+      ],
+      link: { mode: "new", name: "Mixed" },
+      changedBy: by,
+    });
+    expect(r.summary.created).toBe(2);
+    expect(r.linkedTo).toBe("mixed");
+    // No single fresh wrapper covers both, so the documents are linked.
+    expect(
+      [...((await store.collectionMembers(colSlug("mixed"))) ?? [])].sort(),
+    ).toEqual(["a-x", "b-y"]);
   });
 });

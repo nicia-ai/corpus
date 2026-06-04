@@ -288,21 +288,23 @@ export async function collectionMembersProjection(
   return views?.map((v) => v.slug);
 }
 
-export async function listAttachmentsProjection(u: ProjectUnit): Promise<
-  readonly Readonly<{
-    collectionSlug: string;
-    documentSlug: string;
-    position: number;
-  }>[]
+// One row per (collection, RESOLVED member document) — direct includes
+// plus folder-expanded docs, deduped exactly as the agent-facing
+// expansion sees them (shares `resolvedViews`, so a list/card count can
+// never disagree with the collection detail or MCP). The single source
+// for every "how many documents" / "in how many collections" count.
+export async function resolvedMembersProjection(
+  u: ProjectUnit,
+): Promise<
+  readonly Readonly<{ collectionSlug: string; documentSlug: string }>[]
 > {
   const collections = await u.cols.list(DOC_LIST_LIMIT);
   const perCollection = await Promise.all(
     collections.map(async (c) => {
-      const ordered = await u.cols.ordered(asCollectionSlug(c.slug));
-      return (ordered ?? []).map((d) => ({
+      const views = await resolvedViews(u, asCollectionSlug(c.slug));
+      return (views ?? []).map((v) => ({
         collectionSlug: c.slug,
-        documentSlug: d.slug,
-        position: d.position,
+        documentSlug: v.slug,
       }));
     }),
   );

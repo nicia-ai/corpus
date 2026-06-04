@@ -199,6 +199,47 @@ export class CollectionGraph {
     return { ok: true, change: "reordered", previousPosition };
   }
 
+  // Append many documents in one pass: a single collection + edge read,
+  // then one edge create per document not already linked (archived or
+  // missing documents are skipped, mirroring `attach`'s rules). Amortizes
+  // the per-call reads `attach` repeats, so a bulk upload link is O(N)
+  // not O(N·members). Positions continue after the current max across the
+  // shared document+folder space, computed by reduce (no arg-spread cap).
+  // Returns the slugs actually added with their positions, in input
+  // order, for the caller's change events.
+  async attachMany(
+    collectionSlug: CollectionSlug,
+    documentSlugs: readonly DocumentSlug[],
+    delivery: CollectionDelivery,
+  ): Promise<readonly Readonly<{ slug: DocumentSlug; position: number }>[]> {
+    const col = await this.findCollection(collectionSlug);
+    if (col === undefined) return [];
+    const [docEdges, folderEdges] = await Promise.all([
+      this.g.edges.includes.findFrom({ kind: "Collection", id: col.id }),
+      this.g.edges.includes_folder.findFrom({ kind: "Collection", id: col.id }),
+    ]);
+    const presentDocIds = new Set(docEdges.map((e) => e.toId));
+    let position = [...docEdges, ...folderEdges].reduce(
+      (max, e) => Math.max(max, e.position),
+      -1,
+    );
+    const attached: { slug: DocumentSlug; position: number }[] = [];
+    for (const slug of documentSlugs) {
+      const doc = await this.findDoc(slug);
+      if (doc === undefined || doc.archivedAt !== undefined) continue;
+      if (presentDocIds.has(doc.id)) continue;
+      position += 1;
+      await this.g.edges.includes.create(
+        { kind: "Collection", id: col.id },
+        { kind: "Document", id: doc.id },
+        { position, delivery },
+      );
+      presentDocIds.add(doc.id);
+      attached.push({ slug, position });
+    }
+    return attached;
+  }
+
   // Flip a document member's delivery tier WITHOUT touching its position.
   // The edge update merges props, so `position` is preserved (same
   // guarantee `setOrder` relies on) — this is why the caller must NOT

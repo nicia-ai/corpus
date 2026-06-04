@@ -32,10 +32,12 @@ export type ColListItem = Readonly<{
   description?: string;
   documentCount: number;
 }>;
-export type Attachment = Readonly<{
+// A resolved (collection, document) membership pair — the document is in
+// the collection directly OR via a linked folder. Backs every
+// "how many documents" / "in how many collections" count.
+export type CollectionMember = Readonly<{
   collectionSlug: CollectionSlug;
   documentSlug: DocumentSlug;
-  position: number;
 }>;
 // Provenance-aware builder view. `direct` members carry an `includes`
 // edge (detach/reorder individually); `viaFolder` members are pulled in
@@ -92,32 +94,29 @@ export const colMetas = (
     }),
   );
 
-export const attachmentMetas = (
-  rows: readonly {
-    collectionSlug: string;
-    documentSlug: string;
-    position: number;
-  }[],
-): Attachment[] =>
-  rows.map((a) => ({
-    collectionSlug: asCollectionSlug(a.collectionSlug),
-    documentSlug: asDocumentSlug(a.documentSlug),
-    position: a.position,
+export const collectionMemberMetas = (
+  rows: readonly { collectionSlug: string; documentSlug: string }[],
+): CollectionMember[] =>
+  rows.map((m) => ({
+    collectionSlug: asCollectionSlug(m.collectionSlug),
+    documentSlug: asDocumentSlug(m.documentSlug),
   }));
 
 export const getCollectionList = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .handler(async ({ context }): Promise<ColListItem[]> => {
     const store = storeOf(srv(context));
-    const [collections, attachments] = await Promise.all([
+    const [collections, members] = await Promise.all([
       store.listCollections(),
-      store.listAttachments(),
+      store.listResolvedMembers(),
     ]);
+    // One member row per resolved (collection, document), so counting
+    // rows per collection yields the folder-aware document count.
     const countByCol = new Map<string, number>();
-    for (const a of attachments) {
+    for (const m of members) {
       countByCol.set(
-        a.collectionSlug,
-        (countByCol.get(a.collectionSlug) ?? 0) + 1,
+        m.collectionSlug,
+        (countByCol.get(m.collectionSlug) ?? 0) + 1,
       );
     }
     return collections.map((c) =>

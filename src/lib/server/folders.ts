@@ -12,6 +12,7 @@ import { projectMiddleware } from "@/lib/middleware";
 import { changedBy, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
 import type { ImportAndLinkResult, ImportSummary } from "@/project-store";
+import { folderNameHasSeparator } from "@/store/domain/folders";
 import type {
   DeleteFolderResult,
   MoveFolderResult,
@@ -52,6 +53,16 @@ const importLinkInput = z.discriminatedUnion("mode", [
   }),
   z.object({ mode: z.literal("new"), name: z.string().trim().min(1) }),
 ]);
+// A folder name is a single path segment; reject separators so it can't
+// be re-split into the wrong nesting when names are joined into a path.
+const folderNameInput = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (v) => !folderNameHasSeparator(v),
+    "folder name cannot contain a path separator",
+  );
 
 type ImportEntry = Readonly<z.infer<typeof importEntryInput>>;
 
@@ -85,9 +96,7 @@ export const getFolderList = createServerFn({ method: "GET" })
 
 export const createFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
-    z.object({ name: z.string().trim().min(1), parentSlug: parentInput }),
-  )
+  .inputValidator(z.object({ name: folderNameInput, parentSlug: parentInput }))
   .handler(async ({ data, context }): Promise<CreateFolderResult> => {
     const r = await storeOf(srv(context)).createFolder(
       data.name,
@@ -98,7 +107,7 @@ export const createFolder = createServerFn({ method: "POST" })
 
 export const renameFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: slugInput, name: z.string().trim().min(1) }))
+  .inputValidator(z.object({ slug: slugInput, name: folderNameInput }))
   .handler(async ({ data, context }): Promise<RenameFolderResult> => {
     const c = srv(context);
     return storeOf(c).renameFolder(

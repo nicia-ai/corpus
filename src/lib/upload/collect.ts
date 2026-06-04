@@ -232,14 +232,22 @@ export function commonRoot(files: readonly CollectedFile[]): string | null {
   return tops.size === 1 ? ([...tops][0] ?? null) : null;
 }
 
-// Re-root every entry under `folder` so the whole upload lives under
-// exactly one linkable folder. If the entries already share that exact
-// top dir, it is kept (not doubled); otherwise `folder/` is prefixed.
-export function reRoot(
+// Place every collected entry at its final import path: prefix the
+// destination's folder names (`[]` = project root), optionally dropping
+// the upload's own common-root wrapper for a "merge into the
+// destination" upload. With no parent segments and the wrapper kept,
+// paths are returned unchanged — a single loose file lands at the root,
+// no folder synthesized.
+export function placeEntries(
   files: readonly CollectedFile[],
-  folder: string,
+  parentSegments: readonly string[],
+  dropWrapper: boolean,
 ): readonly CollectedFile[] {
-  const root = commonRoot(files);
-  if (root === folder) return files;
-  return files.map((f) => ({ path: `${folder}/${f.path}`, text: f.text }));
+  const root = dropWrapper ? commonRoot(files) : null;
+  const prefix =
+    parentSegments.length > 0 ? `${parentSegments.join("/")}/` : "";
+  return files.map((f) => {
+    const tail = root === null ? f.path : f.path.slice(root.length + 1);
+    return { path: `${prefix}${tail}`, text: f.text };
+  });
 }

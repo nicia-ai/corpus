@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectFromFiles,
   commonRoot,
-  reRoot,
+  placeEntries,
 } from "../src/lib/upload/collect";
 
 function zipFile(entries: Record<string, string>, name = "docs.zip"): File {
@@ -60,7 +60,7 @@ describe("collectFromFiles — zip", () => {
   });
 });
 
-describe("commonRoot / reRoot", () => {
+describe("commonRoot / placeEntries", () => {
   it("commonRoot is the single shared top dir, else null", () => {
     expect(
       commonRoot([
@@ -77,15 +77,46 @@ describe("commonRoot / reRoot", () => {
     expect(commonRoot([{ path: "loose.md", text: "" }])).toBeNull();
   });
 
-  it("reRoot keeps an already-matching root, else prefixes one", () => {
-    const files = [{ path: "docs/a.md", text: "x" }];
-    expect(reRoot(files, "docs")).toBe(files);
-    expect(reRoot(files, "team").map((f) => f.path)).toEqual([
-      "team/docs/a.md",
-    ]);
+  it("a single loose file lands at the root, no folder synthesized", () => {
     expect(
-      reRoot([{ path: "loose.md", text: "x" }], "imported").map((f) => f.path),
-    ).toEqual(["imported/loose.md"]);
+      placeEntries([{ path: "loose.md", text: "x" }], [], false).map(
+        (f) => f.path,
+      ),
+    ).toEqual(["loose.md"]);
+  });
+
+  it("places a file into an existing folder", () => {
+    expect(
+      placeEntries([{ path: "loose.md", text: "x" }], ["docs"], false).map(
+        (f) => f.path,
+      ),
+    ).toEqual(["docs/loose.md"]);
+  });
+
+  it("keeps an uploaded folder as-is under the destination", () => {
+    const files = [
+      { path: "my-docs/a.md", text: "x" },
+      { path: "my-docs/specs/b.md", text: "y" },
+    ];
+    expect(placeEntries(files, [], false).map((f) => f.path)).toEqual([
+      "my-docs/a.md",
+      "my-docs/specs/b.md",
+    ]);
+    expect(placeEntries(files, ["team"], false).map((f) => f.path)).toEqual([
+      "team/my-docs/a.md",
+      "team/my-docs/specs/b.md",
+    ]);
+  });
+
+  it("merges an uploaded folder's files into the destination, structure kept", () => {
+    const files = [
+      { path: "my-docs/a.md", text: "x" },
+      { path: "my-docs/specs/b.md", text: "y" },
+    ];
+    expect(placeEntries(files, ["docs"], true).map((f) => f.path)).toEqual([
+      "docs/a.md",
+      "docs/specs/b.md",
+    ]);
   });
 });
 

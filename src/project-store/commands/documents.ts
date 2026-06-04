@@ -319,6 +319,8 @@ export async function importDocumentAtPathCommand(
       slug,
       docVersion: saved.result.docVersion,
       created,
+      folderSlug,
+      createdFolders: ensured.created,
     },
     changes: saved.changes,
   };
