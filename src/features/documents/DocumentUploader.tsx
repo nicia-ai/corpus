@@ -307,6 +307,7 @@ export function DocumentUploader(
             uploadRoot={uploadRoot}
             keepWrapper={keepWrapper}
             onKeepWrapper={setKeepWrapper}
+            destLabel={parentSegments.join(" / ")}
           />
 
           <LinkPicker
@@ -415,6 +416,7 @@ function DestinationPicker({
   uploadRoot,
   keepWrapper,
   onKeepWrapper,
+  destLabel,
 }: Readonly<{
   options: readonly Readonly<{ slug: FolderSlug; label: string }>[];
   destParent: FolderSlug | null;
@@ -426,36 +428,40 @@ function DestinationPicker({
   uploadRoot: string | null;
   keepWrapper: boolean;
   onKeepWrapper: (v: boolean) => void;
+  // The resolved merge target ("" = project root) — names where a
+  // wrapper-dropped folder's files actually land.
+  destLabel: string;
 }>): React.ReactElement {
   return (
     <div className="space-y-3">
-      {options.length > 0 && (
-        <div>
-          <label
-            htmlFor="dest"
-            className="mb-1 block text-sm font-medium text-slate-700"
-          >
-            Import into
-          </label>
-          <select
-            id="dest"
-            value={destParent ?? ROOT}
-            onChange={(e) =>
-              onDestParent(
-                e.target.value === ROOT ? null : asFolderSlug(e.target.value),
-              )
-            }
-            className={fieldInputClass()}
-          >
-            <option value={ROOT}>Root</option>
-            {options.map((o) => (
-              <option key={o.slug} value={o.slug}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      {/* Always shown — even with no folders yet — so a single-file
+          upload always surfaces its destination and the Root default,
+          gaining folder entries as soon as any exist. */}
+      <div>
+        <label
+          htmlFor="dest"
+          className="mb-1 block text-sm font-medium text-slate-700"
+        >
+          Import into
+        </label>
+        <select
+          id="dest"
+          value={destParent ?? ROOT}
+          onChange={(e) =>
+            onDestParent(
+              e.target.value === ROOT ? null : asFolderSlug(e.target.value),
+            )
+          }
+          className={fieldInputClass()}
+        >
+          <option value={ROOT}>Root</option>
+          {options.map((o) => (
+            <option key={o.slug} value={o.slug}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div>
         <label className="flex items-center gap-2 text-base text-slate-700">
@@ -498,7 +504,11 @@ function DestinationPicker({
               checked={!keepWrapper}
               onChange={() => onKeepWrapper(false)}
             />
-            Add its files to the destination
+            {destLabel === "" ? (
+              "Add its files directly to the root"
+            ) : (
+              <>Add its files directly to “{destLabel}”</>
+            )}
           </label>
         </fieldset>
       )}
