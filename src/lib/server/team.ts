@@ -108,7 +108,7 @@ export const listTeam = createServerFn({ method: "GET" })
 // Auth binds acceptance to the invited email.
 export const inviteMember = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ email: z.email(), role: ROLE }))
+  .validator(z.object({ email: z.email(), role: ROLE }))
   .handler(
     async ({
       data,
@@ -138,7 +138,7 @@ export const inviteMember = createServerFn({ method: "POST" })
 
 export const revokeInvitation = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ invitationId: z.string().min(1) }))
+  .validator(z.object({ invitationId: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const { api, headers, role } = authScope(context);
     requireOwner(role);
@@ -151,7 +151,7 @@ export const revokeInvitation = createServerFn({ method: "POST" })
 
 export const changeMemberRole = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ memberId: z.string().min(1), role: ROLE }))
+  .validator(z.object({ memberId: z.string().min(1), role: ROLE }))
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const { api, organizationId, headers, role } = authScope(context);
     requireOwner(role);
@@ -164,7 +164,7 @@ export const changeMemberRole = createServerFn({ method: "POST" })
 
 export const removeMember = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ memberIdOrEmail: z.string().min(1) }))
+  .validator(z.object({ memberIdOrEmail: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const { api, organizationId, headers, role } = authScope(context);
     requireOwner(role);
@@ -198,7 +198,7 @@ const BA_NOT_RECIPIENT_CODE = "YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION";
 
 export const acceptInvitation = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator(z.object({ invitationId: z.string().min(1) }))
+  .validator(z.object({ invitationId: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<AcceptResult> => {
     const { api, headers } = authScope(context);
     try {

@@ -46,7 +46,7 @@ export const exportBundle = createServerFn({ method: "GET" })
 // runs the preflight version extraction then the full BundleSchema.
 export const importBundle = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.unknown())
+  .validator(z.unknown())
   .handler(async ({ data, context }): Promise<ImportResult> => {
     const c = srv(context);
     requireProjectOwner(c.project, BUNDLE_ADMIN_MSG);

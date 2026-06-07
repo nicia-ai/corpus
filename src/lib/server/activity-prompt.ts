@@ -28,7 +28,7 @@ const promptBetSchema = z.enum([
 
 export const recordPromptAnswer = createServerFn({ method: "POST" })
   .middleware([authMiddleware, projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       bet: promptBetSchema,
       // Accepted but not in the event payload: the prompt is

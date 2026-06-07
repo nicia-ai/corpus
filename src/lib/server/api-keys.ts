@@ -51,7 +51,7 @@ export type ConnectionKeysView = Readonly<{
 
 export const listConnectionApiKeys = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ collectionSlug: z.string().trim().min(1) }))
+  .validator(z.object({ collectionSlug: z.string().trim().min(1) }))
   .handler(
     async ({ data, context }): Promise<ConnectionKeysView | undefined> => {
       const c = srv(context);
@@ -79,7 +79,7 @@ export const listConnectionApiKeys = createServerFn({ method: "GET" })
 
 export const createApiKey = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       name: z.string().trim().min(1).max(100),
       connectionId: z.string().min(1),
@@ -115,7 +115,7 @@ export const createApiKey = createServerFn({ method: "POST" })
 
 export const revokeApiKey = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator(z.object({ id: z.string().min(1) }))
+  .validator(z.object({ id: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<{ ok: true }> => {
     const c = srv(context);
     await deleteApiKey(

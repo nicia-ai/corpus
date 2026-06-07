@@ -1,10 +1,12 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { lazy, Suspense, useMemo, useState } from "react";
 
+import { CommentsView } from "@/components/comments/CommentsView";
 import { ProseDiff, DiffPanel } from "@/components/diff/Diff";
 import { DocHeader } from "@/components/document/DocHeader";
 import { Field } from "@/components/Field";
 import { Markdown } from "@/components/markdown/Markdown";
+import { SuggestionsView } from "@/components/suggestions/SuggestionsView";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -14,6 +16,10 @@ import { showToast } from "@/components/ui/Toast";
 import type { ProjectId } from "@/ids";
 import { lineDiff } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
+import type {
+  CommentsResult,
+  DocumentBlocksResult,
+} from "@/lib/server/comments";
 import {
   archiveDocument,
   type DocSnapshot,
@@ -23,6 +29,12 @@ import {
   renameFilename,
   saveDocument,
 } from "@/lib/server/documents";
+import {
+  createSuggestion,
+  listSuggestions,
+  type SuggestionView,
+} from "@/lib/server/suggestions";
+import { useCollab } from "@/lib/use-collab";
 
 // CodeMirror only loads when a reader first enters edit mode — it stays out
 // of the read path's route chunk (the primary audience reads, not edits).
@@ -39,23 +51,39 @@ const editorFallback = (
 export function DocumentCurrentPage({
   doc,
   projectId,
+  blocks,
+  comments,
 }: Readonly<{
   doc: DocSnapshot | undefined;
   projectId: ProjectId;
+  blocks: DocumentBlocksResult;
+  comments: CommentsResult;
 }>): React.ReactElement | null {
   if (doc === undefined) return null;
 
   // Keyed by version: a successful save invalidates the loader, the new
   // version remounts Editor with a fresh draft — no useEffect re-seeding.
-  return <Editor key={doc.docVersion} doc={doc} projectId={projectId} />;
+  return (
+    <Editor
+      key={doc.docVersion}
+      doc={doc}
+      projectId={projectId}
+      blocks={blocks}
+      comments={comments}
+    />
+  );
 }
 
 function Editor({
   doc,
   projectId,
+  blocks,
+  comments,
 }: Readonly<{
   doc: DocSnapshot;
   projectId: ProjectId;
+  blocks: DocumentBlocksResult;
+  comments: CommentsResult;
 }>): React.ReactElement {
   const router = useRouter();
   const [mode, setMode] = useState<"read" | "edit">("read");
@@ -78,6 +106,90 @@ function Editor({
   const { run: loadSlugs } = useSubmit(async () => {
     setSlugs((await getDocuments({ data: { projectId } })).map((d) => d.slug));
   });
+
+  // Suggestions: review panel + "suggest" from an edit-mode draft.
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<
+    Readonly<{
+      suggestions: readonly SuggestionView[];
+      names: Readonly<Record<string, string>>;
+    }>
+  >();
+  const { run: loadSuggestions } = useSubmit(async () => {
+    setSuggestions(
+      await listSuggestions({ data: { projectId, slug: base.slug } }),
+    );
+  });
+  function toggleSuggestions() {
+    if (suggestionsOpen) {
+      setSuggestionsOpen(false);
+    } else {
+      setSuggestionsOpen(true);
+      void loadSuggestions();
+    }
+  }
+  const {
+    pending: suggesting,
+    error: suggestError,
+    run: suggest,
+  } = useSubmit(async () => {
+    const r = await createSuggestion({
+      data: {
+        projectId,
+        slug: base.slug,
+        proposedMarkdown: draft,
+        clientVersion: base.docVersion,
+      },
+    });
+    if (!r.ok) {
+      throw new Error(
+        r.reason === "no-change"
+          ? "No changes to suggest."
+          : r.reason === "conflict"
+            ? "The document changed — reload and try again."
+            : "Could not create the suggestion.",
+      );
+    }
+    showToast("Suggestion created");
+    setMode("read");
+    setSuggestionsOpen(true);
+    void loadSuggestions();
+  });
+
+  // Select-to-suggest from the read view: propose an edit to one block's
+  // source. Returns an error message (or undefined) so the popover can show
+  // feedback inline.
+  const onSuggestSelection = async (
+    proposed: string,
+  ): Promise<string | undefined> => {
+    const r = await createSuggestion({
+      data: {
+        projectId,
+        slug: base.slug,
+        proposedMarkdown: proposed,
+        clientVersion: blocks.found ? blocks.docVersion : base.docVersion,
+      },
+    });
+    if (!r.ok) {
+      return r.reason === "no-change"
+        ? "No change to suggest."
+        : r.reason === "conflict"
+          ? "The document changed — reload and try again."
+          : "Could not create the suggestion.";
+    }
+    showToast("Suggestion created");
+    setSuggestionsOpen(true);
+    void loadSuggestions();
+    return undefined;
+  };
+
+  // Presence + live nudges over the project's real-time channel. On a change
+  // (anyone's write), refresh whichever review panel is open.
+  const presence = useCollab(projectId, base.slug, () => {
+    void router.invalidate();
+    if (suggestionsOpen) void loadSuggestions();
+  });
+  const here = presence.filter((p) => p.docSlug === base.slug);
 
   function enterEdit() {
     setMode("edit");
@@ -250,7 +362,7 @@ function Editor({
 
   if (mode === "read") {
     return (
-      <div className="max-w-5xl">
+      <div className={comments.threads.length > 0 ? "max-w-7xl" : "max-w-5xl"}>
         {renaming ? (
           <RenameField
             label="Title"
@@ -273,6 +385,9 @@ function Editor({
                 {deleteError && (
                   <span className="text-base text-red-600">{deleteError}</span>
                 )}
+                <Button variant="secondary" onClick={toggleSuggestions}>
+                  {suggestionsOpen ? "Hide suggestions" : "Suggestions"}
+                </Button>
                 <Button variant="secondary" onClick={enterEdit}>
                   Edit
                 </Button>
@@ -312,7 +427,38 @@ function Editor({
             }
           />
         )}
-        <Markdown source={base.markdown} />
+        {here.length > 0 && (
+          <p className="mb-3 text-sm text-slate-500">
+            Viewing now: {here.map((p) => p.userName).join(", ")}
+          </p>
+        )}
+        <CommentsView
+          projectId={projectId}
+          slug={base.slug}
+          markdown={base.markdown}
+          docVersion={blocks.found ? blocks.docVersion : base.docVersion}
+          blocks={blocks.found ? blocks.blocks : []}
+          threads={comments.threads}
+          names={comments.names}
+          onChange={() => void router.invalidate()}
+          onSuggest={onSuggestSelection}
+        />
+        {suggestionsOpen && suggestions !== undefined && (
+          <div className="mt-6">
+            <div className="mb-3 text-sm font-medium tracking-wide text-slate-500 uppercase">
+              Suggestions
+            </div>
+            <SuggestionsView
+              projectId={projectId}
+              baseMarkdown={base.markdown}
+              docVersion={base.docVersion}
+              suggestions={suggestions.suggestions}
+              names={suggestions.names}
+              onReload={() => void loadSuggestions()}
+              onApplied={() => void router.invalidate()}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -360,6 +506,16 @@ function Editor({
         <Button variant="secondary" disabled={pending} onClick={cancel}>
           Cancel
         </Button>
+        <Button
+          variant="secondary"
+          disabled={suggesting}
+          onClick={() => void suggest()}
+        >
+          Suggest changes
+        </Button>
+        {suggestError !== undefined && (
+          <span className="text-base text-red-600">{suggestError}</span>
+        )}
         {tab === "write" && broken > 0 && (
           <span className="text-base text-amber-700">
             {broken} link{broken > 1 ? "s" : ""} to a missing document

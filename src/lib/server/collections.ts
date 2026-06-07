@@ -131,7 +131,7 @@ export const getCollectionList = createServerFn({ method: "GET" })
 
 export const createCollection = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({ name: z.string().min(1), description: z.string().optional() }),
   )
   .handler(async ({ data, context }): Promise<{ slug: CollectionSlug }> => {
@@ -152,7 +152,7 @@ export const createCollection = createServerFn({ method: "POST" })
 // description clears it.
 export const updateCollection = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       slug: z.string().min(1),
       name: z.string().trim().min(1),
@@ -178,7 +178,7 @@ export const updateCollection = createServerFn({ method: "POST" })
 // old readCollection + getDocuments double call on the collection route.
 export const getCollectionDetail = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: z.string().min(1) }))
+  .validator(z.object({ slug: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<ColDetail> => {
     const r = await storeOf(srv(context)).collectionStructure(
       asCollectionSlug(data.slug),
@@ -218,14 +218,14 @@ export const getCollectionDetail = createServerFn({ method: "GET" })
 // doesn't depend on the resolved member structure.
 export const getCollectionMeta = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: z.string().min(1) }))
+  .validator(z.object({ slug: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<ColMetaResult> => {
     return storeOf(srv(context)).collectionMeta(asCollectionSlug(data.slug));
   });
 
 export const attachDocument = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       collectionSlug: z.string().min(1),
       documentSlug: z.string().min(1),
@@ -250,7 +250,7 @@ export const attachDocument = createServerFn({ method: "POST" })
 // resolved index (which would reorder folder-linked members).
 export const setMemberDelivery = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       collectionSlug: z.string().min(1),
       documentSlug: z.string().min(1),
@@ -270,7 +270,7 @@ export const setMemberDelivery = createServerFn({ method: "POST" })
 
 export const detachDocument = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       collectionSlug: z.string().min(1),
       documentSlug: z.string().min(1),
@@ -288,7 +288,7 @@ export const detachDocument = createServerFn({ method: "POST" })
 
 export const reorderCollectionDocuments = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       collectionSlug: z.string().min(1),
       orderedDocumentSlugs: z.array(z.string().min(1)),

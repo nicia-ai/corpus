@@ -43,7 +43,7 @@ export type ArchiveResult = Readonly<
 
 export const createProject = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ name: z.string().min(1) }))
+  .validator(z.object({ name: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<{ projectId: ProjectId }> => {
     const c = srv(context);
     const ref = actingRef(context);
@@ -62,7 +62,7 @@ export const createProject = createServerFn({ method: "POST" })
 
 export const renameProject = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ name: z.string().min(1) }))
+  .validator(z.object({ name: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<{ ok: true }> => {
     const c = srv(context);
     const ref = actingRef(context);

@@ -47,6 +47,14 @@ export type SaveResult = Readonly<
   | { ok: false; rolledBack: true }
 >;
 
+// A scoped create either lands a new document or refuses because the slug
+// already exists outside the bound Collection — another scope's document,
+// which the credential may never write. The existence check is decided
+// inside the create transaction, so the refusal is atomic with the write.
+export type CreateInCollectionResult =
+  | SaveResult
+  | Readonly<{ ok: false; forbidden: true }>;
+
 export type DocumentSnapshot = Readonly<{
   slug: string;
   title: string;

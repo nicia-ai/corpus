@@ -25,7 +25,7 @@ export type { ActivityAgentRow, ActivityDTO, ActivityStatus, RecentEventRow };
 
 export const getCollectionActivity = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       slug: z.string().min(1),
       // projectMiddleware consumes this; declare it so the input

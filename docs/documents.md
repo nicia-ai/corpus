@@ -33,6 +33,9 @@ Click **Save** to commit, or **Cancel** to discard the draft. Each save
 creates a new version (see [Versioning &
 history](./versioning-and-history.md)).
 
+Prefer your own editor, or editing from CI? The [CLI](./cli.md) pulls and
+pushes the same documents from a terminal, with the same versioning.
+
 ### Broken-link warnings
 
 While editing, Corpus checks markdown links that point at other

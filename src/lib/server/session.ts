@@ -61,7 +61,7 @@ export const getMcpUrl = createServerFn({ method: "GET" })
 // (routing keys on project.id, never slug).
 export const createOrganization = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       name: z.string().min(1),
       // First-run (the `/` form) leaves this unset and is idempotent on a
@@ -176,7 +176,7 @@ export type ProjectShell = Readonly<{
 // `/` (the resolver) rather than leaking existence. `projects` is every
 // project the user can switch to (the switcher hides itself at < 2).
 export const loadProjectShell = createServerFn({ method: "GET" })
-  .inputValidator(z.object({ projectId: z.string().min(1) }))
+  .validator(z.object({ projectId: z.string().min(1) }))
   .handler(
     async ({
       data,
@@ -252,7 +252,7 @@ export const loadProjectShell = createServerFn({ method: "GET" })
 // `/p/$projectId` layout already gated membership — an unresolvable id
 // here only happens on a stale link, handled as "redirect to /".
 export const loadDashboard = createServerFn({ method: "GET" })
-  .inputValidator(z.object({ projectId: z.string().min(1) }))
+  .validator(z.object({ projectId: z.string().min(1) }))
   .handler(
     async ({
       data,

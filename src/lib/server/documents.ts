@@ -119,7 +119,7 @@ export const getDocumentList = createServerFn({ method: "GET" })
 
 export const getDocument = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: z.string().min(1) }))
+  .validator(z.object({ slug: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<DocSnapshot | undefined> => {
     const d = await storeOf(srv(context)).getDocument(
       asDocumentSlug(data.slug),
@@ -138,7 +138,7 @@ export const getDocument = createServerFn({ method: "GET" })
 
 export const getDocumentHistory = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: z.string().min(1) }))
+  .validator(z.object({ slug: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<DocVersionEntry[]> => {
     const c = srv(context);
     const entries = await storeOf(c).documentHistory(asDocumentSlug(data.slug));
@@ -153,7 +153,7 @@ export const getDocumentHistory = createServerFn({ method: "GET" })
 
 export const saveDocument = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       slug: z.string().min(1),
       title: z.string().optional(),
@@ -197,7 +197,7 @@ export const saveDocument = createServerFn({ method: "POST" })
 // interleaved content save must not 409 a rename).
 export const renameDocument = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       slug: z.string().min(1),
       title: z.string().trim().min(1),
@@ -222,7 +222,7 @@ export type FilenameResult = Readonly<
 
 export const renameFilename = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       slug: z.string().min(1),
       filename: z
@@ -244,7 +244,7 @@ export const renameFilename = createServerFn({ method: "POST" })
 // ok:false = already gone/archived.
 export const archiveDocument = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: z.string().min(1) }))
+  .validator(z.object({ slug: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
     return storeOf(c).archiveDocument(asDocumentSlug(data.slug), changedBy(c));
@@ -254,7 +254,7 @@ export const archiveDocument = createServerFn({ method: "POST" })
 // returns how many of the selected slugs were actually archived.
 export const archiveDocuments = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slugs: z.array(z.string().min(1)).min(1) }))
+  .validator(z.object({ slugs: z.array(z.string().min(1)).min(1) }))
   .handler(async ({ data, context }): Promise<{ archived: number }> => {
     const c = srv(context);
     return storeOf(c).archiveDocuments(
