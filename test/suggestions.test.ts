@@ -314,4 +314,41 @@ describe("suggestions (DO + D1 integration)", () => {
       }),
     ).toMatchObject({ ok: false, reason: "conflict", currentVersion: 2 });
   });
+
+  it("records the agent origin on the applied version's change event", async () => {
+    const store = freshStore("sug");
+    const slug = docSlug("doc");
+    await seed(store, slug);
+    const created = await store.createSuggestion({
+      slug,
+      proposedMarkdown: `${BASE}\n\ndelta appended`,
+      clientVersion: 1,
+      createdBy: "apikey:agent-x",
+      channel: "mcp",
+    });
+    if (!created.ok) throw new Error("create failed");
+    const hunk = (await store.listSuggestions(slug))[0]?.hunks[0];
+    if (hunk === undefined) throw new Error("no hunk");
+    await store.setHunkDecision({ hunkId: hunk.id, decision: "accepted" });
+    expect(
+      await store.applySuggestion({
+        suggestionId: created.suggestionId,
+        appliedBy: "alice",
+      }),
+    ).toMatchObject({ ok: true });
+
+    const [latest] = await store.recentChanges(1);
+    expect(latest?.eventType).toBe("document.updated");
+    // changedBy is the human approver; appliedFrom is the durable link back
+    // to the suggestion (and the agent that proposed it).
+    expect(latest?.changedBy).toBe("alice");
+    const after = JSON.parse(latest?.afterJson ?? "{}") as {
+      appliedFrom?: { by: string; channel: string; suggestionId: number };
+    };
+    expect(after.appliedFrom).toMatchObject({
+      by: "apikey:agent-x",
+      channel: "mcp",
+      suggestionId: created.suggestionId,
+    });
+  });
 });

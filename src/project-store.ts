@@ -927,6 +927,40 @@ export class ProjectStore extends DurableObject<Env> {
     }
   }
 
+  // The MCP write path (agent-as-suggester). The scoped executor has
+  // already membership-gated `slug` to the caller's bound Collection and
+  // passes the resolved `callerRef` as the author — the agent proposes,
+  // only a human accepts. Delegates to createSuggestion so the
+  // ConflictError→409 mapping, the write transaction, and the post-commit
+  // change broadcast are shared with the web path (no parallel write).
+  async suggestEdit(
+    callerRef: CallerRef,
+    slug: DocumentSlug,
+    proposedMarkdown: string,
+    baseDocVersion: number,
+  ): Promise<CreateSuggestionResult> {
+    return this.createSuggestion({
+      slug,
+      proposedMarkdown,
+      clientVersion: baseDocVersion,
+      createdBy: callerRef,
+      // Correct by construction: this DO method IS the MCP-transport suggest
+      // entry (only the scoped MCP executor reaches it). A future non-MCP
+      // suggest path must NOT reuse this method — give it its own entry (or
+      // thread the channel through the port) so it labels truthfully rather
+      // than inheriting "mcp".
+      channel: "mcp",
+    });
+  }
+
+  // Open-suggestion counts per document, for the documents-list badge that
+  // tells a reviewer which docs have proposals waiting (the presence channel
+  // only nudges open tabs). One aggregate read.
+  async openSuggestionCounts(): Promise<Readonly<Record<string, number>>> {
+    const u = await this.read();
+    return u.suggestions.openCountsByDoc();
+  }
+
   async listSuggestions(
     slug: DocumentSlug,
   ): Promise<readonly SuggestionView[]> {
@@ -941,6 +975,7 @@ export class ProjectStore extends DurableObject<Env> {
       baseDocVersion: s.baseDocVersion,
       proposedMarkdown: s.proposedMarkdown,
       createdBy: s.createdBy,
+      channel: s.channel,
       createdAt: s.createdAt,
       hunks: hunks
         .filter((h) => h.suggestionId === s.id)

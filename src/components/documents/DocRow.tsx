@@ -98,6 +98,14 @@ export function DocRow({
           {doc.filename}
         </button>
       )}
+      {doc.pendingSuggestions > 0 && (
+        <span
+          title={`${doc.pendingSuggestions} suggestion${doc.pendingSuggestions === 1 ? "" : "s"} awaiting review`}
+          className="inline-flex w-fit items-center rounded-sm bg-amber-50 px-1.5 text-sm font-medium text-amber-700 tabular-nums"
+        >
+          {doc.pendingSuggestions} pending
+        </span>
+      )}
       {doc.collectionCount > 0 && (
         <CollectionCountBadge count={doc.collectionCount} />
       )}

@@ -22,6 +22,13 @@
       "when": 1780854821390,
       "tag": "0002_true_black_bird",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1780876733721,
+      "tag": "0003_clever_sunspot",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import {
   type HunkDecision,
@@ -37,6 +37,20 @@ export class SuggestionRepo {
       .from(suggestion)
       .where(eq(suggestion.documentSlug, documentSlug))
       .orderBy(suggestion.id);
+  }
+
+  // Count of OPEN suggestions per document in one grouped query — the
+  // documents-list badge needs every doc's count at once, and a per-row
+  // forDoc() fan-out would be N reads for one list render.
+  async openCountsByDoc(): Promise<Record<string, number>> {
+    const rows = await this.db
+      .select({ slug: suggestion.documentSlug, n: sql<number>`count(*)` })
+      .from(suggestion)
+      .where(eq(suggestion.status, "open"))
+      .groupBy(suggestion.documentSlug);
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.slug] = r.n;
+    return out;
   }
 
   async get(id: number): Promise<SuggestionRow | undefined> {

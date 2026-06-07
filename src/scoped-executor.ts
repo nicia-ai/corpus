@@ -129,6 +129,32 @@ export function scopedExecutor(
       return inner.recordRead(callerRef, collectionSlug, filtered);
     },
 
+    // The executor's only write. Same closure-bound caller identity as
+    // recordRead, then the same membership gate as getDocument: a
+    // non-member (or unknown) slug returns the `missing` result so the
+    // handler 404s without revealing that the slug exists elsewhere, and
+    // no suggestion row is ever written outside the bound Collection. The
+    // agent only ever proposes; createSuggestion stores it pending a human.
+    suggestEdit: (
+      suppliedCallerRef,
+      slug,
+      proposedMarkdown,
+      baseDocVersion,
+    ) => {
+      if (suppliedCallerRef !== callerRef || !memberSet.has(slug)) {
+        return Promise.resolve({
+          ok: false as const,
+          reason: "missing" as const,
+        });
+      }
+      return inner.suggestEdit(
+        callerRef,
+        slug,
+        proposedMarkdown,
+        baseDocVersion,
+      );
+    },
+
     // Membership-gate. A non-member slug is indistinguishable from a
     // truly unknown document (the agent cannot probe to learn what
     // exists outside its Collection).

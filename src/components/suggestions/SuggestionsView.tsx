@@ -1,7 +1,7 @@
 import { ProseDiff } from "@/components/diff/Diff";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Surface";
-import type { ProjectId } from "@/ids";
+import type { CallerChannel, ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
 import { lineDiff } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
@@ -51,6 +51,7 @@ export function SuggestionsView({
           baseMarkdown={baseMarkdown}
           applicable={s.baseDocVersion === docVersion}
           author={names[s.createdBy] ?? s.createdBy}
+          channel={s.channel}
           onReload={onReload}
           onApplied={onApplied}
         />
@@ -69,12 +70,20 @@ const OP_LABEL: Readonly<Record<SuggestionHunkView["op"], string>> = {
   delete: "Remove",
 };
 
+// The "via" chip per transport. `web` is the unmarked default (a person in
+// the browser); mcp/cli mark a non-browser author next to their name.
+const VIA_LABEL: Partial<Record<CallerChannel, string>> = {
+  mcp: "via MCP",
+  cli: "via CLI",
+};
+
 function SuggestionCard({
   projectId,
   suggestion,
   baseMarkdown,
   applicable,
   author,
+  channel,
   onReload,
   onApplied,
 }: Readonly<{
@@ -83,6 +92,7 @@ function SuggestionCard({
   baseMarkdown: string;
   applicable: boolean;
   author: string;
+  channel: CallerChannel;
   onReload: () => void;
   onApplied: () => void;
 }>): React.ReactElement {
@@ -119,7 +129,12 @@ function SuggestionCard({
     <Card className="space-y-3 px-5 py-4">
       <div className="flex items-center justify-between">
         <div className="text-base">
-          <span className="font-medium text-slate-900">{author}</span>{" "}
+          <span className="font-medium text-slate-900">{author}</span>
+          {VIA_LABEL[channel] !== undefined && (
+            <span className="ml-1.5 inline-flex items-center rounded-sm bg-slate-100 px-1.5 text-sm font-medium text-slate-600">
+              {VIA_LABEL[channel]}
+            </span>
+          )}{" "}
           <span className="text-slate-500">
             proposed {suggestion.hunks.length} change
             {suggestion.hunks.length === 1 ? "" : "s"}

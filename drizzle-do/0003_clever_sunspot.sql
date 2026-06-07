@@ -1,0 +1,1 @@
+ALTER TABLE `suggestion` ADD `channel` text DEFAULT 'web' NOT NULL;

@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { connectControlDb } from "@/control/db";
-import { resolveUserNames } from "@/control/users";
+import { resolveAuthorLabels } from "@/control/users";
 import { asDocumentSlug } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import { changedBy, storeOf } from "@/lib/server/shared";
@@ -35,7 +35,7 @@ export const listSuggestions = createServerFn({ method: "GET" })
     const suggestions = [
       ...(await storeOf(c).listSuggestions(asDocumentSlug(data.slug))),
     ];
-    const names = await resolveUserNames(
+    const names = await resolveAuthorLabels(
       connectControlDb(c.env.DB),
       suggestions.map((s) => s.createdBy),
     );
@@ -58,6 +58,7 @@ export const createSuggestion = createServerFn({ method: "POST" })
       proposedMarkdown: data.proposedMarkdown,
       clientVersion: data.clientVersion,
       createdBy: changedBy(c),
+      channel: "web",
     });
   });
 
