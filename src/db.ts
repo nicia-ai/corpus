@@ -1,5 +1,17 @@
+import { sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
-import { blob, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  blob,
+  check,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+} from "drizzle-orm/sqlite-core";
+
+import type { BlockKind } from "./store/domain/block-match";
+import { HUNK_OPS } from "./store/domain/suggestion";
 
 // Content-addressed blob store, co-located in the DO's SQLite (NOT R2):
 // keeping it here preserves the single atomic tx (blob + DocumentVersion
@@ -49,10 +61,188 @@ export const instrumentationOutbox = sqliteTable("instrumentation_outbox", {
   attemptCount: integer("attempt_count").notNull().default(0),
 });
 
+// --- Collaboration: derived block ids + anchored comments -------------
+// Non-canonical side state: off-bundle, off-MCP, reaped with the document
+// versions they describe. Enum columns use drizzle `{ enum }` + a CHECK so
+// the only storable values are the valid ones; the block map is a typed
+// JSON column. Every downstream type is INFERRED from these definitions
+// ($inferSelect / $inferInsert) — there is no hand-written row shape to
+// drift, so persisting an invalid value is a compile error and a DB error.
+
+// One entry in a version's block map: a stable block id plus its kind. The
+// block TEXT is NOT stored — it is recovered by re-parsing the version's
+// blob, so the map stays lean (a comment on a long doc costs a handful of
+// ids, not a second copy of the prose). `kind` is the domain BlockKind (its
+// tuple is the single source for the union); `id` is a BlockId serialized
+// as a string, re-branded by the repo on read.
+export type BlockMapEntry = Readonly<{
+  id: string;
+  kind: BlockKind;
+}>;
+
+// The ordered block decomposition of one document version: stable block ids
+// (minted once, carried forward by the matcher so anchors survive edits and
+// moves) tagged with the parser version that produced them. On a parser
+// upgrade the tag mismatches and the rebase re-anchors by text quote rather
+// than trusting a positional re-parse. One row per (document, version).
+export const documentBlockMap = sqliteTable(
+  "document_block_map",
+  {
+    documentSlug: text("document_slug").notNull(),
+    docVersion: integer("doc_version").notNull(),
+    parserVersion: integer("parser_version").notNull(),
+    blocks: text("blocks", { mode: "json" })
+      .$type<readonly BlockMapEntry[]>()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.documentSlug, t.docVersion] })],
+);
+
+// Per-document monotonic block-id allocator. Ordinals are never reused, so
+// a stale anchor's block id can never collide with a future unrelated
+// block.
+export const documentBlockSeq = sqliteTable("document_block_seq", {
+  documentSlug: text("document_slug").primaryKey(),
+  next: integer("next").notNull().default(0),
+});
+
+// The lifecycle of a comment thread's anchor — server-controlled: a thread
+// opens, is resolved by a person, or orphans when its anchored text is
+// gone. The single source for the union and the CHECK below.
+export const THREAD_STATUSES = ["open", "resolved", "orphaned"] as const;
+
+// An anchored comment thread — the human review layer. Off-bundle, off-MCP.
+export const commentThread = sqliteTable(
+  "comment_thread",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    documentSlug: text("document_slug").notNull(),
+    anchorBlockId: text("anchor_block_id").notNull(),
+    anchorStart: integer("anchor_start").notNull(),
+    anchorEnd: integer("anchor_end").notNull(),
+    quotePrefix: text("quote_prefix").notNull(),
+    quoteExact: text("quote_exact").notNull(),
+    quoteSuffix: text("quote_suffix").notNull(),
+    status: text("status", { enum: THREAD_STATUSES }).notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull(),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: text("resolved_at"),
+  },
+  (t) => [
+    index("comment_thread_doc").on(t.documentSlug),
+    check(
+      "comment_thread_status_valid",
+      sql.raw(`status in (${THREAD_STATUSES.map((s) => `'${s}'`).join(", ")})`),
+    ),
+  ],
+);
+
+// A message within a thread (the opening comment and any replies).
+export const comment = sqliteTable(
+  "comment",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    threadId: integer("thread_id").notNull(),
+    body: text("body").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("comment_thread_id").on(t.threadId)],
+);
+
+// Downstream types are INFERRED from the schema above — never hand-written —
+// so each column's type (including the status union) is the single source
+// of truth shared by repos, DO methods, and DTOs.
+export type StoredBlockMap = Readonly<typeof documentBlockMap.$inferSelect>;
+export type CommentThreadRow = Readonly<typeof commentThread.$inferSelect>;
+export type NewCommentThread = Readonly<typeof commentThread.$inferInsert>;
+export type CommentRow = Readonly<typeof comment.$inferSelect>;
+export type NewComment = Readonly<typeof comment.$inferInsert>;
+export type CommentStatus = CommentThreadRow["status"];
+
+// --- Suggestions (per-hunk proposed edits) ----------------------------
+// Same non-canonical, off-bundle, off-MCP discipline as comments. A
+// suggestion is a proposed alternative markdown against a base version,
+// decomposed into block-level hunks the reviewer accepts or rejects.
+
+export const SUGGESTION_STATUSES = [
+  "open",
+  "applied",
+  "rejected",
+  "stale",
+] as const;
+
+export const suggestion = sqliteTable(
+  "suggestion",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    documentSlug: text("document_slug").notNull(),
+    baseDocVersion: integer("base_doc_version").notNull(),
+    proposedMarkdown: text("proposed_markdown").notNull(),
+    status: text("status", { enum: SUGGESTION_STATUSES }).notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull(),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: text("resolved_at"),
+  },
+  (t) => [
+    index("suggestion_doc").on(t.documentSlug),
+    check(
+      "suggestion_status_valid",
+      sql.raw(
+        `status in (${SUGGESTION_STATUSES.map((s) => `'${s}'`).join(", ")})`,
+      ),
+    ),
+  ],
+);
+
+export const HUNK_DECISIONS = ["pending", "accepted", "rejected"] as const;
+
+export const suggestionHunk = sqliteTable(
+  "suggestion_hunk",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    suggestionId: integer("suggestion_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    op: text("op", { enum: HUNK_OPS }).notNull(),
+    baseStart: integer("base_start").notNull(),
+    baseEnd: integer("base_end").notNull(),
+    proposedText: text("proposed_text").notNull(),
+    decision: text("decision", { enum: HUNK_DECISIONS }).notNull(),
+  },
+  (t) => [
+    index("suggestion_hunk_suggestion").on(t.suggestionId),
+    check(
+      "suggestion_hunk_op_valid",
+      sql.raw(`op in (${HUNK_OPS.map((s) => `'${s}'`).join(", ")})`),
+    ),
+    check(
+      "suggestion_hunk_decision_valid",
+      sql.raw(
+        `decision in (${HUNK_DECISIONS.map((s) => `'${s}'`).join(", ")})`,
+      ),
+    ),
+  ],
+);
+
+export type SuggestionRow = Readonly<typeof suggestion.$inferSelect>;
+export type NewSuggestion = Readonly<typeof suggestion.$inferInsert>;
+export type SuggestionStatus = SuggestionRow["status"];
+export type SuggestionHunkRow = Readonly<typeof suggestionHunk.$inferSelect>;
+export type NewSuggestionHunk = Readonly<typeof suggestionHunk.$inferInsert>;
+export type HunkDecision = SuggestionHunkRow["decision"];
+
 export type LedgerDb = DrizzleSqliteDODatabase<{
   contentBlobs: typeof contentBlobs;
   changeEvents: typeof changeEvents;
   instrumentationOutbox: typeof instrumentationOutbox;
+  documentBlockMap: typeof documentBlockMap;
+  documentBlockSeq: typeof documentBlockSeq;
+  commentThread: typeof commentThread;
+  comment: typeof comment;
+  suggestion: typeof suggestion;
+  suggestionHunk: typeof suggestionHunk;
 }>;
 
 // The DDL for these tables is not hand-written: the table definitions

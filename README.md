@@ -40,12 +40,24 @@ version history.
 - **Documents** — markdown, edited in-browser, with an append-only
   version ledger and optimistic-concurrency conflict resolution (a
   side-by-side merge UI, never a lost write).
+- **Collaboration** — a people-only review layer over documents:
+  threaded **comments** anchored to text that follow it across edits and
+  moves; **suggestions** reviewed and applied per hunk; live **presence**
+  of who's viewing; and a verifiable **edit history** any version can be
+  restored from. Deliberately never exposed over MCP or in the bundle —
+  agents read approved docs, they don't see or touch review state.
 - **Collections** — an ordered set of documents assembled into one
   corpus, with a token-size estimate so you can see when a collection is
   too large for an agent to use well.
 - **MCP** — each project exposes a read-only MCP endpoint (`/mcp`)
   authenticated by OAuth bearer token or `cck_`-prefixed API key. An
   agent only ever sees the project its credential resolves to.
+- **CLI** — a Git-free `pull`/`push` tool (`pnpm corpus`) over a
+  collection-scoped REST surface (`/api/v1/docs`), for editing documents
+  from a terminal or CI with the same optimistic-concurrency contract as
+  the editor. Its logic is a runtime-agnostic core (web `fetch` + an
+  injected filesystem port, zero `node:` imports), so it also runs under
+  Deno, Workers, or a WASM host. See [docs/cli.md](docs/cli.md).
 - **Portable bundle** — export the whole project as a deterministic,
   content-addressed bundle (web UI → Settings → Export); re-import to
   the same hash on any Corpus instance.

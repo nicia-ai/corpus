@@ -42,6 +42,17 @@ import {
   updateCollectionCommand,
 } from "./project-store/commands/collections";
 import {
+  addCommentCommand,
+  type AddCommentInput,
+  type CommentThreadView,
+  createCommentCommand,
+  type CreateCommentInput,
+  type CreateCommentResult,
+  type DocumentBlocksResult,
+  resolveThreadCommand,
+  type ResolveThreadInput,
+} from "./project-store/commands/comments";
+import {
   archiveDocumentsCommand,
   archiveOneDocumentCommand,
   ImportAbort,
@@ -63,8 +74,22 @@ import {
   linkImportedFolderCommand,
 } from "./project-store/commands/import-link";
 import { seedExampleCommand } from "./project-store/commands/seed";
+import {
+  applySuggestionCommand,
+  type ApplySuggestionInput,
+  type ApplySuggestionResult,
+  createSuggestionCommand,
+  type CreateSuggestionInput,
+  type CreateSuggestionResult,
+  rejectSuggestionCommand,
+  type RejectSuggestionInput,
+  setHunkDecisionCommand,
+  type SetHunkDecisionInput,
+  type SuggestionView,
+} from "./project-store/commands/suggestions";
 import type {
   CollectionOutline,
+  CreateInCollectionResult,
   DocumentHistoryEntry,
   ImportAndLinkInput,
   ImportAndLinkResult,
@@ -84,6 +109,12 @@ import type {
 } from "./project-store/contracts";
 import { ProjectInstrumentation } from "./project-store/outbox";
 import {
+  ClientMessage,
+  presenceFrom,
+  SocketAttachment,
+  type SocketMeta,
+} from "./project-store/presence";
+import {
   collectionMembersProjection,
   collectionMetaProjection,
   collectionOutlineProjection,
@@ -101,6 +132,10 @@ import {
 } from "./project-store/queries";
 import { reapExpiredRecords } from "./project-store/retention";
 import type { ProjectUnit } from "./project-store/unit";
+import {
+  BLOCK_PARSER_VERSION,
+  parseBlocksWithRanges,
+} from "./store/domain/block-parse";
 import type { Bundle, BundleSource } from "./store/domain/bundle";
 import {
   DEFAULT_COLLECTION_DELIVERY,
@@ -113,11 +148,13 @@ import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
 import type { GraphHandle } from "./store/handle";
 import { BlobStore } from "./store/repos/blob-store";
+import { BlockMapRepo } from "./store/repos/block-map";
 import { ChangeLog, type RecentChange } from "./store/repos/change-log";
 import {
   CollectionGraph,
   type CollectionMeta,
 } from "./store/repos/collection-graph";
+import { CommentRepo } from "./store/repos/comment";
 import { DocumentRepo } from "./store/repos/document-repo";
 import {
   type DeleteFolderResult,
@@ -128,11 +165,13 @@ import {
   type RenameFolderResult,
 } from "./store/repos/folder-repo";
 import { InstrumentationOutbox } from "./store/repos/instrumentation-outbox";
+import { SuggestionRepo } from "./store/repos/suggestion";
 import { VersionRepo } from "./store/repos/version-repo";
-import { sha256, slugify } from "./util";
+import { compact, sha256, slugify } from "./util";
 
 export type {
   CollectionOutline,
+  CreateInCollectionResult,
   DocumentHistoryEntry,
   ImportAndLinkInput,
   ImportAndLinkResult,
@@ -153,6 +192,18 @@ export type {
 
 type Unit = ProjectUnit;
 
+// Internal sentinel: a scoped create's bound collection vanished between
+// scope resolution and the create transaction, so the attach failed.
+// Thrown to roll the create back (never leave a document created but
+// unattached — outside its own caller's scope) and map to a fail-closed
+// 403, matching the collection-gone path in `apiKeyScope`.
+class CollectionUnavailable extends Error {
+  constructor() {
+    super("collection unavailable");
+    this.name = "CollectionUnavailable";
+  }
+}
+
 // The single, deliberate unsafe cast in the system. TypeGraph 0.26 and the
 // Drizzle ledger ride the SAME do-sqlite handle (storage handle or the
 // in-transaction tx.sql); the structural mismatch with LedgerDb is
@@ -160,6 +211,9 @@ type Unit = ProjectUnit;
 function asLedgerDb(handle: unknown): LedgerDb {
   return handle as LedgerDb;
 }
+
+// WebSocket.OPEN — the readyState of a live socket.
+const WS_OPEN = 1;
 
 // Stable, deterministic serialization of a {slug: docVersion} map so
 // two reads with the same version-set produce the same fingerprint
@@ -250,11 +304,91 @@ export class ProjectStore extends DurableObject<Env> {
       return out;
     });
     await this.instrumentation().drain();
+    // Nudge connected clients that something in this project changed so they
+    // re-fetch (comments / suggestions / the document). Ephemeral, best-effort.
+    this.broadcastChanged();
     return outcome;
   }
 
   override async alarm(): Promise<void> {
     await this.instrumentation().drain();
+  }
+
+  // — Real-time channel (presence + change nudges) ————————————————————
+  // The one sanctioned WebSocket surface. Hibernation-aware: per-socket
+  // metadata is serialized so the DO can sleep between messages. Identity
+  // (uid / name) and authorization are resolved by the Worker BEFORE the
+  // upgrade is forwarded here, then passed as query params.
+
+  override fetch(request: Request): Response {
+    if (request.headers.get("upgrade") !== "websocket") {
+      return new Response("expected a websocket upgrade", { status: 426 });
+    }
+    const url = new URL(request.url);
+    const meta: SocketMeta = {
+      userId: url.searchParams.get("uid") ?? "",
+      userName: url.searchParams.get("name") ?? "Someone",
+      docSlug: url.searchParams.get("doc"),
+    };
+    const { 0: client, 1: server } = new WebSocketPair();
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment(meta);
+    this.broadcastPresence();
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  override webSocketMessage(
+    ws: WebSocket,
+    message: ArrayBuffer | string,
+  ): void {
+    if (typeof message !== "string") return;
+    let data: unknown;
+    try {
+      data = JSON.parse(message);
+    } catch {
+      return;
+    }
+    const parsed = ClientMessage.safeParse(data);
+    if (!parsed.success) return;
+    const current = SocketAttachment.safeParse(ws.deserializeAttachment());
+    const base: SocketMeta = current.success
+      ? current.data
+      : { userId: "", userName: "Someone", docSlug: null };
+    ws.serializeAttachment({ ...base, docSlug: parsed.data.docSlug });
+    this.broadcastPresence();
+  }
+
+  override webSocketClose(): void {
+    this.broadcastPresence();
+  }
+
+  override webSocketError(): void {
+    this.broadcastPresence();
+  }
+
+  private broadcastPresence(): void {
+    const metas: SocketMeta[] = [];
+    for (const ws of this.ctx.getWebSockets()) {
+      const m = SocketAttachment.safeParse(ws.deserializeAttachment());
+      if (m.success) metas.push(m.data);
+    }
+    this.broadcast({ type: "presence", users: presenceFrom(metas) });
+  }
+
+  private broadcastChanged(): void {
+    this.broadcast({ type: "changed" });
+  }
+
+  private broadcast(message: unknown): void {
+    const text = JSON.stringify(message);
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WS_OPEN) continue;
+      try {
+        ws.send(text);
+      } catch {
+        continue;
+      }
+    }
   }
 
   // — Read-path event emission ————————————————————————————————————————
@@ -339,6 +473,9 @@ export class ProjectStore extends DurableObject<Env> {
       blobs: new BlobStore(ledger),
       versions: new VersionRepo(graph),
       outbox: new InstrumentationOutbox(ledger),
+      blockMaps: new BlockMapRepo(ledger),
+      comments: new CommentRepo(ledger),
+      suggestions: new SuggestionRepo(ledger),
     };
   }
 
@@ -592,6 +729,261 @@ export class ProjectStore extends DurableObject<Env> {
     } catch (err) {
       return this.saveError(err, input);
     }
+  }
+
+  // Create a NEW document into `collectionSlug` in a single transaction —
+  // the collection-scoped REST surface's create path, entered when the
+  // transport's (necessarily stale) member snapshot didn't list the slug.
+  // The whole decision is re-made inside the write, so it is race-correct:
+  //
+  //   - slug already exists AND is in the bound collection → another
+  //     client won a concurrent create; the caller IS authorized, so
+  //     delegate to the normal save and let `clientVersion` decide (a
+  //     stale version yields a retryable 409, never a misleading 403).
+  //   - slug exists but is NOT in the bound collection → genuinely another
+  //     scope's document → `forbidden` (403).
+  //   - slug is new → create + attach together; "created" must mean
+  //     "created AND attached", so if the bound collection vanished under
+  //     us the attach fails and the whole unit rolls back (fail-closed
+  //     403) rather than orphaning the document outside its own scope.
+  async createDocumentInCollection(
+    input: SaveDocumentInput,
+    collectionSlug: CollectionSlug,
+    position: number,
+  ): Promise<CreateInCollectionResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand<
+        { forbidden: true } | { docVersion: number }
+      >(now, async (ctx) => {
+        const head = await ctx.u.docs.find(input.slug);
+        if (head !== undefined) {
+          const members = await collectionMembersProjection(
+            ctx.u,
+            collectionSlug,
+          );
+          if (members?.includes(input.slug) !== true) {
+            return { result: { forbidden: true }, changes: [] };
+          }
+          // Already a member → a plain update; clientVersion guards it.
+          const saved = await saveDocumentCommand(ctx, input);
+          return {
+            result: { docVersion: saved.result.docVersion },
+            changes: saved.changes,
+          };
+        }
+        const saved = await saveDocumentCommand(ctx, input);
+        const attached = await attachDocumentCommand(ctx, {
+          collectionSlug,
+          documentSlug: input.slug,
+          position,
+          changedBy: input.changedBy,
+        });
+        if (!attached.result.ok) throw new CollectionUnavailable();
+        return {
+          result: { docVersion: saved.result.docVersion },
+          changes: [...saved.changes, ...attached.changes],
+        };
+      });
+      return "forbidden" in outcome.result
+        ? { ok: false, forbidden: true }
+        : { ok: true, docVersion: outcome.result.docVersion };
+    } catch (err) {
+      if (err instanceof CollectionUnavailable) {
+        return { ok: false, forbidden: true };
+      }
+      return this.saveError(err, input);
+    }
+  }
+
+  // — Comments (anchored review layer; off-bundle, off-MCP) ——————————
+
+  // The head version's blocks, addressed by index, for selecting a comment
+  // target in the editor. A pure read — the block map is bootstrapped when
+  // a comment is actually created.
+  async getDocumentBlocks(slug: DocumentSlug): Promise<DocumentBlocksResult> {
+    const u = await this.read();
+    const head = await u.docs.find(slug);
+    if (head === undefined) return { found: false };
+    const markdown = (await u.blobs.get(head.contentHash)) ?? "";
+    const parsed = parseBlocksWithRanges(markdown);
+    const stored = await u.blockMaps.headMap(slug);
+    const mapped =
+      stored?.docVersion === head.docVersion &&
+      stored.parserVersion === BLOCK_PARSER_VERSION &&
+      stored.blocks.length === parsed.length &&
+      stored.blocks.every((b, i) => b.kind === parsed[i]?.kind)
+        ? stored.blocks
+        : undefined;
+    return {
+      found: true,
+      docVersion: head.docVersion,
+      blocks: parsed.map((b, i) =>
+        compact({
+          id: mapped?.[i]?.id,
+          index: i,
+          kind: b.kind,
+          text: b.text,
+          sourceStart: b.sourceStart,
+          sourceEnd: b.sourceEnd,
+        }),
+      ),
+    };
+  }
+
+  async listComments(
+    slug: DocumentSlug,
+  ): Promise<readonly CommentThreadView[]> {
+    const u = await this.read();
+    const threads = await u.comments.threadsForDoc(slug);
+    const comments = await u.comments.commentsForThreads(
+      threads.map((t) => t.id),
+    );
+    return threads.map((t) => ({
+      id: t.id,
+      status: t.status,
+      anchorBlockId: t.anchorBlockId,
+      anchorStart: t.anchorStart,
+      anchorEnd: t.anchorEnd,
+      quote: {
+        prefix: t.quotePrefix,
+        exact: t.quoteExact,
+        suffix: t.quoteSuffix,
+      },
+      createdBy: t.createdBy,
+      createdAt: t.createdAt,
+      resolvedBy: t.resolvedBy ?? undefined,
+      resolvedAt: t.resolvedAt ?? undefined,
+      comments: comments
+        .filter((c) => c.threadId === t.id)
+        .map((c) => ({
+          id: c.id,
+          body: c.body,
+          createdBy: c.createdBy,
+          createdAt: c.createdAt,
+        })),
+    }));
+  }
+
+  async createComment(input: CreateCommentInput): Promise<CreateCommentResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand(now, (ctx) =>
+        createCommentCommand(ctx, input),
+      );
+      return outcome.result;
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        return {
+          ok: false,
+          reason: "conflict",
+          currentVersion: err.currentVersion,
+        };
+      }
+      throw err;
+    }
+  }
+
+  async addComment(
+    input: AddCommentInput,
+  ): Promise<Readonly<{ commentId: number }>> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      addCommentCommand(ctx, input),
+    );
+    return outcome.result;
+  }
+
+  async resolveCommentThread(
+    input: ResolveThreadInput,
+  ): Promise<Readonly<{ ok: true }>> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      resolveThreadCommand(ctx, input),
+    );
+    return outcome.result;
+  }
+
+  // — Suggestions (per-hunk proposed edits) ——————————————————————————
+
+  async createSuggestion(
+    input: CreateSuggestionInput,
+  ): Promise<CreateSuggestionResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand(now, (ctx) =>
+        createSuggestionCommand(ctx, input),
+      );
+      return outcome.result;
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        return {
+          ok: false,
+          reason: "conflict",
+          currentVersion: err.currentVersion,
+        };
+      }
+      throw err;
+    }
+  }
+
+  async listSuggestions(
+    slug: DocumentSlug,
+  ): Promise<readonly SuggestionView[]> {
+    const u = await this.read();
+    const suggestions = await u.suggestions.forDoc(slug);
+    const hunks = await u.suggestions.hunksForSuggestions(
+      suggestions.map((s) => s.id),
+    );
+    return suggestions.map((s) => ({
+      id: s.id,
+      status: s.status,
+      baseDocVersion: s.baseDocVersion,
+      proposedMarkdown: s.proposedMarkdown,
+      createdBy: s.createdBy,
+      createdAt: s.createdAt,
+      hunks: hunks
+        .filter((h) => h.suggestionId === s.id)
+        .map((h) => ({
+          id: h.id,
+          ordinal: h.ordinal,
+          op: h.op,
+          baseStart: h.baseStart,
+          baseEnd: h.baseEnd,
+          proposedText: h.proposedText,
+          decision: h.decision,
+        })),
+    }));
+  }
+
+  async setHunkDecision(
+    input: SetHunkDecisionInput,
+  ): Promise<Readonly<{ ok: boolean }>> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      setHunkDecisionCommand(ctx, input),
+    );
+    return outcome.result;
+  }
+
+  async applySuggestion(
+    input: ApplySuggestionInput,
+  ): Promise<ApplySuggestionResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      applySuggestionCommand(ctx, input),
+    );
+    return outcome.result;
+  }
+
+  async rejectSuggestion(
+    input: RejectSuggestionInput,
+  ): Promise<Readonly<{ ok: boolean }>> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      rejectSuggestionCommand(ctx, input),
+    );
+    return outcome.result;
   }
 
   // Rename a document = a title-only head-pointer edit. Distinct from

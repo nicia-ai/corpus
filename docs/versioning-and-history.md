@@ -2,7 +2,7 @@
 title: Versioning & history
 description: Every document edit is a new version, conflicts are resolved not lost, and the change feed shows what moved — how Corpus keeps your canonical collection trustworthy.
 sidebar:
-  order: 8
+  order: 9
 ---
 
 Your agents act on what's in Corpus, so Corpus treats history as

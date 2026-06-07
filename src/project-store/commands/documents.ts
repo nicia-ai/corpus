@@ -38,6 +38,7 @@ import type {
   RenameFilenameResult,
 } from "../contracts";
 
+import { maintainAnchorsOnSave } from "./anchoring";
 import { folderTreeFanOutChanges } from "./folder-fanout";
 
 // Internal control-flow sentinel: thrown inside the import write() to
@@ -96,6 +97,14 @@ export async function saveDocumentCommand(
       changedBy: input.changedBy,
     }),
   );
+  // Maintain block ids + rebase open comment anchors onto this new version,
+  // in the same transaction (no-op unless the document has open threads).
+  await maintainAnchorsOnSave(ctx, {
+    slug: input.slug,
+    docVersion,
+    markdown: input.markdown,
+    head,
+  });
   const change = documentChange({
     existed: head !== undefined,
     slug: input.slug,

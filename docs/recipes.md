@@ -2,7 +2,7 @@
 title: Recipes & best practices
 description: Patterns that make Corpus pay off — designing collections agents actually follow, keeping docs agent-readable, and wiring it into your workflow.
 sidebar:
-  order: 9
+  order: 10
 ---
 
 Corpus is simple on purpose. The leverage is in _how_ you structure

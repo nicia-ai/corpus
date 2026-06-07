@@ -1,11 +1,21 @@
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
 import { ProseDiff } from "@/components/diff/Diff";
 import { Markdown } from "@/components/markdown/Markdown";
+import { Button } from "@/components/ui/Button";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { AbsoluteTime } from "@/components/ui/DateTime";
 import { Segmented } from "@/components/ui/Segmented";
+import { showToast } from "@/components/ui/Toast";
+import type { ProjectId } from "@/ids";
 import { lineDiff } from "@/lib/diff";
-import type { DocSnapshot, DocVersionEntry } from "@/lib/server/documents";
+import { useSubmit } from "@/lib/forms";
+import {
+  type DocSnapshot,
+  type DocVersionEntry,
+  saveDocument,
+} from "@/lib/server/documents";
 
 // Author for display: the control-plane-resolved name when present, the
 // "import" sentinel as a readable label, otherwise nothing (a raw user id
@@ -16,20 +26,25 @@ function authorOf(e: Readonly<DocVersionEntry>): string | undefined {
   return undefined;
 }
 
-// Read-only version history: the chain newest-first, each version viewable
-// rendered and diffable against the current head (the common "what changed
-// since vN" question). Restore is intentionally out of scope here. This is
-// the body of the document page's "Versions" tab — the page owns the title,
-// the version chip and the tab bar, so this renders content only.
+// Version history: the chain newest-first, each version viewable rendered
+// and diffable against the current head. Restoring an older version writes
+// its content as a NEW version (non-destructive; the chain — and comment
+// anchors, via the save path — carry forward). This is the body of the
+// document page's "Versions" tab — the page owns the title, the version
+// chip and the tab bar, so this renders content only.
 export function DocumentHistory({
   current,
   entries,
+  projectId,
 }: Readonly<{
   current: DocSnapshot;
   entries: readonly DocVersionEntry[];
+  projectId: ProjectId;
 }>): React.ReactElement {
   const [picked, setPicked] = useState<number>();
   const [view, setView] = useState<"changes" | "rendered">("changes");
+  const router = useRouter();
+  const navigate = useNavigate();
 
   const active =
     entries.find((e) => e.docVersion === picked) ?? entries[1] ?? entries[0];
@@ -37,6 +52,39 @@ export function DocumentHistory({
   const diff = useMemo(
     () => (active ? lineDiff(active.markdown, current.markdown) : []),
     [active, current.markdown],
+  );
+
+  const { pending: restoring, run: restore } = useSubmit(
+    async (entry: DocVersionEntry) => {
+      const ok = await confirmDialog({
+        title: `Restore v${entry.docVersion.toString()}?`,
+        body: "This creates a new version with that version's content. Nothing is lost — the current version stays in history.",
+        confirmLabel: "Restore",
+      });
+      if (!ok) return;
+      const r = await saveDocument({
+        data: {
+          projectId,
+          slug: current.slug,
+          title: current.title,
+          markdown: entry.markdown,
+          clientVersion: current.docVersion,
+        },
+      });
+      if (!r.ok) {
+        throw new Error(
+          "conflict" in r
+            ? "The document changed — reopen history and try again."
+            : "Restore failed — please retry.",
+        );
+      }
+      showToast(`Restored v${entry.docVersion.toString()}`);
+      await router.invalidate();
+      await navigate({
+        to: "/p/$projectId/documents/$slug",
+        params: { projectId, slug: current.slug },
+      });
+    },
   );
 
   if (active === undefined) {
@@ -117,15 +165,24 @@ export function DocumentHistory({
             )}
           </div>
           {!isCurrent && active.retained && (
-            <Segmented
-              ariaLabel="History view"
-              value={view}
-              onChange={setView}
-              options={[
-                { value: "changes", label: "Changes" },
-                { value: "rendered", label: "Rendered" },
-              ]}
-            />
+            <div className="flex items-center gap-3">
+              <Segmented
+                ariaLabel="History view"
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "changes", label: "Changes" },
+                  { value: "rendered", label: "Rendered" },
+                ]}
+              />
+              <Button
+                variant="secondary"
+                disabled={restoring}
+                onClick={() => void restore(active)}
+              >
+                Restore this version
+              </Button>
+            </div>
           )}
         </div>
 

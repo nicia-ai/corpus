@@ -3,7 +3,7 @@ import {
   oauthProviderOpenIdConfigMetadata,
 } from "@better-auth/oauth-provider";
 import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resource-client";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import {
   createLocalJWKSet,
   errors,
@@ -11,6 +11,7 @@ import {
   type JSONWebKeySet,
   type JWTPayload,
 } from "jose";
+import { z } from "zod";
 
 import { getAuth } from "./auth";
 import { API_KEY_PREFIX } from "./control/api-keys";
@@ -20,11 +21,18 @@ import {
 } from "./control/connection-resolution";
 import { connectControlDb } from "./control/db";
 import { connectionClaimKey } from "./control/oauth-selection";
+import { resolveProjectById } from "./control/project-resolution";
 import type { ConnectionRef } from "./control/refs";
 import { storeFor } from "./control/store-for";
-import { callerRefFromApiKey, callerRefFromOAuth } from "./ids";
+import {
+  asDocumentSlug,
+  asProjectId,
+  callerRefFromApiKey,
+  callerRefFromOAuth,
+} from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
 import { scopedExecutor } from "./scoped-executor";
+import { compact } from "./util";
 
 // Shared MCP responder: parse the JSON-RPC envelope (the trust
 // boundary), preflight the bound Collection, and dispatch through the
@@ -59,9 +67,8 @@ async function respondMcp(
       { status: 400 },
     );
   }
-  const inner = storeFor(env, ref.projectId);
-  const members = await inner.collectionMembers(ref.collectionSlug);
-  if (members === undefined) {
+  const scope = await resolveScope(env, ref);
+  if (scope === undefined) {
     // The Connection's bound Collection is gone — fail closed at the
     // transport. Never "therefore the whole Project," never a soft
     // JSON-RPC not-found that an agent could read as an empty Collection.
@@ -70,6 +77,7 @@ async function respondMcp(
       { status: 403 },
     );
   }
+  const { store: inner, members } = scope;
   // Build the per-request CallerRef from the resolved Connection. The
   // api_key path populates `apiKeyId`; the OAuth path leaves it
   // undefined and the namespace falls to `oauth:<userId>`. Either way
@@ -91,6 +99,23 @@ async function respondMcp(
 function bearer(authorization: string | undefined): string | undefined {
   const m = /^Bearer\s+(.+)$/iu.exec(authorization ?? "");
   return m?.[1]?.trim();
+}
+
+// The one place a Connection's bound-Collection scope is resolved: its
+// Project store plus the resolved member-slug set. `undefined` = the
+// bound Collection is gone, and every caller fails closed on that (never
+// widening to the whole Project). Sharing it keeps the /mcp and REST
+// surfaces from drifting on the tenant/scope boundary.
+async function resolveScope(
+  env: Env,
+  ref: ConnectionRef,
+): Promise<
+  | Readonly<{ store: ReturnType<typeof storeFor>; members: readonly string[] }>
+  | undefined
+> {
+  const store = storeFor(env, ref.projectId);
+  const members = await store.collectionMembers(ref.collectionSlug);
+  return members === undefined ? undefined : { store, members };
 }
 
 // RFC 9728 Protected Resource Metadata. The MCP spec REQUIRES it + a
@@ -162,11 +187,149 @@ async function verifyOAuthJwt(
   }
 }
 
+const DocPushBody = z.object({
+  markdown: z.string(),
+  clientVersion: z.number().int().nonnegative(),
+  title: z.string().optional(),
+});
+
+type ApiKeyScope = Readonly<{
+  store: ReturnType<typeof storeFor>;
+  members: ReadonlySet<string>;
+  ref: ConnectionRef;
+}>;
+
 // Non-UI surface only. The web app's data flows through TanStack Start
 // server functions (src/lib/server/*.ts); Hono carries auth, MCP, and
 // OAuth discovery — the external/agent contract.
+//
+// Resolve an api-key bearer to its Project store AND the bound
+// Collection's resolved member-slug set — the REST tenant *and* scope
+// boundary in one step. An api-key is a Connection credential bound to a
+// single Collection, so the CLI/automation surface must see exactly that
+// Collection's documents, never the whole Project: the bearer's authority
+// is the Collection, not its tenant. Shares `resolveScope` with the /mcp
+// preflight and fails closed (403) when the bound Collection is gone —
+// never widening to "therefore the whole Project." Returns the 401/403
+// Response itself on failure so each route early-returns it unchanged.
+async function apiKeyScope(
+  c: Context<{ Bindings: Env }>,
+): Promise<ApiKeyScope | Response> {
+  const token = bearer(c.req.header("authorization"));
+  const ref = token?.startsWith(API_KEY_PREFIX)
+    ? await resolveApiKey(connectControlDb(c.env.DB), token)
+    : undefined;
+  if (ref === undefined) return c.json({ error: "unauthorized" }, 401);
+  const scope = await resolveScope(c.env, ref);
+  if (scope === undefined) {
+    return c.json({ error: "connection's collection unavailable" }, 403);
+  }
+  return { store: scope.store, members: new Set(scope.members), ref };
+}
+
 export const api = new Hono<{ Bindings: Env }>()
   .get("/healthz", (c) => c.json({ ok: true }))
+  // Real-time collaboration channel. Authenticate the upgrade (web session →
+  // project member) HERE, then forward it to the per-Project DO, which owns
+  // presence + change-nudge fan-out. The DO never sees an unauthenticated
+  // socket; identity is passed as query params the Worker controls.
+  .get("/api/ws/:projectId", async (c) => {
+    if (c.req.raw.headers.get("upgrade") !== "websocket") {
+      return c.text("expected a websocket upgrade", 426);
+    }
+    const projectId = c.req.param("projectId");
+    const getSession = () =>
+      getAuth(c.env).api.getSession({ headers: c.req.raw.headers });
+    const session = await getSession();
+    if (!session) return c.text("unauthorized", 401);
+    const ref = await resolveProjectById(
+      connectControlDb(c.env.DB),
+      getSession,
+      c.req.raw.headers,
+      projectId,
+    );
+    if (ref === undefined) return c.text("forbidden", 403);
+
+    const url = new URL(c.req.url);
+    url.searchParams.set("uid", session.user.id);
+    url.searchParams.set("name", session.user.name);
+    return storeFor(c.env, asProjectId(projectId)).fetch(
+      new Request(url, c.req.raw),
+    );
+  })
+  // — REST surface for the CLI / automation (api-key bearer) ——————————
+  // Every route scopes through the api-key's bound Collection: an agent
+  // credential never reads or writes a document outside its Collection.
+  // List filters to members; a non-member read 404s (no existence leak).
+  // Writes: a member is updated; a wholly-new slug is CREATED into the
+  // bound Collection; a slug that already exists outside it 403s (that is
+  // another scope's document — the key may grow its own Collection, never
+  // reach into one it doesn't already contain).
+  .get("/api/v1/docs", async (c) => {
+    const scope = await apiKeyScope(c);
+    if (scope instanceof Response) return scope;
+    const docs = await scope.store.listDocuments();
+    return c.json({
+      documents: docs
+        .filter((d) => scope.members.has(d.slug))
+        .map((d) => ({
+          slug: d.slug,
+          title: d.title,
+          docVersion: d.docVersion,
+        })),
+    });
+  })
+  .get("/api/v1/docs/:slug", async (c) => {
+    const scope = await apiKeyScope(c);
+    if (scope instanceof Response) return scope;
+    const slug = c.req.param("slug");
+    if (!scope.members.has(slug)) return c.json({ error: "not found" }, 404);
+    const d = await scope.store.getDocument(asDocumentSlug(slug));
+    if (d === undefined) return c.json({ error: "not found" }, 404);
+    return c.json({
+      slug: d.slug,
+      title: d.title,
+      filename: d.filename,
+      markdown: d.markdown,
+      docVersion: d.docVersion,
+    });
+  })
+  .put("/api/v1/docs/:slug", async (c) => {
+    const scope = await apiKeyScope(c);
+    if (scope instanceof Response) return scope;
+    const slug = c.req.param("slug");
+    const parsed = DocPushBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "invalid body" }, 400);
+    const save = compact({
+      slug: asDocumentSlug(slug),
+      markdown: parsed.data.markdown,
+      title: parsed.data.title,
+      clientVersion: parsed.data.clientVersion,
+      changedBy: scope.ref.userId,
+    });
+    // A member is plainly updated; a non-member slug is created INTO the
+    // bound collection (atomic save+attach, appended after the current
+    // members). `members` is a snapshot, so the create path re-decides
+    // inside its transaction: a slug that a racing create already landed
+    // in this collection yields a retryable 409 (clientVersion decides),
+    // and only a slug existing OUTSIDE the collection is `forbidden`.
+    const r = scope.members.has(slug)
+      ? await scope.store.saveDocument(save)
+      : await scope.store.createDocumentInCollection(
+          save,
+          scope.ref.collectionSlug,
+          scope.members.size,
+        );
+    if (r.ok) return c.json({ ok: true, docVersion: r.docVersion });
+    if ("forbidden" in r) return c.json({ error: "forbidden" }, 403);
+    if ("conflict" in r) {
+      return c.json(
+        { ok: false, conflict: true, currentVersion: r.currentVersion },
+        409,
+      );
+    }
+    return c.json({ ok: false, rolledBack: true }, 409);
+  })
   .get("/.well-known/oauth-authorization-server", (c) =>
     oauthProviderAuthServerMetadata(getAuth(c.env))(c.req.raw),
   )

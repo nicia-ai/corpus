@@ -35,7 +35,7 @@ function VersionsTab(): React.ReactElement | null {
         version={doc.docVersion}
         active="versions"
       />
-      <DocumentHistory current={doc} entries={history} />
+      <DocumentHistory current={doc} entries={history} projectId={projectId} />
     </div>
   );
 }

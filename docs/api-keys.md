@@ -47,6 +47,10 @@ Authorization: Bearer <YOUR_API_KEY>
 The token starts with `cck_` so the MCP transport can tell it apart from
 an OAuth JWT before doing any database work.
 
+The same key also authenticates the [CLI](./cli.md), which can **edit**
+the bound collection's documents from a terminal or CI — list, pull, and
+push markdown without a browser.
+
 ## Revoking a key
 
 On the Connection's **API keys** list, click **Revoke** on the row and

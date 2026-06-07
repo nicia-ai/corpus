@@ -34,7 +34,14 @@ const startHandler = createStartHandler(defaultStreamHandler);
 
 // Non-UI Hono surface: Better Auth, MCP, OAuth discovery, healthcheck.
 // Everything else (incl. TanStack Start server functions) is the app.
-const API_PREFIXES = ["/api/auth/", "/mcp", "/.well-known/", "/healthz"];
+const API_PREFIXES = [
+  "/api/auth/",
+  "/api/ws/",
+  "/api/v1/",
+  "/mcp",
+  "/.well-known/",
+  "/healthz",
+];
 
 export type ServerRequestContextExtras = Readonly<
   Partial<Pick<ServerRequestContext, "entitlements">>

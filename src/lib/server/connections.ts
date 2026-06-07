@@ -53,7 +53,7 @@ export type ConnectCollectionResult = Readonly<{
 
 export const connectThisCollection = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ collectionSlug: z.string().trim().min(1) }))
+  .validator(z.object({ collectionSlug: z.string().trim().min(1) }))
   .handler(async ({ data, context }): Promise<ConnectCollectionResult> => {
     const c = srv(context);
     const ref = requireProjectOwner(c.project, CONNECTION_ADMIN_MSG);
@@ -76,7 +76,7 @@ export const connectThisCollection = createServerFn({ method: "POST" })
 // `renameConnection` in `src/control/connections.ts`.
 export const renameConnection = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       connectionId: z.string().min(1),
       name: z.string().trim().min(1).max(100),
@@ -95,7 +95,7 @@ export const renameConnection = createServerFn({ method: "POST" })
 
 export const deleteConnection = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ connectionId: z.string().min(1) }))
+  .validator(z.object({ connectionId: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<{ ok: true }> => {
     const c = srv(context);
     const ref = requireProjectOwner(c.project, CONNECTION_ADMIN_MSG);
@@ -165,7 +165,7 @@ export type SelectionResult = Readonly<
 
 export const commitConnectionSelection = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       connectionId: z.string().min(1),
       oauthQuery: z.string(),

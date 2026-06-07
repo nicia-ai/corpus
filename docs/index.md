@@ -67,4 +67,5 @@ The same person, wearing two hats:
 - Writing docs? See [Documents](./documents.md) and
   [Collections](./collections.md).
 - Wiring up an agent? See [Connect your agent](./connect-your-agent.md).
+- Editing from a terminal or CI? See the [CLI](./cli.md).
 - Working as a team? See [Your team](./team.md).

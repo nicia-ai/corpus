@@ -56,7 +56,7 @@ export const authMiddleware = createMiddleware({ type: "function" }).server(
 // fn's inputValidator runs. Loose validates `projectId` and passes the
 // rest through.
 export const projectMiddleware = createMiddleware({ type: "function" })
-  .inputValidator(z.looseObject({ projectId: z.string().min(1) }))
+  .validator(z.looseObject({ projectId: z.string().min(1) }))
   .server(async ({ next, context, data }) => {
     const c = assertServerContext(context);
     const userId = c.authSession?.user.id;

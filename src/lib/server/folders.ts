@@ -96,7 +96,7 @@ export const getFolderList = createServerFn({ method: "GET" })
 
 export const createFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ name: folderNameInput, parentSlug: parentInput }))
+  .validator(z.object({ name: folderNameInput, parentSlug: parentInput }))
   .handler(async ({ data, context }): Promise<CreateFolderResult> => {
     const r = await storeOf(srv(context)).createFolder(
       data.name,
@@ -107,7 +107,7 @@ export const createFolder = createServerFn({ method: "POST" })
 
 export const renameFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: slugInput, name: folderNameInput }))
+  .validator(z.object({ slug: slugInput, name: folderNameInput }))
   .handler(async ({ data, context }): Promise<RenameFolderResult> => {
     const c = srv(context);
     return storeOf(c).renameFolder(
@@ -119,7 +119,7 @@ export const renameFolder = createServerFn({ method: "POST" })
 
 export const moveFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: slugInput, newParentSlug: parentInput }))
+  .validator(z.object({ slug: slugInput, newParentSlug: parentInput }))
   .handler(async ({ data, context }): Promise<MoveFolderResult> => {
     const c = srv(context);
     return storeOf(c).moveFolder(
@@ -131,7 +131,7 @@ export const moveFolder = createServerFn({ method: "POST" })
 
 export const deleteFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(z.object({ slug: slugInput }))
+  .validator(z.object({ slug: slugInput }))
   .handler(async ({ data, context }): Promise<DeleteFolderResult> => {
     const c = srv(context);
     return storeOf(c).deleteFolder(asFolderSlug(data.slug), changedBy(c));
@@ -140,7 +140,7 @@ export const deleteFolder = createServerFn({ method: "POST" })
 // Place (or re-place) a document in a folder. `folderSlug: null` = root.
 export const placeDocumentInFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({ documentSlug: slugInput, folderSlug: slugInput.nullable() }),
   )
   .handler(async ({ data, context }): Promise<PlaceDocumentResult> => {
@@ -161,7 +161,7 @@ export type MoveDocumentsResult = Readonly<{
 // picker's alternative to dragging when there are many files.
 export const moveDocumentsToFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       slugs: z.array(slugInput).min(1),
       folderSlug: slugInput.nullable(),
@@ -184,7 +184,7 @@ export const moveDocumentsToFolder = createServerFn({ method: "POST" })
 // explicitly, so the default never diverges by entry point.
 export const attachFolderToCollection = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       collectionSlug: slugInput,
       folderSlug: slugInput,
@@ -207,7 +207,7 @@ export const attachFolderToCollection = createServerFn({ method: "POST" })
 // for documents) — a position-free update so the toggle never reorders.
 export const setFolderLinkDelivery = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       collectionSlug: slugInput,
       folderSlug: slugInput,
@@ -226,9 +226,7 @@ export const setFolderLinkDelivery = createServerFn({ method: "POST" })
 
 export const detachFolderFromCollection = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
-    z.object({ collectionSlug: slugInput, folderSlug: slugInput }),
-  )
+  .validator(z.object({ collectionSlug: slugInput, folderSlug: slugInput }))
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
     return storeOf(c).detachFolderFromCollection(
@@ -243,7 +241,7 @@ export const detachFolderFromCollection = createServerFn({ method: "POST" })
 // idempotent on path. Returns a created/updated/failed summary.
 export const importDocuments = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       entries: z.array(importEntryInput).min(1).max(MAX_UPLOAD_ENTRIES),
     }),
@@ -260,7 +258,7 @@ export const importDocuments = createServerFn({ method: "POST" })
 
 export const importDocumentsAndLink = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .inputValidator(
+  .validator(
     z.object({
       entries: z.array(importEntryInput).min(1).max(MAX_UPLOAD_ENTRIES),
       link: importLinkInput,

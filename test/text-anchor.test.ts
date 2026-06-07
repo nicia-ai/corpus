@@ -1,0 +1,146 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  anchorSpansInText,
+  type AnchorBlock,
+  exactSpans,
+  resolveAnchorInText,
+} from "../src/lib/text-anchor";
+
+// Adjacent block elements concatenate in the rendered text with no
+// separator, so the flat text of [A, B] is `A.text + B.text`.
+const block = (index: number, text: string, id?: string): AnchorBlock =>
+  id === undefined
+    ? { index, text, sourceStart: 0, sourceEnd: text.length }
+    : { id, index, text, sourceStart: 0, sourceEnd: text.length };
+
+describe("resolveAnchorInText (selection → block + offset)", () => {
+  it("anchors to the block the selection is in, even when text repeats", () => {
+    // Two identical paragraphs; the selection lands in the SECOND.
+    const blocks = [block(0, "the cat sat"), block(1, "the cat sat")];
+    const full = "the cat satthe cat sat";
+    // "cat" of the second block: offset 11 + 4 = 15..18.
+    expect(resolveAnchorInText(full, 15, 18, blocks)).toEqual({
+      blockIndex: 1,
+      start: 4,
+      end: 7,
+      exact: "cat",
+      sourceStart: 0,
+      sourceEnd: 11,
+    });
+  });
+
+  it("anchors to the first block when the selection is in it", () => {
+    const blocks = [block(0, "the cat sat"), block(1, "the cat sat")];
+    const full = "the cat satthe cat sat";
+    expect(resolveAnchorInText(full, 4, 7, blocks)).toMatchObject({
+      blockIndex: 0,
+      start: 4,
+      end: 7,
+      exact: "cat",
+    });
+  });
+
+  it("picks the selected occurrence of a phrase repeated WITHIN a block", () => {
+    const blocks = [block(0, "na na na batman")];
+    const full = "na na na batman";
+    // The third "na" is at offset 6..8 — not the first that indexOf finds.
+    expect(resolveAnchorInText(full, 6, 8, blocks)).toMatchObject({
+      blockIndex: 0,
+      start: 6,
+      end: 8,
+      exact: "na",
+    });
+  });
+
+  it("returns undefined for an empty selection", () => {
+    expect(resolveAnchorInText("abc", 1, 1, [block(0, "abc")])).toBeUndefined();
+  });
+
+  it("returns undefined for a selection crossing block boundaries", () => {
+    const blocks = [block(0, "first block"), block(1, "second block")];
+    const full = "first blocksecond block";
+    expect(resolveAnchorInText(full, 6, 14, blocks)).toBeUndefined();
+  });
+
+  it("skips a block whose text isn't present verbatim, never misattributing", () => {
+    // A table row's block text carries `|` separators the rendered cells
+    // drop, so it isn't found in `full` — it must be skipped, not matched.
+    const blocks = [block(0, "a | b"), block(1, "tail para")];
+    const full = "abtail para";
+    expect(resolveAnchorInText(full, 2, 6, blocks)).toMatchObject({
+      blockIndex: 1,
+      exact: "tail",
+    });
+    // A selection over the unaligned row resolves to nothing, not block 0.
+    expect(resolveAnchorInText(full, 0, 2, blocks)).toBeUndefined();
+  });
+});
+
+describe("exactSpans (quote → highlighted occurrence)", () => {
+  it("highlights the occurrence matching the quote's context, not the first", () => {
+    const full = "see foo here and foo there";
+    // The SECOND foo, bracketed by its real neighbours.
+    expect(
+      exactSpans(full, { prefix: "and ", exact: "foo", suffix: " there" }),
+    ).toEqual([[17, 20]]);
+  });
+
+  it("returns no span for an empty quote", () => {
+    expect(
+      exactSpans("anything", { prefix: "", exact: "", suffix: "" }),
+    ).toEqual([]);
+  });
+
+  it("returns no span when the bracketed quote drifted out of the text", () => {
+    expect(
+      exactSpans("the text changed", {
+        prefix: "old ",
+        exact: "phrase",
+        suffix: " gone",
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns every occurrence that shares identical quote-only context", () => {
+    const full = "x ab y x ab y";
+    expect(
+      exactSpans(full, { prefix: "x ", exact: "ab", suffix: " y" }),
+    ).toEqual([
+      [2, 4],
+      [9, 11],
+    ]);
+  });
+});
+
+describe("anchorSpansInText (stored anchor → highlighted occurrence)", () => {
+  it("uses the stable block id to disambiguate identical quote context", () => {
+    const blocks = [block(0, "x ab y", "a"), block(1, "x ab y", "b")];
+    const full = "x ab yx ab y";
+    expect(
+      anchorSpansInText(full, blocks, [
+        {
+          blockId: "b",
+          start: 2,
+          end: 4,
+          quote: { prefix: "x ", exact: "ab", suffix: " y" },
+        },
+      ]),
+    ).toEqual([[8, 10]]);
+  });
+
+  it("falls back to quote context when the block id is unavailable", () => {
+    const blocks = [block(0, "see foo here"), block(1, "and foo there")];
+    const full = "see foo hereand foo there";
+    expect(
+      anchorSpansInText(full, blocks, [
+        {
+          blockId: "missing",
+          start: 4,
+          end: 7,
+          quote: { prefix: "and ", exact: "foo", suffix: " there" },
+        },
+      ]),
+    ).toEqual([[16, 19]]);
+  });
+});

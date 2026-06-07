@@ -2,7 +2,7 @@
 title: Your team
 description: Invite teammates into your organization so everyone shares one canonical collection — roles, the invite-link flow, and managing members.
 sidebar:
-  order: 7
+  order: 8
 ---
 
 Everyone in your organization shares its canonical collection. Inviting
