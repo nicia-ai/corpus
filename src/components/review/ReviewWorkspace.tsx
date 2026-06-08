@@ -1,8 +1,11 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Markdown } from "@/components/markdown/Markdown";
-import { ReviewRail } from "@/components/review/ReviewRail";
+import {
+  ReviewRail,
+  type ReviewRailLayout,
+} from "@/components/review/ReviewRail";
 import { Button } from "@/components/ui/Button";
 import { focusableIn } from "@/components/ui/dialog-focus";
 import { Card } from "@/components/ui/Surface";
@@ -12,7 +15,9 @@ import { useSubmit } from "@/lib/forms";
 import {
   applyReviewHighlights,
   clearHighlights,
+  measureAnchorTops,
   resolveSelectionAnchor,
+  type AnchorPositionTarget,
 } from "@/lib/highlight";
 import type { ReviewModel } from "@/lib/review-items";
 import {
@@ -35,6 +40,11 @@ type Pending = Readonly<{
 }>;
 
 type Mode = "menu" | "comment" | "suggest";
+
+const EMPTY_REVIEW_LAYOUT: ReviewRailLayout = {
+  itemTops: {},
+  documentHeight: 0,
+};
 
 export function ReviewWorkspace({
   projectId,
@@ -70,6 +80,13 @@ export function ReviewWorkspace({
   const mobileDialogRef = useRef<HTMLDivElement>(null);
   const mobileCloseRef = useRef<HTMLButtonElement>(null);
   const restoreMobileFocusRef = useRef<HTMLElement | null>(null);
+  const [reviewLayout, setReviewLayout] =
+    useState<ReviewRailLayout>(EMPTY_REVIEW_LAYOUT);
+  const updateReviewLayout = useCallback((next: ReviewRailLayout): void => {
+    setReviewLayout((current) =>
+      sameReviewLayout(current, next) ? current : next,
+    );
+  }, []);
 
   useEffect(() => {
     if (!mobileOpen) return undefined;
@@ -105,7 +122,20 @@ export function ReviewWorkspace({
     };
   }, [mobileOpen, onMobileOpenChange]);
 
-  const rail = (
+  const desktopRail = (
+    <ReviewRail
+      projectId={projectId}
+      items={model.items}
+      commentNames={comments.names}
+      suggestionNames={suggestions.names}
+      baseMarkdown={markdown}
+      presence={presence}
+      layout={reviewLayout}
+      onChange={onChange}
+    />
+  );
+
+  const mobileRail = (
     <ReviewRail
       projectId={projectId}
       items={model.items}
@@ -122,8 +152,9 @@ export function ReviewWorkspace({
       <div
         className={cn(
           "min-w-0",
-          showReview &&
-            "grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]",
+          showReview
+            ? "grid items-start gap-6 lg:grid-cols-[minmax(0,54rem)_20rem] xl:gap-8"
+            : "mx-auto max-w-[54rem]",
         )}
       >
         <AnnotatableMarkdown
@@ -134,16 +165,11 @@ export function ReviewWorkspace({
           blocks={blocks}
           comments={comments}
           suggestionMarks={model.inlineSuggestionMarks}
+          onReviewLayoutChange={updateReviewLayout}
           onChange={onChange}
           onSuggest={onSuggest}
         />
-        {showReview && (
-          <div className="hidden lg:block">
-            <div className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-auto pr-1">
-              {rail}
-            </div>
-          </div>
-        )}
+        {showReview && <div className="hidden lg:block">{desktopRail}</div>}
       </div>
       {mobileOpen && showReview && (
         <div className="fixed inset-0 z-40 lg:hidden">
@@ -174,12 +200,45 @@ export function ReviewWorkspace({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            {rail}
+            {mobileRail}
           </div>
         </div>
       )}
     </section>
   );
+}
+
+function reviewAnchorTargets(
+  threads: CommentsResult["threads"],
+  suggestionMarks: ReviewModel["inlineSuggestionMarks"],
+): readonly AnchorPositionTarget[] {
+  const targets: AnchorPositionTarget[] = threads.map((thread) => ({
+    id: `comment:${thread.id}`,
+    anchor: {
+      blockId: thread.anchorBlockId,
+      start: thread.anchorStart,
+      end: thread.anchorEnd,
+      quote: thread.quote,
+    },
+  }));
+  const seenSuggestions = new Set<number>();
+  for (const mark of suggestionMarks) {
+    if (seenSuggestions.has(mark.suggestionId)) continue;
+    seenSuggestions.add(mark.suggestionId);
+    targets.push({
+      id: `suggestion:${mark.suggestionId}`,
+      anchor: mark.anchor,
+    });
+  }
+  return targets;
+}
+
+function sameReviewLayout(a: ReviewRailLayout, b: ReviewRailLayout): boolean {
+  if (a.documentHeight !== b.documentHeight) return false;
+  const aKeys = Object.keys(a.itemTops);
+  const bKeys = Object.keys(b.itemTops);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => a.itemTops[key] === b.itemTops[key]);
 }
 
 function AnnotatableMarkdown({
@@ -190,6 +249,7 @@ function AnnotatableMarkdown({
   blocks,
   comments,
   suggestionMarks,
+  onReviewLayoutChange,
   onChange,
   onSuggest,
 }: Readonly<{
@@ -200,6 +260,7 @@ function AnnotatableMarkdown({
   blocks: readonly BlockView[];
   comments: CommentsResult;
   suggestionMarks: ReviewModel["inlineSuggestionMarks"];
+  onReviewLayoutChange: (layout: ReviewRailLayout) => void;
   onChange: () => void;
   onSuggest: (proposedMarkdown: string) => Promise<string | undefined>;
 }>): React.ReactElement {
@@ -230,7 +291,21 @@ function AnnotatableMarkdown({
 
   useEffect(() => {
     const prose = proseRef.current;
+    const frame = containerRef.current;
     if (prose === null) return undefined;
+    const targets = reviewAnchorTargets(comments.threads, suggestionMarks);
+    const measure = (): void => {
+      if (frame === null) return;
+      onReviewLayoutChange({
+        itemTops: measureAnchorTops({
+          container: prose,
+          frame,
+          targets,
+          blocks,
+        }),
+        documentHeight: Math.ceil(frame.scrollHeight),
+      });
+    };
     applyReviewHighlights({
       container: prose,
       comments: comments.threads
@@ -244,8 +319,35 @@ function AnnotatableMarkdown({
       suggestions: suggestionMarks,
       blocks,
     });
-    return () => clearHighlights();
-  }, [blocks, comments.threads, markdown, suggestionMarks]);
+    measure();
+    let frameId: number | undefined;
+    const scheduleMeasure = (): void => {
+      if (frameId !== undefined) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        frameId = undefined;
+        measure();
+      });
+    };
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(scheduleMeasure);
+    observer?.observe(prose);
+    if (frame !== null) observer?.observe(frame);
+    window.addEventListener("resize", scheduleMeasure);
+    return () => {
+      clearHighlights();
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      if (frameId !== undefined) cancelAnimationFrame(frameId);
+    };
+  }, [
+    blocks,
+    comments.threads,
+    markdown,
+    onReviewLayoutChange,
+    suggestionMarks,
+  ]);
 
   useEffect(
     () => () => {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildReviewModel,
   type InlineSuggestionMark,
+  type ReviewItem,
 } from "../src/lib/review-items";
 import type { CommentThreadView } from "../src/lib/server/comments";
 import type { SuggestionView } from "../src/lib/server/suggestions";
@@ -24,9 +25,10 @@ const comment = (
   id: number,
   blockId: string,
   start: number,
+  status: CommentThreadView["status"] = "open",
 ): CommentThreadView => ({
   id,
-  status: "open",
+  status,
   anchorBlockId: blockId,
   anchorStart: start,
   anchorEnd: start + 4,
@@ -80,6 +82,14 @@ const markIds = (marks: readonly InlineSuggestionMark[]): readonly string[] =>
     (m) => `${m.op}:${m.anchor.blockId}:${m.anchor.start}:${m.anchor.end}`,
   );
 
+function onlyComment(
+  item: ReviewItem | undefined,
+): Extract<ReviewItem, { kind: "comment" }> {
+  expect(item?.kind).toBe("comment");
+  if (item?.kind !== "comment") throw new Error("expected comment");
+  return item;
+}
+
 describe("buildReviewModel", () => {
   it("interleaves comments and suggestions by document source position", () => {
     const model = buildReviewModel({
@@ -90,6 +100,68 @@ describe("buildReviewModel", () => {
     });
 
     expect(model.items.map((i) => i.id)).toEqual(["suggestion:2", "comment:1"]);
+  });
+
+  it("marks resolved comment anchors whose text is still present", () => {
+    const model = buildReviewModel({
+      blocks,
+      threads: [comment(1, "b1", 0, "resolved")],
+      suggestions: [],
+      docVersion: 1,
+    });
+
+    const item = onlyComment(model.items[0]);
+    expect(item.anchorEvidence).toEqual({
+      status: "present",
+      original: "beta",
+    });
+  });
+
+  it("marks resolved comment anchors whose text changed at the anchor", () => {
+    const model = buildReviewModel({
+      blocks: [
+        {
+          id: "b1",
+          index: 0,
+          text: "zeta middle",
+          sourceStart: 0,
+          sourceEnd: 11,
+        },
+      ],
+      threads: [comment(1, "b1", 0, "resolved")],
+      suggestions: [],
+      docVersion: 1,
+    });
+
+    const item = onlyComment(model.items[0]);
+    expect(item.anchorEvidence).toEqual({
+      status: "changed",
+      original: "beta",
+      current: "zeta middle",
+    });
+  });
+
+  it("marks resolved comment anchors whose text was removed", () => {
+    const model = buildReviewModel({
+      blocks: [
+        {
+          id: "b0",
+          index: 0,
+          text: "alpha lead",
+          sourceStart: 0,
+          sourceEnd: 10,
+        },
+      ],
+      threads: [comment(1, "missing", 0, "resolved")],
+      suggestions: [],
+      docVersion: 1,
+    });
+
+    const item = onlyComment(model.items[0]);
+    expect(item.anchorEvidence).toEqual({
+      status: "removed",
+      original: "beta",
+    });
   });
 
   it("creates inline marks for current-version replace and delete hunks", () => {

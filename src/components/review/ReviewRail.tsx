@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/Button";
 import { cardClass } from "@/components/ui/Surface";
 import type { CallerChannel, ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
-import { lineDiff } from "@/lib/diff";
+import { lineDiff, type DiffLine } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
-import type { ReviewItem } from "@/lib/review-items";
+import type { CommentAnchorEvidence, ReviewItem } from "@/lib/review-items";
 import type { CommentStatus } from "@/lib/server/comments";
 import { addComment, resolveComment } from "@/lib/server/comments";
 import {
@@ -22,6 +22,11 @@ import type { PresenceUser } from "@/lib/use-collab";
 
 const REVIEW_CARD_CLASS = cardClass("space-y-3 px-4 py-3");
 
+export type ReviewRailLayout = Readonly<{
+  itemTops: Readonly<Record<string, number>>;
+  documentHeight: number;
+}>;
+
 export function ReviewRail({
   projectId,
   items,
@@ -29,6 +34,7 @@ export function ReviewRail({
   suggestionNames,
   baseMarkdown,
   presence,
+  layout,
   onChange,
 }: Readonly<{
   projectId: ProjectId;
@@ -37,45 +43,123 @@ export function ReviewRail({
   suggestionNames: Readonly<Record<string, string>>;
   baseMarkdown: string;
   presence: readonly PresenceUser[];
+  layout?: ReviewRailLayout;
   onChange: () => void;
 }>): React.ReactElement {
+  const positionedLayout =
+    layout !== undefined && layout.documentHeight > 0 ? layout : undefined;
+
   return (
     <aside aria-label="Document review" className="space-y-3">
-      <PresenceRow users={presence} />
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium tracking-wide text-slate-500 uppercase">
-          Review
-        </div>
-        <span className="text-sm text-slate-500 tabular-nums">
-          {items.length}
-        </span>
-      </div>
-      <div className="space-y-3">
-        {items.map((item) =>
-          item.kind === "comment" ? (
-            <CommentCard
-              key={item.id}
-              projectId={projectId}
-              item={item}
-              names={commentNames}
-              onChange={onChange}
-            />
-          ) : (
-            <SuggestionCard
-              key={item.id}
-              projectId={projectId}
-              item={item}
-              baseMarkdown={baseMarkdown}
-              author={
-                suggestionNames[item.suggestion.createdBy] ??
-                item.suggestion.createdBy
-              }
-              onChange={onChange}
-            />
-          ),
-        )}
-      </div>
+      {positionedLayout === undefined && (
+        <>
+          <PresenceRow users={presence} />
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium tracking-wide text-slate-500 uppercase">
+              Review
+            </div>
+            <span className="text-sm text-slate-500 tabular-nums">
+              {items.length}
+            </span>
+          </div>
+        </>
+      )}
+      <ReviewItems
+        projectId={projectId}
+        items={items}
+        commentNames={commentNames}
+        suggestionNames={suggestionNames}
+        baseMarkdown={baseMarkdown}
+        layout={positionedLayout}
+        onChange={onChange}
+      />
     </aside>
+  );
+}
+
+function ReviewItems({
+  projectId,
+  items,
+  commentNames,
+  suggestionNames,
+  baseMarkdown,
+  layout,
+  onChange,
+}: Readonly<{
+  projectId: ProjectId;
+  items: readonly ReviewItem[];
+  commentNames: Readonly<Record<string, string>>;
+  suggestionNames: Readonly<Record<string, string>>;
+  baseMarkdown: string;
+  layout: ReviewRailLayout | undefined;
+  onChange: () => void;
+}>): React.ReactElement {
+  function renderItem(item: ReviewItem): React.ReactElement {
+    return item.kind === "comment" ? (
+      <CommentCard
+        projectId={projectId}
+        item={item}
+        names={commentNames}
+        onChange={onChange}
+      />
+    ) : (
+      <SuggestionCard
+        projectId={projectId}
+        item={item}
+        baseMarkdown={baseMarkdown}
+        author={
+          suggestionNames[item.suggestion.createdBy] ??
+          item.suggestion.createdBy
+        }
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (layout === undefined) {
+    return (
+      <div className="space-y-3">
+        {items.map((item) => (
+          <div key={item.id}>{renderItem(item)}</div>
+        ))}
+      </div>
+    );
+  }
+
+  const positionedItems: { item: ReviewItem; top: number }[] = [];
+  const unpositionedItems: ReviewItem[] = [];
+  for (const item of items) {
+    const top = layout.itemTops[item.id];
+    if (top === undefined) {
+      unpositionedItems.push(item);
+    } else {
+      positionedItems.push({ item, top });
+    }
+  }
+
+  return (
+    <>
+      <div className="relative" style={{ minHeight: layout.documentHeight }}>
+        {positionedItems.map(({ item, top }) => {
+          return (
+            <div
+              key={item.id}
+              className="absolute right-0 left-0"
+              style={{ top }}
+            >
+              {renderItem(item)}
+            </div>
+          );
+        })}
+      </div>
+      {unpositionedItems.length > 0 && (
+        <div className="mt-3 space-y-3">
+          {unpositionedItems.map((item) => (
+            <div key={item.id}>{renderItem(item)}</div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -125,6 +209,7 @@ function CommentCard({
   onChange: () => void;
 }>): React.ReactElement {
   const [reply, setReply] = useState("");
+  const [showAnchorChange, setShowAnchorChange] = useState(false);
   const thread = item.thread;
   const who = (id: string): string => names[id] ?? id;
 
@@ -162,6 +247,13 @@ function CommentCard({
       <blockquote className="line-clamp-2 border-l-2 border-amber-200 pl-2 text-sm text-slate-500">
         {thread.quote.exact}
       </blockquote>
+      {thread.status === "resolved" && (
+        <ResolvedAnchorEvidence
+          evidence={item.anchorEvidence}
+          expanded={showAnchorChange}
+          onExpandedChange={setShowAnchorChange}
+        />
+      )}
       <ul className="space-y-1.5">
         {thread.comments.map((m) => (
           <li key={m.id} className="text-base [overflow-wrap:anywhere]">
@@ -196,6 +288,47 @@ function CommentCard({
         </form>
       )}
     </article>
+  );
+}
+
+function ResolvedAnchorEvidence({
+  evidence,
+  expanded,
+  onExpandedChange,
+}: Readonly<{
+  evidence: CommentAnchorEvidence;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+}>): React.ReactElement {
+  const changed = evidence.status !== "present";
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span
+          className={cn(
+            "font-medium",
+            changed ? "text-amber-700" : "text-slate-500",
+          )}
+        >
+          {ANCHOR_EVIDENCE_LABEL[evidence.status]}
+        </span>
+        {changed && (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => onExpandedChange(!expanded)}
+            className="font-medium text-slate-500 hover:text-slate-900"
+          >
+            {expanded ? "Hide change" : "Show change"}
+          </button>
+        )}
+      </div>
+      {changed && expanded && (
+        <div className="rounded-md border border-slate-200 px-3 py-2">
+          <ProseDiff lines={anchorEvidenceDiff(evidence)} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -327,10 +460,31 @@ const hunkOld = (h: SuggestionHunkView, base: string): string =>
 const hunkNew = (h: SuggestionHunkView): string =>
   h.op === "delete" ? "" : h.proposedText;
 
+function anchorEvidenceDiff(
+  evidence: CommentAnchorEvidence,
+): readonly DiffLine[] {
+  if (evidence.status === "present") return [];
+  if (evidence.status === "removed") {
+    return [{ tag: "removed", text: evidence.original }];
+  }
+  return [
+    { tag: "removed", text: evidence.original },
+    { tag: "added", text: evidence.current },
+  ];
+}
+
 const OP_LABEL: Readonly<Record<SuggestionHunkView["op"], string>> = {
   replace: "Edit",
   insert: "Add",
   delete: "Remove",
+};
+
+const ANCHOR_EVIDENCE_LABEL: Readonly<
+  Record<CommentAnchorEvidence["status"], string>
+> = {
+  present: "No change",
+  changed: "Changed",
+  removed: "Removed",
 };
 
 const COMMENT_STATUS_LABEL: Readonly<Record<CommentStatus, string>> = {

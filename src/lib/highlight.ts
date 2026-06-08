@@ -98,6 +98,11 @@ function buildIndex(container: HTMLElement): TextIndex {
 
 type Located = Readonly<{ node: Text; offset: number }>;
 
+export type AnchorPositionTarget = Readonly<{
+  id: string;
+  anchor: HighlightAnchor;
+}>;
+
 // The (text node, offset) for a position in the concatenated text — the
 // last node whose cumulative start is at or before `pos`.
 function locate(idx: TextIndex, pos: number): Located | undefined {
@@ -123,6 +128,31 @@ function rangeAt(
   range.setStart(a.node, a.offset);
   range.setEnd(b.node, b.offset);
   return range;
+}
+
+export function measureAnchorTops({
+  container,
+  frame,
+  targets,
+  blocks,
+}: Readonly<{
+  container: HTMLElement;
+  frame: HTMLElement;
+  targets: readonly AnchorPositionTarget[];
+  blocks: readonly AnchorBlock[];
+}>): Readonly<Record<string, number>> {
+  const idx = buildIndex(container);
+  const frameTop = frame.getBoundingClientRect().top;
+  const out: Record<string, number> = {};
+  for (const target of targets) {
+    const span = anchorSpansInText(idx.full, blocks, [target.anchor])[0];
+    if (span === undefined) continue;
+    const range = rangeAt(idx, span[0], span[1]);
+    const rect = range?.getClientRects()[0] ?? range?.getBoundingClientRect();
+    if (rect === undefined) continue;
+    out[target.id] = Math.max(0, Math.round(rect.top - frameTop));
+  }
+  return out;
 }
 
 // The character offset of a DOM position within `container`'s flat text —
