@@ -63,6 +63,38 @@ describe("resolveAnchorInText (selection → block + offset)", () => {
     expect(resolveAnchorInText(full, 6, 14, blocks)).toBeUndefined();
   });
 
+  it("clamps browser-added trailing whitespace from paragraph selection", () => {
+    const paragraph =
+      "A monthly comfort subscription. Each kit pairs one paperback novel\nships the first Tuesday.";
+    const blocks = [
+      block(0, "Marlow"),
+      block(1, paragraph),
+      block(2, "Who it's for"),
+    ];
+    const full = `Marlow\n${paragraph}\nWho it's for`;
+    const start = "Marlow\n".length;
+    const end = start + paragraph.length + 1;
+    expect(resolveAnchorInText(full, start, end, blocks)).toEqual({
+      blockIndex: 1,
+      start: 0,
+      end: paragraph.length,
+      exact: paragraph,
+      sourceStart: 0,
+      sourceEnd: paragraph.length,
+    });
+  });
+
+  it("clamps browser-added leading whitespace from paragraph selection", () => {
+    const blocks = [block(0, "first"), block(1, "second")];
+    const full = "first\nsecond";
+    expect(resolveAnchorInText(full, 5, full.length, blocks)).toMatchObject({
+      blockIndex: 1,
+      start: 0,
+      end: "second".length,
+      exact: "second",
+    });
+  });
+
   it("skips a block whose text isn't present verbatim, never misattributing", () => {
     // A table row's block text carries `|` separators the rendered cells
     // drop, so it isn't found in `full` — it must be skipped, not matched.

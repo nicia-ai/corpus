@@ -81,6 +81,13 @@ exists to deliver.
 - **Semantic (used sparingly, inline only):**
   - success `#15803d` warning `#b45309` error `#b91c1c` info `#2563eb`
   - toast surface `#334155` (slate-700) on white text
+- **Review semantics (document annotation only):**
+  - comment wash `#fef3c7` — amber highlight for human discussion
+  - suggestion replace wash `#dcfce7` — green accepted/additive proposal
+  - suggestion delete wash `#ffe4e6` + rose text `#9f1239` — removal proposal
+  - suggestion insert cue `#bbf7d0` + green text `#166534` — nearest-seam marker
+  - These colors are semantic review states, not new action accents; primary
+    actions stay blue.
 - **Dark mode:** Not in v0. Strategy when added: redesign surfaces (do not
   invert), reduce accent saturation ~15%, keep the single-accent discipline.
 
@@ -136,3 +143,4 @@ these tokens in an `@theme { … }` block in `styles.css` (CSS variables), NOT a
 | 2026-05-17 | Single-accent discipline      | Color budget spent on the shared-linkage fan-out so the product's one memorable moment is unmissable                                                       |
 | 2026-05-17 | No motion on graph layout     | Determinism and legibility at 40 nodes beat demo-gif delight                                                                                               |
 | 2026-05-17 | Type roles +1 standard step   | App-wide readability bump done in component `text-*` utilities + the `.md` block (no root/CSS override): body sm→base→lg, etc. Stock Tailwind scale, no px |
+| 2026-06-08 | Review colors are semantic    | Document comments/suggestions get amber/green/rose annotation states while the app keeps blue reserved for primary action and graph linkage.               |

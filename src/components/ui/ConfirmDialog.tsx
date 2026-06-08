@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { focusableIn } from "@/components/ui/dialog-focus";
 
 // Replaces `window.confirm` so the destructive-action surface matches
 // the rest of the product. One `<ConfirmHost>` is mounted at the root
@@ -21,21 +22,6 @@ type Pending = Readonly<{
 }>;
 
 let hostOpen: ((p: Pending) => void) | undefined;
-
-// Candidate-tabbable selector — `:not()` filters cover the hidden-element
-// classes querySelectorAll otherwise returns (aria-hidden subtrees,
-// disabled buttons/inputs, descendants of a disabled fieldset, and
-// negative-tabindex elements). The `display:none` / `visibility:hidden`
-// case is caught by checking `offsetParent` on the resulting nodes — CSS
-// hiding isn't reflected in any attribute selector.
-const FOCUSABLE_SELECTOR =
-  'a[href]:not([aria-hidden="true"]), button:not([disabled]):not([aria-hidden="true"]), input:not([disabled]):not([aria-hidden="true"]), select:not([disabled]):not([aria-hidden="true"]), textarea:not([disabled]):not([aria-hidden="true"]), [tabindex]:not([tabindex="-1"]):not([aria-hidden="true"])';
-
-function focusableIn(root: HTMLElement): readonly HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
-    (el) => el.offsetParent !== null && !el.closest("fieldset[disabled]"),
-  );
-}
 
 export function confirmDialog(init: ConfirmInit): Promise<boolean> {
   return new Promise<boolean>((resolve) => {

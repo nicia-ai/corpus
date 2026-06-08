@@ -160,10 +160,3 @@ body {
     border-radius: 6px;
   }
 }
-
-/* Commented text in the rendered document, painted via the CSS Custom
-   Highlight API (src/lib/highlight.ts) — a soft amber annotation wash, kept
-   distinct from the single blue action accent. */
-::highlight(corpus-comment) {
-  background-color: #fef3c7;
-}

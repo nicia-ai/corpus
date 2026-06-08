@@ -62,6 +62,10 @@ function alignBlocks(
   return out;
 }
 
+function isBlank(text: string): boolean {
+  return text.trim() === "";
+}
+
 // Map a selection's character span in the rendered document text to the
 // block it falls in and the offset within that block's text. Blocks are
 // aligned to `full` IN DOCUMENT ORDER — a cursor advances past each match —
@@ -69,8 +73,9 @@ function alignBlocks(
 // position, and a selection in the second of two identical paragraphs
 // anchors to the second. A block whose text isn't present verbatim (e.g. a
 // table row rendered without its `|` separators) is skipped rather than
-// misattributed. A selection crossing a block boundary is rejected; comments
-// and suggestions are currently single-block anchors.
+// misattributed. A selection that includes meaningful text from multiple
+// blocks is rejected; browser-added whitespace at a block boundary is
+// clamped so native paragraph selection still resolves to that paragraph.
 export function resolveAnchorInText(
   full: string,
   selStart: number,
@@ -79,19 +84,22 @@ export function resolveAnchorInText(
 ): SelectionAnchor | undefined {
   if (selEnd <= selStart) return undefined;
   for (const b of alignBlocks(full, blocks)) {
-    if (selStart >= b.at && selStart < b.end) {
-      if (selEnd > b.end) return undefined;
-      const start = selStart - b.at;
-      const end = selEnd - b.at;
-      return {
-        blockIndex: b.index,
-        start,
-        end,
-        exact: b.text.slice(start, end),
-        sourceStart: b.sourceStart,
-        sourceEnd: b.sourceEnd,
-      };
-    }
+    if (selStart >= b.end || selEnd <= b.at) continue;
+    const clampedStart = Math.max(selStart, b.at);
+    const clampedEnd = Math.min(selEnd, b.end);
+    if (clampedEnd <= clampedStart) continue;
+    if (!isBlank(full.slice(selStart, clampedStart))) continue;
+    if (!isBlank(full.slice(clampedEnd, selEnd))) continue;
+    const start = clampedStart - b.at;
+    const end = clampedEnd - b.at;
+    return {
+      blockIndex: b.index,
+      start,
+      end,
+      exact: b.text.slice(start, end),
+      sourceStart: b.sourceStart,
+      sourceEnd: b.sourceEnd,
+    };
   }
   return undefined;
 }

@@ -1,30 +1,29 @@
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { DocHeader } from "@/components/document/DocHeader";
 import { DocumentHistory } from "@/components/document-history/DocumentHistory";
 import { asProjectId } from "@/ids";
-import { getDocumentHistory } from "@/lib/server/documents";
+import { getDocumentHistoryPage } from "@/lib/server/document-review";
 
 // The Versions tab. Its own route loader: the version chain is fetched
 // only when this route is active (and warmed on hover by the router's
 // intent preloading), never on the document page's initial load.
-const layout = getRouteApi("/p/$projectId/documents/$slug");
-
 export const Route = createFileRoute("/p/$projectId/documents/$slug/versions")({
   component: VersionsTab,
-  loader: async ({ params }) => ({
-    history: await getDocumentHistory({
+  loader: async ({ params }) => {
+    return getDocumentHistoryPage({
       data: { projectId: params.projectId, slug: params.slug },
-    }),
-  }),
+    });
+  },
 });
 
-function VersionsTab(): React.ReactElement | null {
-  const { doc } = layout.useLoaderData();
-  const { history } = Route.useLoaderData();
+function VersionsTab(): React.ReactElement {
+  const { doc, history } = Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
 
-  if (doc === undefined) return null;
+  if (doc === undefined) {
+    return <p className="mt-4 text-slate-500">Document not found.</p>;
+  }
 
   return (
     <div className="max-w-5xl">

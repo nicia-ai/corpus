@@ -192,6 +192,18 @@ export type {
 
 type Unit = ProjectUnit;
 
+export type DocumentReviewSnapshot = Readonly<{
+  doc: DocumentSnapshot | undefined;
+  blocks: DocumentBlocksResult;
+  comments: readonly CommentThreadView[];
+  suggestions: readonly SuggestionView[];
+}>;
+
+export type DocumentHistorySnapshot = Readonly<{
+  doc: DocumentSnapshot | undefined;
+  history: readonly DocumentHistoryEntry[];
+}>;
+
 // Internal sentinel: a scoped create's bound collection vanished between
 // scope resolution and the create transaction, so the attach failed.
 // Thrown to roll the create back (never leave a document created but
@@ -506,6 +518,38 @@ export class ProjectStore extends DurableObject<Env> {
     return getDocumentProjection(await this.read(), slug);
   }
 
+  async documentReviewSnapshot(
+    slug: DocumentSlug,
+  ): Promise<DocumentReviewSnapshot> {
+    const u = await this.read();
+    const doc = await getDocumentProjection(u, slug);
+    if (doc === undefined) {
+      return {
+        doc: undefined,
+        blocks: { found: false },
+        comments: [],
+        suggestions: [],
+      };
+    }
+    const [blocks, comments, suggestions] = await Promise.all([
+      this.documentBlocksForHead(u, slug, doc.docVersion, doc.markdown),
+      this.commentThreadViews(u, slug),
+      this.suggestionViews(u, slug),
+    ]);
+    return { doc, blocks, comments, suggestions };
+  }
+
+  async documentHistorySnapshot(
+    slug: DocumentSlug,
+  ): Promise<DocumentHistorySnapshot> {
+    const u = await this.read();
+    const [doc, history] = await Promise.all([
+      getDocumentProjection(u, slug),
+      documentHistoryProjection(u, slug),
+    ]);
+    return { doc, history };
+  }
+
   async listDocuments(): Promise<
     readonly {
       slug: string;
@@ -804,12 +848,23 @@ export class ProjectStore extends DurableObject<Env> {
   async getDocumentBlocks(slug: DocumentSlug): Promise<DocumentBlocksResult> {
     const u = await this.read();
     const head = await u.docs.find(slug);
-    if (head === undefined) return { found: false };
+    if (head === undefined || head.archivedAt !== undefined) {
+      return { found: false };
+    }
     const markdown = (await u.blobs.get(head.contentHash)) ?? "";
+    return this.documentBlocksForHead(u, slug, head.docVersion, markdown);
+  }
+
+  private async documentBlocksForHead(
+    u: Unit,
+    slug: DocumentSlug,
+    docVersion: number,
+    markdown: string,
+  ): Promise<DocumentBlocksResult> {
     const parsed = parseBlocksWithRanges(markdown);
     const stored = await u.blockMaps.headMap(slug);
     const mapped =
-      stored?.docVersion === head.docVersion &&
+      stored?.docVersion === docVersion &&
       stored.parserVersion === BLOCK_PARSER_VERSION &&
       stored.blocks.length === parsed.length &&
       stored.blocks.every((b, i) => b.kind === parsed[i]?.kind)
@@ -817,7 +872,7 @@ export class ProjectStore extends DurableObject<Env> {
         : undefined;
     return {
       found: true,
-      docVersion: head.docVersion,
+      docVersion,
       blocks: parsed.map((b, i) =>
         compact({
           id: mapped?.[i]?.id,
@@ -834,7 +889,13 @@ export class ProjectStore extends DurableObject<Env> {
   async listComments(
     slug: DocumentSlug,
   ): Promise<readonly CommentThreadView[]> {
-    const u = await this.read();
+    return this.commentThreadViews(await this.read(), slug);
+  }
+
+  private async commentThreadViews(
+    u: Unit,
+    slug: DocumentSlug,
+  ): Promise<readonly CommentThreadView[]> {
     const threads = await u.comments.threadsForDoc(slug);
     const comments = await u.comments.commentsForThreads(
       threads.map((t) => t.id),
@@ -964,7 +1025,13 @@ export class ProjectStore extends DurableObject<Env> {
   async listSuggestions(
     slug: DocumentSlug,
   ): Promise<readonly SuggestionView[]> {
-    const u = await this.read();
+    return this.suggestionViews(await this.read(), slug);
+  }
+
+  private async suggestionViews(
+    u: Unit,
+    slug: DocumentSlug,
+  ): Promise<readonly SuggestionView[]> {
     const suggestions = await u.suggestions.forDoc(slug);
     const hunks = await u.suggestions.hunksForSuggestions(
       suggestions.map((s) => s.id),
