@@ -1,0 +1,432 @@
+import { Check, MessageSquare, PencilLine, X } from "lucide-react";
+import { useState } from "react";
+
+import { ProseDiff } from "@/components/diff/Diff";
+import { Button } from "@/components/ui/Button";
+import { cardClass } from "@/components/ui/Surface";
+import type { CallerChannel, ProjectId } from "@/ids";
+import { cn } from "@/lib/cn";
+import { lineDiff } from "@/lib/diff";
+import { useSubmit } from "@/lib/forms";
+import type { ReviewItem } from "@/lib/review-items";
+import type { CommentStatus } from "@/lib/server/comments";
+import { addComment, resolveComment } from "@/lib/server/comments";
+import {
+  applySuggestion,
+  rejectSuggestion,
+  setHunkDecision,
+  type SuggestionHunkView,
+  type SuggestionStatus,
+} from "@/lib/server/suggestions";
+import type { PresenceUser } from "@/lib/use-collab";
+
+const REVIEW_CARD_CLASS = cardClass("space-y-3 px-4 py-3");
+
+export function ReviewRail({
+  projectId,
+  items,
+  commentNames,
+  suggestionNames,
+  baseMarkdown,
+  presence,
+  onChange,
+}: Readonly<{
+  projectId: ProjectId;
+  items: readonly ReviewItem[];
+  commentNames: Readonly<Record<string, string>>;
+  suggestionNames: Readonly<Record<string, string>>;
+  baseMarkdown: string;
+  presence: readonly PresenceUser[];
+  onChange: () => void;
+}>): React.ReactElement {
+  return (
+    <aside aria-label="Document review" className="space-y-3">
+      <PresenceRow users={presence} />
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium tracking-wide text-slate-500 uppercase">
+          Review
+        </div>
+        <span className="text-sm text-slate-500 tabular-nums">
+          {items.length}
+        </span>
+      </div>
+      <div className="space-y-3">
+        {items.map((item) =>
+          item.kind === "comment" ? (
+            <CommentCard
+              key={item.id}
+              projectId={projectId}
+              item={item}
+              names={commentNames}
+              onChange={onChange}
+            />
+          ) : (
+            <SuggestionCard
+              key={item.id}
+              projectId={projectId}
+              item={item}
+              baseMarkdown={baseMarkdown}
+              author={
+                suggestionNames[item.suggestion.createdBy] ??
+                item.suggestion.createdBy
+              }
+              onChange={onChange}
+            />
+          ),
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function PresenceRow({
+  users,
+}: Readonly<{ users: readonly PresenceUser[] }>): React.ReactElement | null {
+  if (users.length === 0) return null;
+  const shown = users.slice(0, 5);
+  const extra = users.length - shown.length;
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-sm font-medium tracking-wide text-slate-500 uppercase">
+        Viewing now
+      </div>
+      <div
+        className="flex -space-x-1"
+        aria-label={`Viewing now: ${users.map((u) => u.userName).join(", ")}`}
+      >
+        {shown.map((user) => (
+          <span
+            key={user.userId}
+            title={user.userName}
+            className="grid size-7 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600 ring-2 ring-white"
+          >
+            {initials(user.userName)}
+          </span>
+        ))}
+        {extra > 0 && (
+          <span className="grid size-7 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-600 ring-2 ring-white">
+            +{extra}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CommentCard({
+  projectId,
+  item,
+  names,
+  onChange,
+}: Readonly<{
+  projectId: ProjectId;
+  item: Extract<ReviewItem, { kind: "comment" }>;
+  names: Readonly<Record<string, string>>;
+  onChange: () => void;
+}>): React.ReactElement {
+  const [reply, setReply] = useState("");
+  const thread = item.thread;
+  const who = (id: string): string => names[id] ?? id;
+
+  const { pending: replying, run: sendReply } = useSubmit(async () => {
+    const text = reply.trim();
+    if (text === "") return;
+    await addComment({ data: { projectId, threadId: thread.id, body: text } });
+    setReply("");
+    onChange();
+  });
+
+  const { pending: resolving, run: resolve } = useSubmit(async () => {
+    await resolveComment({ data: { projectId, threadId: thread.id } });
+    onChange();
+  });
+
+  return (
+    <article className={REVIEW_CARD_CLASS}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-4 w-4 text-amber-700" />
+          <StatusBadge status={thread.status} labels={COMMENT_STATUS_LABEL} />
+        </div>
+        {thread.status === "open" && (
+          <button
+            type="button"
+            disabled={resolving}
+            onClick={() => void resolve()}
+            className="text-sm font-medium text-slate-500 hover:text-green-700 disabled:opacity-50"
+          >
+            Resolve
+          </button>
+        )}
+      </div>
+      <blockquote className="line-clamp-2 border-l-2 border-amber-200 pl-2 text-sm text-slate-500">
+        {thread.quote.exact}
+      </blockquote>
+      <ul className="space-y-1.5">
+        {thread.comments.map((m) => (
+          <li key={m.id} className="text-base [overflow-wrap:anywhere]">
+            <span className="font-medium text-slate-900">
+              {who(m.createdBy)}
+            </span>{" "}
+            <span className="text-slate-700">{m.body}</span>
+          </li>
+        ))}
+      </ul>
+      {thread.status === "open" && (
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void sendReply();
+          }}
+        >
+          <input
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            placeholder="Reply..."
+            className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-base focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+          />
+          <button
+            type="submit"
+            disabled={replying || reply.trim() === ""}
+            className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
+          >
+            Reply
+          </button>
+        </form>
+      )}
+    </article>
+  );
+}
+
+function SuggestionCard({
+  projectId,
+  item,
+  baseMarkdown,
+  author,
+  onChange,
+}: Readonly<{
+  projectId: ProjectId;
+  item: Extract<ReviewItem, { kind: "suggestion" }>;
+  baseMarkdown: string;
+  author: string;
+  onChange: () => void;
+}>): React.ReactElement {
+  const suggestion = item.suggestion;
+  const { run: decide } = useSubmit(
+    async (hunkId: number, decision: "accepted" | "rejected") => {
+      await setHunkDecision({ data: { projectId, hunkId, decision } });
+      onChange();
+    },
+  );
+  const {
+    pending: applying,
+    error: applyError,
+    run: apply,
+  } = useSubmit(async () => {
+    const r = await applySuggestion({
+      data: { projectId, suggestionId: suggestion.id },
+    });
+    if (!r.ok) {
+      throw new Error(applyErrorMessage(r.reason));
+    }
+    onChange();
+  });
+  const { run: reject } = useSubmit(async () => {
+    await rejectSuggestion({
+      data: { projectId, suggestionId: suggestion.id },
+    });
+    onChange();
+  });
+
+  const acceptedCount = suggestion.hunks.filter(
+    (h) => h.decision === "accepted",
+  ).length;
+  const open = suggestion.status === "open";
+
+  return (
+    <article className={REVIEW_CARD_CLASS}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 text-base">
+          <div className="flex min-w-0 items-center gap-2">
+            <PencilLine className="h-4 w-4 shrink-0 text-green-700" />
+            <span className="truncate font-medium text-slate-900">
+              {author}
+            </span>
+            <ViaBadge channel={suggestion.channel} />
+          </div>
+          <div className="text-sm text-slate-500">
+            proposed {suggestion.hunks.length} change
+            {suggestion.hunks.length === 1 ? "" : "s"}
+          </div>
+        </div>
+        <StatusBadge
+          status={suggestion.status}
+          labels={SUGGESTION_STATUS_LABEL}
+        />
+      </div>
+
+      {open && !item.applicable && (
+        <p className="text-sm text-amber-700">
+          Based on an earlier version. Recreate it against the current text.
+        </p>
+      )}
+
+      {open && item.applicable && (
+        <>
+          <ul className="max-h-96 space-y-3 overflow-auto pr-1">
+            {suggestion.hunks.map((h) => (
+              <li key={h.id} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-slate-500">
+                    {OP_LABEL[h.op]}
+                  </span>
+                  <div className="flex gap-1">
+                    <DecisionButton
+                      active={h.decision === "accepted"}
+                      tone="accept"
+                      onClick={() => void decide(h.id, "accepted")}
+                    />
+                    <DecisionButton
+                      active={h.decision === "rejected"}
+                      tone="reject"
+                      onClick={() => void decide(h.id, "rejected")}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-md border border-slate-200 px-3 py-2">
+                  <ProseDiff
+                    lines={lineDiff(hunkOld(h, baseMarkdown), hunkNew(h))}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              disabled={applying || acceptedCount === 0}
+              onClick={() => void apply()}
+            >
+              Apply {acceptedCount} accepted
+            </Button>
+            <Button variant="secondary" onClick={() => void reject()}>
+              Reject all
+            </Button>
+            {applyError !== undefined && (
+              <span className="text-sm text-red-600">{applyError}</span>
+            )}
+          </div>
+        </>
+      )}
+    </article>
+  );
+}
+
+const hunkOld = (h: SuggestionHunkView, base: string): string =>
+  h.op === "insert" ? "" : base.slice(h.baseStart, h.baseEnd);
+const hunkNew = (h: SuggestionHunkView): string =>
+  h.op === "delete" ? "" : h.proposedText;
+
+const OP_LABEL: Readonly<Record<SuggestionHunkView["op"], string>> = {
+  replace: "Edit",
+  insert: "Add",
+  delete: "Remove",
+};
+
+const COMMENT_STATUS_LABEL: Readonly<Record<CommentStatus, string>> = {
+  open: "Open",
+  resolved: "Resolved",
+  orphaned: "Detached",
+};
+
+const SUGGESTION_STATUS_LABEL: Readonly<Record<SuggestionStatus, string>> = {
+  open: "Open",
+  applied: "Applied",
+  rejected: "Rejected",
+  stale: "Stale",
+};
+
+const VIA_LABEL: Partial<Record<CallerChannel, string>> = {
+  mcp: "via MCP",
+  cli: "via CLI",
+};
+
+function ViaBadge({
+  channel,
+}: Readonly<{ channel: CallerChannel }>): React.ReactElement | null {
+  const label = VIA_LABEL[channel];
+  if (label === undefined) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-sm bg-slate-100 px-1.5 text-sm font-medium text-slate-600">
+      {label}
+    </span>
+  );
+}
+
+function DecisionButton({
+  active,
+  tone,
+  onClick,
+}: Readonly<{
+  active: boolean;
+  tone: "accept" | "reject";
+  onClick: () => void;
+}>): React.ReactElement {
+  const accept = tone === "accept";
+  return (
+    <button
+      type="button"
+      aria-label={accept ? "Accept hunk" : "Reject hunk"}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-7 w-7 items-center justify-center rounded-sm border",
+        active
+          ? accept
+            ? "border-green-300 bg-green-50 text-green-700"
+            : "border-rose-300 bg-rose-50 text-rose-700"
+          : "border-slate-200 text-slate-500 hover:bg-slate-50",
+      )}
+    >
+      {accept ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+    </button>
+  );
+}
+
+function StatusBadge<T extends string>({
+  status,
+  labels,
+}: Readonly<{
+  status: T;
+  labels: Readonly<Record<T, string>>;
+}>): React.ReactElement {
+  return (
+    <span className={cn("shrink-0 text-sm font-medium", statusClass(status))}>
+      {labels[status]}
+    </span>
+  );
+}
+
+function statusClass(status: string): string {
+  if (status === "applied" || status === "resolved") return "text-green-700";
+  if (status === "rejected") return "text-slate-400";
+  if (status === "stale" || status === "orphaned") return "text-amber-700";
+  return "text-slate-500";
+}
+
+function initials(name: string): string {
+  const letters = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return letters === "" ? "?" : letters;
+}
+
+function applyErrorMessage(reason: string): string {
+  if (reason === "stale")
+    return "The document changed; recreate this suggestion.";
+  if (reason === "nothing-accepted") return "Accept at least one hunk first.";
+  if (reason === "not-open") return "This suggestion is already settled.";
+  return "Could not apply this suggestion.";
+}

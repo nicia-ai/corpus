@@ -95,63 +95,9 @@ export function DocumentHistory({
   const showDiff = view === "changes" && !isCurrent && active.retained;
 
   return (
-    <div className="grid grid-cols-[16rem_1fr] gap-6">
-      <ol className="space-y-1">
-        {entries.map((e) => {
-          const on = e.docVersion === active.docVersion;
-          const isCurrentEntry = e.docVersion === current.docVersion;
-          const who = authorOf(e);
-          const ariaLabel = [
-            `v${String(e.docVersion)}`,
-            isCurrentEntry ? "(current)" : null,
-            who === undefined ? null : `by ${who}`,
-          ]
-            .filter((s): s is string => s !== null)
-            .join(" ");
-          return (
-            <li key={e.docVersion}>
-              <button
-                onClick={() => setPicked(e.docVersion)}
-                aria-label={ariaLabel}
-                aria-current={on ? "true" : undefined}
-                className={
-                  on
-                    ? "w-full rounded-md border border-blue-600 bg-blue-50 px-3 py-2 text-left"
-                    : "w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-left hover:bg-slate-50"
-                }
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-base font-medium">
-                    v{e.docVersion}
-                    {e.docVersion === current.docVersion && (
-                      <span className="ml-2 text-sm font-normal text-slate-500">
-                        current
-                      </span>
-                    )}
-                  </span>
-                  <AbsoluteTime
-                    iso={e.changedAt}
-                    className="shrink-0 text-sm text-slate-500 tabular-nums"
-                  />
-                </div>
-                {authorOf(e) && (
-                  <div className="mt-0.5 truncate text-sm text-slate-500">
-                    {authorOf(e)}
-                  </div>
-                )}
-                {e.diffSummary && (
-                  <div className="mt-1 text-sm text-slate-600">
-                    {e.diffSummary}
-                  </div>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-
-      <div>
-        <div className="mb-3 flex items-start justify-between gap-3">
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="min-w-0">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="text-base text-slate-500">
               {isCurrent
@@ -165,7 +111,7 @@ export function DocumentHistory({
             )}
           </div>
           {!isCurrent && active.retained && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <Segmented
                 ariaLabel="History view"
                 value={view}
@@ -177,6 +123,7 @@ export function DocumentHistory({
               />
               <Button
                 variant="secondary"
+                className="shrink-0"
                 disabled={restoring}
                 onClick={() => void restore(active)}
               >
@@ -198,6 +145,62 @@ export function DocumentHistory({
           <Markdown source={active.markdown} />
         )}
       </div>
+
+      <aside className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-auto lg:pr-1">
+        <ol className="space-y-1">
+          {entries.map((e) => {
+            const on = e.docVersion === active.docVersion;
+            const isCurrentEntry = e.docVersion === current.docVersion;
+            const who = authorOf(e);
+            const ariaLabel = [
+              `v${String(e.docVersion)}`,
+              isCurrentEntry ? "(current)" : null,
+              who === undefined ? null : `by ${who}`,
+            ]
+              .filter((s): s is string => s !== null)
+              .join(" ");
+            return (
+              <li key={e.docVersion}>
+                <button
+                  onClick={() => setPicked(e.docVersion)}
+                  aria-label={ariaLabel}
+                  aria-current={on ? "true" : undefined}
+                  className={
+                    on
+                      ? "w-full rounded-md border border-blue-600 bg-blue-50 px-3 py-2 text-left"
+                      : "w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-left hover:bg-slate-50"
+                  }
+                >
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-base font-medium">
+                      v{e.docVersion}
+                      {e.docVersion === current.docVersion && (
+                        <span className="ml-2 text-sm font-normal text-slate-500">
+                          current
+                        </span>
+                      )}
+                    </span>
+                    <AbsoluteTime
+                      iso={e.changedAt}
+                      className="shrink-0 text-sm text-slate-500 tabular-nums"
+                    />
+                  </div>
+                  {authorOf(e) && (
+                    <div className="mt-0.5 truncate text-sm text-slate-500">
+                      {authorOf(e)}
+                    </div>
+                  )}
+                  {e.diffSummary && (
+                    <div className="mt-1 text-sm text-slate-600">
+                      {e.diffSummary}
+                    </div>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </aside>
     </div>
   );
 }

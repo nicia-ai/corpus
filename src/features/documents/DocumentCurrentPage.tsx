@@ -1,12 +1,12 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
+import { CheckCircle2, MessageSquareText } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 
-import { CommentsView } from "@/components/comments/CommentsView";
 import { ProseDiff, DiffPanel } from "@/components/diff/Diff";
 import { DocHeader } from "@/components/document/DocHeader";
 import { Field } from "@/components/Field";
 import { Markdown } from "@/components/markdown/Markdown";
-import { SuggestionsView } from "@/components/suggestions/SuggestionsView";
+import { ReviewWorkspace } from "@/components/review/ReviewWorkspace";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -16,6 +16,7 @@ import { showToast } from "@/components/ui/Toast";
 import type { ProjectId } from "@/ids";
 import { lineDiff } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
+import { buildReviewModel, type ReviewModel } from "@/lib/review-items";
 import type {
   CommentsResult,
   DocumentBlocksResult,
@@ -31,8 +32,8 @@ import {
 } from "@/lib/server/documents";
 import {
   createSuggestion,
-  listSuggestions,
-  type SuggestionView,
+  type CreateSuggestionResult,
+  type SuggestionsResult,
 } from "@/lib/server/suggestions";
 import { useCollab } from "@/lib/use-collab";
 
@@ -53,11 +54,13 @@ export function DocumentCurrentPage({
   projectId,
   blocks,
   comments,
+  suggestions,
 }: Readonly<{
   doc: DocSnapshot | undefined;
   projectId: ProjectId;
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
+  suggestions: SuggestionsResult;
 }>): React.ReactElement | null {
   if (doc === undefined) return null;
 
@@ -70,6 +73,7 @@ export function DocumentCurrentPage({
       projectId={projectId}
       blocks={blocks}
       comments={comments}
+      suggestions={suggestions}
     />
   );
 }
@@ -79,16 +83,20 @@ function Editor({
   projectId,
   blocks,
   comments,
+  suggestions,
 }: Readonly<{
   doc: DocSnapshot;
   projectId: ProjectId;
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
+  suggestions: SuggestionsResult;
 }>): React.ReactElement {
   const router = useRouter();
   const [mode, setMode] = useState<"read" | "edit">("read");
   const [renaming, setRenaming] = useState(false);
   const [renamingFile, setRenamingFile] = useState(false);
+  const [reviewDismissed, setReviewDismissed] = useState(false);
+  const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
   const [tab, setTab] = useState<"write" | "preview">("write");
   const [draft, setDraft] = useState(doc.markdown);
   const [broken, setBroken] = useState(0);
@@ -98,6 +106,7 @@ function Editor({
   // A successful save remounts this component (version key), resetting it.
   const [base, setBase] = useState<DocSnapshot>(doc);
   const [conflict, setConflict] = useState<DocSnapshot>();
+  const head = base.updatedAt >= doc.updatedAt ? base : doc;
 
   // Slugs feed the editor's broken-link linter and matter only in edit
   // mode, so they load on first edit (not in the loader — every read view,
@@ -107,27 +116,13 @@ function Editor({
     setSlugs((await getDocuments({ data: { projectId } })).map((d) => d.slug));
   });
 
-  // Suggestions: review panel + "suggest" from an edit-mode draft.
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
-  const [suggestions, setSuggestions] = useState<
-    Readonly<{
-      suggestions: readonly SuggestionView[];
-      names: Readonly<Record<string, string>>;
-    }>
-  >();
-  const { run: loadSuggestions } = useSubmit(async () => {
-    setSuggestions(
-      await listSuggestions({ data: { projectId, slug: base.slug } }),
-    );
-  });
-  function toggleSuggestions() {
-    if (suggestionsOpen) {
-      setSuggestionsOpen(false);
-    } else {
-      setSuggestionsOpen(true);
-      void loadSuggestions();
-    }
+  function refreshRoute(): void {
+    void router.invalidate();
   }
+
+  // Suggestions use the Current route loader in read mode; this edit-mode
+  // action creates one, then invalidates the loader so the review workspace
+  // shows it inline without a detached secondary fetch.
   const {
     pending: suggesting,
     error: suggestError,
@@ -136,24 +131,19 @@ function Editor({
     const r = await createSuggestion({
       data: {
         projectId,
-        slug: base.slug,
+        slug: head.slug,
         proposedMarkdown: draft,
-        clientVersion: base.docVersion,
+        clientVersion: head.docVersion,
       },
     });
     if (!r.ok) {
       throw new Error(
-        r.reason === "no-change"
-          ? "No changes to suggest."
-          : r.reason === "conflict"
-            ? "The document changed — reload and try again."
-            : "Could not create the suggestion.",
+        suggestionErrorMessage(r.reason, "No changes to suggest."),
       );
     }
     showToast("Suggestion created");
     setMode("read");
-    setSuggestionsOpen(true);
-    void loadSuggestions();
+    refreshRoute();
   });
 
   // Select-to-suggest from the read view: propose an edit to one block's
@@ -165,38 +155,50 @@ function Editor({
     const r = await createSuggestion({
       data: {
         projectId,
-        slug: base.slug,
+        slug: head.slug,
         proposedMarkdown: proposed,
-        clientVersion: blocks.found ? blocks.docVersion : base.docVersion,
+        clientVersion: blocks.found ? blocks.docVersion : head.docVersion,
       },
     });
     if (!r.ok) {
-      return r.reason === "no-change"
-        ? "No change to suggest."
-        : r.reason === "conflict"
-          ? "The document changed — reload and try again."
-          : "Could not create the suggestion.";
+      return suggestionErrorMessage(r.reason, "No change to suggest.");
     }
     showToast("Suggestion created");
-    setSuggestionsOpen(true);
-    void loadSuggestions();
+    refreshRoute();
     return undefined;
   };
 
   // Presence + live nudges over the project's real-time channel. On a change
-  // (anyone's write), refresh whichever review panel is open.
-  const presence = useCollab(projectId, base.slug, () => {
-    void router.invalidate();
-    if (suggestionsOpen) void loadSuggestions();
-  });
-  const here = presence.filter((p) => p.docSlug === base.slug);
+  // (anyone's write), refresh the document + review loader.
+  const presence = useCollab(projectId, head.slug, refreshRoute);
+  const here = presence.filter((p) => p.docSlug === head.slug);
+  const docVersion = blocks.found ? blocks.docVersion : head.docVersion;
+  const documentBlocks = blocks.found ? blocks.blocks : EMPTY_BLOCKS;
+  const reviewModel = useMemo(
+    () =>
+      buildReviewModel({
+        blocks: documentBlocks,
+        threads: comments.threads,
+        suggestions: suggestions.suggestions,
+        docVersion,
+      }),
+    [comments.threads, docVersion, documentBlocks, suggestions.suggestions],
+  );
+  const hasReviewItems = reviewModel.items.length > 0;
+  const reviewDismissedNow = reviewDismissed && reviewModel.activeCount === 0;
+  const showReview = hasReviewItems && !reviewDismissedNow;
+  const reviewComplete = hasReviewItems && reviewModel.activeCount === 0;
 
   function enterEdit() {
+    if (head !== base) {
+      setBase(head);
+      setDraft(head.markdown);
+    }
     setMode("edit");
     if (slugs === undefined) void loadSlugs();
   }
   function cancel() {
-    setDraft(base.markdown);
+    setDraft(head.markdown);
     setTab("write");
     setMode("read");
   }
@@ -236,19 +238,19 @@ function Editor({
     run: runRename,
   } = useSubmit(async (nextTitle: string) => {
     const t = nextTitle.trim();
-    if (t === "" || t === base.title) {
+    if (t === "" || t === head.title) {
       setRenaming(false);
       return;
     }
     const r = await renameDocument({
-      data: { projectId, slug: base.slug, title: t },
+      data: { projectId, slug: head.slug, title: t },
     });
     if (!r.ok) throw new Error("Rename failed — please retry.");
     // A rename doesn't bump docVersion, so the version-key remount that
     // re-seeds after a content save never fires here. Update the local
     // head optimistically (the server accepted it); onSaved() flashes +
     // invalidates so other routes' loaders pick up the new title.
-    setBase((b) => ({ ...b, title: t }));
+    setBase({ ...head, title: t });
     setRenaming(false);
     showToast("Title updated");
     void router.invalidate();
@@ -260,12 +262,12 @@ function Editor({
     run: runRenameFile,
   } = useSubmit(async (nextName: string) => {
     const f = nextName.trim();
-    if (f === "" || f === base.filename) {
+    if (f === "" || f === head.filename) {
       setRenamingFile(false);
       return;
     }
     const r = await renameFilename({
-      data: { projectId, slug: base.slug, filename: f },
+      data: { projectId, slug: head.slug, filename: f },
     });
     if (!r.ok) {
       throw new Error(
@@ -277,7 +279,7 @@ function Editor({
     // Filename is head metadata — no docVersion bump, so (like the
     // title rename) update the local head optimistically and invalidate
     // so other routes pick up the new path / resolved links.
-    setBase((b) => ({ ...b, filename: f }));
+    setBase({ ...head, filename: f });
     setRenamingFile(false);
     showToast("File renamed");
     void router.invalidate();
@@ -290,14 +292,14 @@ function Editor({
     run: runDelete,
   } = useSubmit(async () => {
     const ok = await confirmDialog({
-      title: `Delete “${base.title}”?`,
+      title: `Delete “${head.title}”?`,
       body: "It is removed from all collections and hidden. History is kept.",
       confirmLabel: "Delete",
       tone: "danger",
     });
     if (!ok) return;
     const r = await archiveDocument({
-      data: { projectId, slug: base.slug },
+      data: { projectId, slug: head.slug },
     });
     if (!r.ok) throw new Error("Delete failed — please retry.");
     // Archived: gone from the list + MCP. Leave the now-dead detail page.
@@ -362,11 +364,11 @@ function Editor({
 
   if (mode === "read") {
     return (
-      <div className={comments.threads.length > 0 ? "max-w-7xl" : "max-w-5xl"}>
+      <div className={hasReviewItems ? "max-w-7xl" : "max-w-5xl"}>
         {renaming ? (
           <RenameField
             label="Title"
-            initial={base.title}
+            initial={head.title}
             pending={renamePending}
             error={renameError}
             onSave={(t) => void runRename(t)}
@@ -374,20 +376,29 @@ function Editor({
           />
         ) : (
           <DocHeader
-            slug={base.slug}
+            slug={head.slug}
             projectId={projectId}
-            title={base.title}
-            version={base.docVersion}
+            title={head.title}
+            version={head.docVersion}
             active="current"
             onEditTitle={() => setRenaming(true)}
+            tabAccessory={
+              hasReviewItems ? (
+                <ReviewTabSummary
+                  model={reviewModel}
+                  complete={reviewComplete}
+                  dismissed={reviewDismissedNow}
+                  onOpenMobile={() => setMobileReviewOpen(true)}
+                  onShowReview={() => setReviewDismissed(false)}
+                  onFinish={() => setReviewDismissed(true)}
+                />
+              ) : undefined
+            }
             actions={
               <>
                 {deleteError && (
                   <span className="text-base text-red-600">{deleteError}</span>
                 )}
-                <Button variant="secondary" onClick={toggleSuggestions}>
-                  {suggestionsOpen ? "Hide suggestions" : "Suggestions"}
-                </Button>
                 <Button variant="secondary" onClick={enterEdit}>
                   Edit
                 </Button>
@@ -404,7 +415,7 @@ function Editor({
               renamingFile ? (
                 <RenameField
                   label="File name"
-                  initial={base.filename}
+                  initial={head.filename}
                   pending={filePending}
                   error={fileError}
                   mono
@@ -414,7 +425,7 @@ function Editor({
                 />
               ) : (
                 <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <span className="font-mono">{base.filename}</span>
+                  <span className="font-mono">{head.filename}</span>
                   <button
                     type="button"
                     onClick={() => setRenamingFile(true)}
@@ -427,38 +438,22 @@ function Editor({
             }
           />
         )}
-        {here.length > 0 && (
-          <p className="mb-3 text-sm text-slate-500">
-            Viewing now: {here.map((p) => p.userName).join(", ")}
-          </p>
-        )}
-        <CommentsView
+        <ReviewWorkspace
           projectId={projectId}
-          slug={base.slug}
-          markdown={base.markdown}
-          docVersion={blocks.found ? blocks.docVersion : base.docVersion}
-          blocks={blocks.found ? blocks.blocks : []}
-          threads={comments.threads}
-          names={comments.names}
-          onChange={() => void router.invalidate()}
+          slug={head.slug}
+          markdown={head.markdown}
+          docVersion={docVersion}
+          blocks={documentBlocks}
+          comments={comments}
+          suggestions={suggestions}
+          model={reviewModel}
+          presence={here}
+          showReview={showReview}
+          mobileOpen={mobileReviewOpen}
+          onMobileOpenChange={setMobileReviewOpen}
+          onChange={refreshRoute}
           onSuggest={onSuggestSelection}
         />
-        {suggestionsOpen && suggestions !== undefined && (
-          <div className="mt-6">
-            <div className="mb-3 text-sm font-medium tracking-wide text-slate-500 uppercase">
-              Suggestions
-            </div>
-            <SuggestionsView
-              projectId={projectId}
-              baseMarkdown={base.markdown}
-              docVersion={base.docVersion}
-              suggestions={suggestions.suggestions}
-              names={suggestions.names}
-              onReload={() => void loadSuggestions()}
-              onApplied={() => void router.invalidate()}
-            />
-          </div>
-        )}
       </div>
     );
   }
@@ -466,9 +461,9 @@ function Editor({
   return (
     <div className="max-w-5xl">
       <PageHeader
-        title={base.title}
+        title={head.title}
         meta={
-          <span className="text-base text-slate-500">v{base.docVersion}</span>
+          <span className="text-base text-slate-500">v{head.docVersion}</span>
         }
         actions={
           <Segmented
@@ -491,7 +486,7 @@ function Editor({
               value={draft}
               onChange={setDraft}
               docSlugs={slugs}
-              selfSlug={base.slug}
+              selfSlug={head.slug}
               onBrokenChange={setBroken}
             />
           </Suspense>
@@ -500,7 +495,7 @@ function Editor({
         <Markdown source={draft} bodyClassName="min-h-[28rem]" />
       )}
       <div className="mt-3 flex items-center gap-3">
-        <Button disabled={pending} onClick={() => void save(base, draft)}>
+        <Button disabled={pending} onClick={() => void save(head, draft)}>
           Save
         </Button>
         <Button variant="secondary" disabled={pending} onClick={cancel}>
@@ -527,8 +522,125 @@ function Editor({
   );
 }
 
-// Inline filename editor. Distinct from the title rename: filename is
-// the path segment for relative-link resolution, so changing it shifts
+const EMPTY_BLOCKS: readonly [] = [];
+
+type CreateSuggestionFailureReason = Extract<
+  CreateSuggestionResult,
+  { ok: false }
+>["reason"];
+
+function suggestionErrorMessage(
+  reason: CreateSuggestionFailureReason,
+  noChangeMessage: string,
+): string {
+  if (reason === "no-change") return noChangeMessage;
+  if (reason === "conflict")
+    return "The document changed — reload and try again.";
+  return "Could not create the suggestion.";
+}
+
+function ReviewTabSummary({
+  model,
+  complete,
+  dismissed,
+  onOpenMobile,
+  onShowReview,
+  onFinish,
+}: Readonly<{
+  model: ReviewModel;
+  complete: boolean;
+  dismissed: boolean;
+  onOpenMobile: () => void;
+  onShowReview: () => void;
+  onFinish: () => void;
+}>): React.ReactElement {
+  if (dismissed) {
+    return (
+      <span className="inline-flex min-w-0 flex-wrap items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-sm text-emerald-800">
+        <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="font-medium">Review complete</span>
+        <button
+          type="button"
+          onClick={onShowReview}
+          className="hidden font-medium text-blue-700 hover:text-blue-800 lg:inline"
+        >
+          Show review
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onShowReview();
+            onOpenMobile();
+          }}
+          className="font-medium text-blue-700 hover:text-blue-800 lg:hidden"
+        >
+          Show review
+        </button>
+      </span>
+    );
+  }
+
+  const activeKinds = [
+    model.activeCommentCount > 0
+      ? `${model.activeCommentCount} comment${model.activeCommentCount === 1 ? "" : "s"}`
+      : undefined,
+    model.activeSuggestionCount > 0
+      ? `${model.activeSuggestionCount} suggestion${model.activeSuggestionCount === 1 ? "" : "s"}`
+      : undefined,
+  ].filter((s): s is string => s !== undefined);
+
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-600">
+      {complete ? (
+        <CheckCircle2
+          className="size-3.5 shrink-0 text-emerald-600"
+          aria-hidden="true"
+        />
+      ) : (
+        <MessageSquareText
+          className="size-3.5 shrink-0 text-amber-600"
+          aria-hidden="true"
+        />
+      )}
+      <span className="font-medium text-slate-900">Review</span>
+      <span
+        className={
+          complete
+            ? "rounded-full bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700"
+            : "rounded-full bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700"
+        }
+      >
+        {complete ? "complete" : `${model.activeCount} open`}
+      </span>
+      {!complete && activeKinds.length > 0 && (
+        <span className="text-slate-500">{activeKinds.join(" · ")}</span>
+      )}
+      {model.staleSuggestionCount > 0 && (
+        <span className="text-amber-700">
+          {model.staleSuggestionCount} stale suggestion
+          {model.staleSuggestionCount === 1 ? "" : "s"}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onOpenMobile}
+        className="font-medium text-blue-600 hover:text-blue-700 lg:hidden"
+      >
+        Open review
+      </button>
+      {complete && (
+        <button
+          type="button"
+          onClick={onFinish}
+          className="font-medium text-blue-600 hover:text-blue-700"
+        >
+          Finish review
+        </button>
+      )}
+    </span>
+  );
+}
+
 // Inline metadata editor for title and filename. Both are head-only
 // (no version/content change), so they share this lightweight surface
 // instead of the read/edit/conflict machinery above. `hint` carries the

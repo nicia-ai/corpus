@@ -19,6 +19,7 @@ export function DocHeader({
   active,
   actions,
   subline,
+  tabAccessory,
   onEditTitle,
 }: Readonly<{
   slug: DocumentSlug;
@@ -30,6 +31,9 @@ export function DocHeader({
   // Document identity that belongs with the title (filename + rename),
   // not buried under the tab bar — sits between the title and the tabs.
   subline?: React.ReactNode;
+  // Lightweight state that belongs next to the routed tabs. Keep this inline:
+  // multi-line status belongs in the document body or review rail instead.
+  tabAccessory?: React.ReactNode;
   // When set, a subtle pencil sits next to the title (renaming the title
   // is a light, in-place edit — not a top-right command button).
   onEditTitle?: () => void;
@@ -59,29 +63,30 @@ export function DocHeader({
         actions={actions}
       />
       {subline !== undefined && <div className="-mt-4 mb-4">{subline}</div>}
-      <div
-        role="tablist"
-        aria-label="Document view"
-        className={cn(tabBarClass, "mb-5")}
-      >
-        <Link
-          to="/p/$projectId/documents/$slug"
-          params={{ projectId, slug }}
-          role="tab"
-          aria-selected={active === "current"}
-          className={tabItemClass(active === "current")}
-        >
-          Current
-        </Link>
-        <Link
-          to="/p/$projectId/documents/$slug/versions"
-          params={{ projectId, slug }}
-          role="tab"
-          aria-selected={active === "versions"}
-          className={tabItemClass(active === "versions")}
-        >
-          Versions
-        </Link>
+      <div className={cn(tabBarClass, "mb-5 flex-wrap items-end gap-y-2")}>
+        <div role="tablist" aria-label="Document view" className="flex gap-5">
+          <Link
+            to="/p/$projectId/documents/$slug"
+            params={{ projectId, slug }}
+            role="tab"
+            aria-selected={active === "current"}
+            className={tabItemClass(active === "current")}
+          >
+            Current
+          </Link>
+          <Link
+            to="/p/$projectId/documents/$slug/versions"
+            params={{ projectId, slug }}
+            role="tab"
+            aria-selected={active === "versions"}
+            className={tabItemClass(active === "versions")}
+          >
+            Versions
+          </Link>
+        </div>
+        {tabAccessory !== undefined && (
+          <div className="min-w-0 pb-2">{tabAccessory}</div>
+        )}
       </div>
     </>
   );

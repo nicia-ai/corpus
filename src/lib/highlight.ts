@@ -1,3 +1,4 @@
+import type { InlineSuggestionMark } from "./review-items";
 import {
   type AnchorBlock,
   anchorSpansInText,
@@ -12,9 +13,61 @@ import {
 // boundaries), and degrades to nothing where unsupported. The pure
 // character math — which occurrence of a phrase — lives in `text-anchor.ts`;
 // here we only flatten the container's text and turn spans into `Range`s.
-// Highlight styling is `::highlight(corpus-comment)` in styles.css.
+// Highlight styling uses `::highlight(corpus-*)`. Keep those rules out of
+// styles.css because Lightning CSS currently warns on the valid Custom
+// Highlight API pseudo-element while minifying the app stylesheet.
 
-const NAME = "corpus-comment";
+const COMMENT = "corpus-comment";
+const SUGGESTION_REPLACE = "corpus-suggestion-replace";
+const SUGGESTION_DELETE = "corpus-suggestion-delete";
+const SUGGESTION_INSERT = "corpus-suggestion-insert";
+const ALL_NAMES = [
+  COMMENT,
+  SUGGESTION_REPLACE,
+  SUGGESTION_DELETE,
+  SUGGESTION_INSERT,
+] as const;
+const HIGHLIGHT_STYLE_ID = "corpus-custom-highlight-styles";
+const HIGHLIGHT_STYLES = `
+::highlight(corpus-comment) {
+  background-color: #fef3c7;
+}
+
+::highlight(corpus-suggestion-replace) {
+  background-color: #dcfce7;
+}
+
+::highlight(corpus-suggestion-delete) {
+  background-color: #ffe4e6;
+  color: #9f1239;
+  text-decoration-line: line-through;
+}
+
+::highlight(corpus-suggestion-insert) {
+  background-color: #bbf7d0;
+  color: #166534;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+`.trim();
+
+function supportsHighlights(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    typeof CSS !== "undefined" &&
+    "highlights" in CSS &&
+    typeof Highlight !== "undefined"
+  );
+}
+
+function ensureHighlightStyles(): void {
+  if (document.getElementById(HIGHLIGHT_STYLE_ID) !== null) return;
+  const style = document.createElement("style");
+  style.id = HIGHLIGHT_STYLE_ID;
+  style.textContent = HIGHLIGHT_STYLES;
+  document.head.appendChild(style);
+}
 
 function isText(node: Node): node is Text {
   return node.nodeType === Node.TEXT_NODE;
@@ -87,14 +140,13 @@ function offsetOf(
   return r.toString().length;
 }
 
-// Highlight each open thread's quoted text at its own occurrence, located
-// by its current stable block anchor first, with quote context as fallback.
-export function applyHighlights(
+function setHighlight(
+  name: string,
   container: HTMLElement,
   anchors: readonly HighlightAnchor[],
   blocks: readonly AnchorBlock[],
 ): void {
-  if (!("highlights" in CSS)) return;
+  if (!supportsHighlights()) return;
   const idx = buildIndex(container);
   const ranges: Range[] = [];
   for (const [start, end] of anchorSpansInText(idx.full, blocks, anchors)) {
@@ -102,14 +154,58 @@ export function applyHighlights(
     if (range !== undefined) ranges.push(range);
   }
   if (ranges.length === 0) {
-    CSS.highlights.delete(NAME);
+    CSS.highlights.delete(name);
     return;
   }
-  CSS.highlights.set(NAME, new Highlight(...ranges));
+  ensureHighlightStyles();
+  CSS.highlights.set(name, new Highlight(...ranges));
+}
+
+// Highlight each open thread's quoted text at its own occurrence, located
+// by its current stable block anchor first, with quote context as fallback.
+export function applyHighlights(
+  container: HTMLElement,
+  anchors: readonly HighlightAnchor[],
+  blocks: readonly AnchorBlock[],
+): void {
+  setHighlight(COMMENT, container, anchors, blocks);
+}
+
+export function applyReviewHighlights({
+  container,
+  comments,
+  suggestions,
+  blocks,
+}: Readonly<{
+  container: HTMLElement;
+  comments: readonly HighlightAnchor[];
+  suggestions: readonly InlineSuggestionMark[];
+  blocks: readonly AnchorBlock[];
+}>): void {
+  applyHighlights(container, comments, blocks);
+  setHighlight(
+    SUGGESTION_REPLACE,
+    container,
+    suggestions.filter((m) => m.op === "replace").map((m) => m.anchor),
+    blocks,
+  );
+  setHighlight(
+    SUGGESTION_DELETE,
+    container,
+    suggestions.filter((m) => m.op === "delete").map((m) => m.anchor),
+    blocks,
+  );
+  setHighlight(
+    SUGGESTION_INSERT,
+    container,
+    suggestions.filter((m) => m.op === "insert").map((m) => m.anchor),
+    blocks,
+  );
 }
 
 export function clearHighlights(): void {
-  if ("highlights" in CSS) CSS.highlights.delete(NAME);
+  if (!supportsHighlights()) return;
+  for (const name of ALL_NAMES) CSS.highlights.delete(name);
 }
 
 // Resolve a live DOM selection to a block anchor: which block it lies in

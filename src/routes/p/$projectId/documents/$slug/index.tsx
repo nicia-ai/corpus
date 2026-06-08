@@ -1,39 +1,33 @@
-import { createFileRoute, getRouteApi } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { DocumentCurrentPage } from "@/features/documents/DocumentCurrentPage";
 import { asProjectId } from "@/ids";
-import { getDocumentBlocks, listComments } from "@/lib/server/comments";
-
-const layout = getRouteApi("/p/$projectId/documents/$slug");
+import { getDocumentReview } from "@/lib/server/document-review";
 
 export const Route = createFileRoute("/p/$projectId/documents/$slug/")({
   component: CurrentTabRoute,
-  // Comments + the head block list load with the Current tab so the rendered
-  // document is commentable immediately (select text → comment), and
-  // `router.invalidate()` (after a mutation or a live nudge) refreshes them.
-  // The Versions tab has its own loader and pays none of this.
+  // One review payload: document head + anchor blocks + comments + suggestions.
+  // Mutations and live nudges refresh this same loader via router.invalidate().
   loader: async ({ params }) => {
-    const [blocks, comments] = await Promise.all([
-      getDocumentBlocks({
-        data: { projectId: params.projectId, slug: params.slug },
-      }),
-      listComments({
-        data: { projectId: params.projectId, slug: params.slug },
-      }),
-    ]);
-    return { blocks, comments };
+    return getDocumentReview({
+      data: { projectId: params.projectId, slug: params.slug },
+    });
   },
 });
 
-function CurrentTabRoute(): React.ReactElement | null {
-  const { doc } = layout.useLoaderData();
-  const { blocks, comments } = Route.useLoaderData();
+function CurrentTabRoute(): React.ReactElement {
+  const { doc, blocks, comments, suggestions } = Route.useLoaderData();
+  const projectId = asProjectId(Route.useParams().projectId);
+  if (doc === undefined) {
+    return <p className="mt-4 text-slate-500">Document not found.</p>;
+  }
   return (
     <DocumentCurrentPage
       doc={doc}
-      projectId={asProjectId(Route.useParams().projectId)}
+      projectId={projectId}
       blocks={blocks}
       comments={comments}
+      suggestions={suggestions}
     />
   );
 }
