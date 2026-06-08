@@ -16,7 +16,8 @@ export const Route = createFileRoute("/p/$projectId/documents/$slug/")({
 });
 
 function CurrentTabRoute(): React.ReactElement {
-  const { doc, blocks, comments, suggestions } = Route.useLoaderData();
+  const { doc, blocks, comments, suggestions, viewerId } =
+    Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
   if (doc === undefined) {
     return <p className="mt-4 text-slate-500">Document not found.</p>;
@@ -28,6 +29,7 @@ function CurrentTabRoute(): React.ReactElement {
       blocks={blocks}
       comments={comments}
       suggestions={suggestions}
+      viewerId={viewerId}
     />
   );
 }

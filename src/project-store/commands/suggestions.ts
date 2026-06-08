@@ -157,6 +157,12 @@ export type ApplySuggestionResult = Readonly<
   | { ok: false; reason: "stale"; currentVersion: number }
 >;
 
+type ApplySuggestionCommandResult = Readonly<
+  | { ok: true; docVersion: number; documentSlug: DocumentSlug }
+  | { ok: false; reason: "missing" | "not-open" | "nothing-accepted" }
+  | { ok: false; reason: "stale"; currentVersion: number }
+>;
+
 // Materialize the accepted hunks into a new version via the normal save
 // path (so comment anchors rebase too). Refuses if the head has moved off
 // the suggestion's base — the stored source ranges would be wrong — and
@@ -164,7 +170,7 @@ export type ApplySuggestionResult = Readonly<
 export async function applySuggestionCommand(
   ctx: ProjectCommandContext,
   input: ApplySuggestionInput,
-): Promise<CommandOutcome<ApplySuggestionResult>> {
+): Promise<CommandOutcome<ApplySuggestionCommandResult>> {
   const s = await ctx.u.suggestions.get(input.suggestionId);
   if (s === undefined) return commandOutcome({ ok: false, reason: "missing" });
   if (s.status !== "open") {
@@ -202,7 +208,11 @@ export async function applySuggestionCommand(
   });
   await ctx.u.suggestions.resolve(s.id, "applied", input.appliedBy, ctx.now);
   return {
-    result: { ok: true, docVersion: saved.result.docVersion },
+    result: {
+      ok: true,
+      docVersion: saved.result.docVersion,
+      documentSlug: slug,
+    },
     changes: saved.changes,
   };
 }
@@ -218,7 +228,9 @@ export type RejectSuggestionInput = Readonly<{
 export async function rejectSuggestionCommand(
   ctx: ProjectCommandContext,
   input: RejectSuggestionInput,
-): Promise<CommandOutcome<Readonly<{ ok: boolean }>>> {
+): Promise<
+  CommandOutcome<Readonly<{ ok: boolean; documentSlug?: DocumentSlug }>>
+> {
   const s = await ctx.u.suggestions.get(input.suggestionId);
   if (s?.status !== "open") return commandOutcome({ ok: false });
   await ctx.u.suggestions.resolve(
@@ -227,5 +239,8 @@ export async function rejectSuggestionCommand(
     input.rejectedBy,
     ctx.now,
   );
-  return commandOutcome({ ok: true });
+  return commandOutcome({
+    ok: true,
+    documentSlug: asDocumentSlug(s.documentSlug),
+  });
 }

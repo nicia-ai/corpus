@@ -1,12 +1,24 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { CheckCircle2, MessageSquareText } from "lucide-react";
-import { lazy, Suspense, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { ProseDiff, DiffPanel } from "@/components/diff/Diff";
 import { DocHeader } from "@/components/document/DocHeader";
 import { Field } from "@/components/Field";
 import { Markdown } from "@/components/markdown/Markdown";
-import { ReviewWorkspace } from "@/components/review/ReviewWorkspace";
+import {
+  CHANGE_FLASH_DURATION_MS,
+  ReviewWorkspace,
+  type ChangeFlash,
+} from "@/components/review/ReviewWorkspace";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -14,10 +26,12 @@ import { Segmented } from "@/components/ui/Segmented";
 import { textLinkClass } from "@/components/ui/text-link";
 import { showToast } from "@/components/ui/Toast";
 import type { ProjectId } from "@/ids";
+import { changedBlockIndexes } from "@/lib/changed-blocks";
 import { lineDiff } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
 import { buildReviewModel, type ReviewModel } from "@/lib/review-items";
 import type {
+  BlockView,
   CommentsResult,
   DocumentBlocksResult,
 } from "@/lib/server/comments";
@@ -35,7 +49,7 @@ import {
   type CreateSuggestionResult,
   type SuggestionsResult,
 } from "@/lib/server/suggestions";
-import { useCollab } from "@/lib/use-collab";
+import { useCollab, type RealtimeChange } from "@/lib/use-collab";
 
 // CodeMirror only loads when a reader first enters edit mode — it stays out
 // of the read path's route chunk (the primary audience reads, not edits).
@@ -49,19 +63,98 @@ const editorFallback = (
   <div className="min-h-[28rem] rounded-md border border-slate-300 bg-white" />
 );
 
+type RemoteFlashRequest = Readonly<
+  | {
+      id: number;
+      kind: "content";
+      slug: string;
+      fromDocVersion: number;
+      fromMarkdown: string;
+    }
+  | {
+      id: number;
+      kind: "suggestion";
+      slug: string;
+      seenSuggestionIds: readonly number[];
+    }
+>;
+
+type VisibleDocSnapshot = Readonly<{
+  slug: string;
+  docVersion: number;
+  markdown: string;
+}>;
+
 export function DocumentCurrentPage({
   doc,
   projectId,
   blocks,
   comments,
   suggestions,
+  viewerId,
 }: Readonly<{
   doc: DocSnapshot | undefined;
   projectId: ProjectId;
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
   suggestions: SuggestionsResult;
+  viewerId: string;
 }>): React.ReactElement | null {
+  const nextFlashId = useRef(0);
+  const [remoteFlashRequest, setRemoteFlashRequest] =
+    useState<RemoteFlashRequest>();
+
+  const queueRemoteContentFlash = useCallback(
+    (snapshot: VisibleDocSnapshot): void => {
+      setRemoteFlashRequest({
+        id: (nextFlashId.current += 1),
+        kind: "content",
+        slug: snapshot.slug,
+        fromDocVersion: snapshot.docVersion,
+        fromMarkdown: snapshot.markdown,
+      });
+    },
+    [],
+  );
+  const queueRemoteSuggestionFlash = useCallback(
+    (slug: string, seenSuggestionIds: readonly number[]): void => {
+      setRemoteFlashRequest({
+        id: (nextFlashId.current += 1),
+        kind: "suggestion",
+        slug,
+        seenSuggestionIds,
+      });
+    },
+    [],
+  );
+
+  // Drop the request once its flash window elapses, so `changeFlash` returns
+  // to undefined: stops the per-render recompute and the stale replay on a
+  // later edit→read toggle.
+  useEffect(() => {
+    if (remoteFlashRequest === undefined) return undefined;
+    const id = window.setTimeout(
+      () => setRemoteFlashRequest(undefined),
+      CHANGE_FLASH_DURATION_MS,
+    );
+    return () => window.clearTimeout(id);
+  }, [remoteFlashRequest]);
+
+  // Memoized so its identity is stable across unrelated re-renders (presence
+  // pings), which would otherwise re-run the heavy measure/highlight effect.
+  const changeFlash = useMemo(
+    (): ChangeFlash | undefined =>
+      doc !== undefined && blocks.found && remoteFlashRequest?.slug === doc.slug
+        ? changeFlashFor({
+            request: remoteFlashRequest,
+            doc,
+            blocks: blocks.blocks,
+            suggestions: suggestions.suggestions,
+          })
+        : undefined,
+    [doc, blocks, remoteFlashRequest, suggestions.suggestions],
+  );
+
   if (doc === undefined) return null;
 
   // Keyed by version: a successful save invalidates the loader, the new
@@ -74,6 +167,10 @@ export function DocumentCurrentPage({
       blocks={blocks}
       comments={comments}
       suggestions={suggestions}
+      viewerId={viewerId}
+      changeFlash={changeFlash}
+      onRemoteContentChange={queueRemoteContentFlash}
+      onRemoteSuggestionChange={queueRemoteSuggestionFlash}
     />
   );
 }
@@ -84,12 +181,23 @@ function Editor({
   blocks,
   comments,
   suggestions,
+  viewerId,
+  changeFlash,
+  onRemoteContentChange,
+  onRemoteSuggestionChange,
 }: Readonly<{
   doc: DocSnapshot;
   projectId: ProjectId;
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
   suggestions: SuggestionsResult;
+  viewerId: string;
+  changeFlash?: ChangeFlash | undefined;
+  onRemoteContentChange: (snapshot: VisibleDocSnapshot) => void;
+  onRemoteSuggestionChange: (
+    slug: string,
+    seenSuggestionIds: readonly number[],
+  ) => void;
 }>): React.ReactElement {
   const router = useRouter();
   const [mode, setMode] = useState<"read" | "edit">("read");
@@ -116,9 +224,47 @@ function Editor({
     setSlugs((await getDocuments({ data: { projectId } })).map((d) => d.slug));
   });
 
-  function refreshRoute(): void {
+  const refreshRoute = useCallback((): void => {
     void router.invalidate();
-  }
+  }, [router]);
+
+  // The DO broadcasts every write to all sockets, including the actor's own.
+  // Identify self-echoes by actor id (web writes stamp the viewer's id) so we
+  // refresh but skip the flash/toast for our own edits — without ever muting a
+  // genuine concurrent change from someone else.
+  const handleCollabChanged = useCallback(
+    (change: RealtimeChange | undefined): void => {
+      const isSelf =
+        change?.actorId !== undefined && change.actorId === viewerId;
+      if (!isSelf && shouldFlashContentChange(change, head.slug)) {
+        onRemoteContentChange({
+          slug: head.slug,
+          docVersion: head.docVersion,
+          markdown: head.markdown,
+        });
+      }
+      if (!isSelf && shouldFlashSuggestionChange(change, head.slug)) {
+        onRemoteSuggestionChange(
+          head.slug,
+          suggestions.suggestions.map((s) => s.id),
+        );
+      }
+      refreshRoute();
+      if (isSelf) return;
+      const message = collabToastMessage(change, head.slug);
+      if (message !== undefined) showToast(message);
+    },
+    [
+      head.docVersion,
+      head.markdown,
+      head.slug,
+      onRemoteContentChange,
+      onRemoteSuggestionChange,
+      refreshRoute,
+      suggestions.suggestions,
+      viewerId,
+    ],
+  );
 
   // Suggestions use the Current route loader in read mode; this edit-mode
   // action creates one, then invalidates the loader so the review workspace
@@ -170,7 +316,7 @@ function Editor({
 
   // Presence + live nudges over the project's real-time channel. On a change
   // (anyone's write), refresh the document + review loader.
-  const presence = useCollab(projectId, head.slug, refreshRoute);
+  const presence = useCollab(projectId, head.slug, handleCollabChanged);
   const here = presence.filter((p) => p.docSlug === head.slug);
   const docVersion = blocks.found ? blocks.docVersion : head.docVersion;
   const documentBlocks = blocks.found ? blocks.blocks : EMPTY_BLOCKS;
@@ -448,6 +594,7 @@ function Editor({
           suggestions={suggestions}
           model={reviewModel}
           presence={here}
+          changeFlash={changeFlash}
           showReview={showReview}
           mobileOpen={mobileReviewOpen}
           onMobileOpenChange={setMobileReviewOpen}
@@ -524,6 +671,89 @@ function Editor({
 
 const EMPTY_BLOCKS: readonly [] = [];
 
+type SuggestionForFlash = SuggestionsResult["suggestions"][number];
+type SuggestionHunkForFlash = SuggestionForFlash["hunks"][number];
+
+function changeFlashFor({
+  request,
+  doc,
+  blocks,
+  suggestions,
+}: Readonly<{
+  request: RemoteFlashRequest;
+  doc: DocSnapshot;
+  blocks: readonly BlockView[];
+  suggestions: readonly SuggestionForFlash[];
+}>): ChangeFlash | undefined {
+  if (request.kind === "content") {
+    if (
+      request.fromDocVersion === doc.docVersion ||
+      request.fromMarkdown === doc.markdown
+    ) {
+      return undefined;
+    }
+    const blockIndexes = changedBlockIndexes(request.fromMarkdown, blocks);
+    return blockIndexes.length === 0
+      ? undefined
+      : { id: request.id, blockIndexes };
+  }
+
+  const seen = new Set(request.seenSuggestionIds);
+  const blockIndexes = new Set<number>();
+  for (const suggestion of suggestions) {
+    if (seen.has(suggestion.id) || suggestion.status !== "open") continue;
+    // A hunk's baseStart/baseEnd index the version it was created against; the
+    // blocks here are the current head. Only flash when they're the same
+    // coordinate system, else the overlap math points at the wrong block.
+    if (suggestion.baseDocVersion !== doc.docVersion) continue;
+    for (const hunk of suggestion.hunks) {
+      for (const index of blockIndexesForHunk(hunk, blocks)) {
+        blockIndexes.add(index);
+      }
+    }
+  }
+  return blockIndexes.size === 0
+    ? undefined
+    : { id: request.id, blockIndexes: [...blockIndexes] };
+}
+
+function blockIndexesForHunk(
+  hunk: SuggestionHunkForFlash,
+  blocks: readonly BlockView[],
+): readonly number[] {
+  if (hunk.baseEnd > hunk.baseStart) {
+    const covered = blocks
+      .filter(
+        (block) =>
+          hunk.baseStart <= block.sourceStart &&
+          hunk.baseEnd >= block.sourceEnd,
+      )
+      .map((block) => block.index);
+    if (covered.length > 0) return covered;
+
+    return blocks
+      .filter(
+        (block) =>
+          hunk.baseStart < block.sourceEnd && hunk.baseEnd > block.sourceStart,
+      )
+      .map((block) => block.index);
+  }
+
+  const before = [...blocks]
+    .reverse()
+    .find(
+      (block) => block.text.length > 0 && block.sourceEnd <= hunk.baseStart,
+    );
+  const after = blocks.find(
+    (block) => block.text.length > 0 && block.sourceStart >= hunk.baseStart,
+  );
+  return before !== undefined
+    ? [before.index]
+    : after === undefined
+      ? []
+      : [after.index];
+}
+
 type CreateSuggestionFailureReason = Extract<
   CreateSuggestionResult,
   { ok: false }
@@ -537,6 +767,73 @@ function suggestionErrorMessage(
   if (reason === "conflict")
     return "The document changed — reload and try again.";
   return "Could not create the suggestion.";
+}
+
+function collabToastMessage(
+  change: RealtimeChange | undefined,
+  currentSlug: string,
+): string | undefined {
+  if (change?.docSlug !== currentSlug) return undefined;
+  const actor = change.actorName ?? "Someone";
+  switch (change.action) {
+    case "document.created":
+    case "document.updated":
+      return `${actor} updated this document`;
+    case "document.renamed":
+      return `${actor} renamed this document`;
+    case "document.filename_changed":
+      return `${actor} renamed this file`;
+    case "document.archived":
+      return `${actor} deleted this document`;
+    case "comment.created":
+      return `${actor} commented on this document`;
+    case "comment.replied":
+      return `${actor} replied in review`;
+    case "comment.resolved":
+      return `${actor} resolved a comment`;
+    case "suggestion.created":
+      return change.channel === "mcp"
+        ? "An agent proposed an edit via MCP"
+        : `${actor} suggested an edit`;
+    case "suggestion.applied":
+      return `${actor} applied accepted changes`;
+    case "suggestion.rejected":
+      return `${actor} rejected a suggestion`;
+    case "project.changed":
+    case "collection.created":
+    case "collection.updated":
+    case "collection.attached":
+    case "collection.detached":
+    case "collection.reordered":
+      // Project/collection-level changes don't warrant a per-document toast.
+      return undefined;
+    default: {
+      // Exhaustiveness: a new RealtimeChange action must be handled here (or
+      // explicitly silenced above) rather than silently dropping its toast.
+      const unexpected: never = change.action;
+      return unexpected;
+    }
+  }
+}
+
+function shouldFlashContentChange(
+  change: RealtimeChange | undefined,
+  currentSlug: string,
+): boolean {
+  return (
+    change?.docSlug === currentSlug &&
+    (change.action === "document.updated" ||
+      change.action === "suggestion.applied")
+  );
+}
+
+function shouldFlashSuggestionChange(
+  change: RealtimeChange | undefined,
+  currentSlug: string,
+): boolean {
+  return (
+    change?.docSlug === currentSlug && change.action === "suggestion.created"
+  );
 }
 
 function ReviewTabSummary({

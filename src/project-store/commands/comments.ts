@@ -1,6 +1,6 @@
 import type { CommentStatus } from "../../db";
 import { ConflictError } from "../../errors";
-import type { DocumentSlug } from "../../ids";
+import { asDocumentSlug, type DocumentSlug } from "../../ids";
 import { resolveAnchor } from "../../store/domain/anchor";
 import type { BlockKind } from "../../store/domain/block-match";
 import {
@@ -126,14 +126,21 @@ export type AddCommentInput = Readonly<{
 export async function addCommentCommand(
   ctx: ProjectCommandContext,
   input: AddCommentInput,
-): Promise<CommandOutcome<Readonly<{ commentId: number }>>> {
+): Promise<
+  CommandOutcome<Readonly<{ commentId: number; documentSlug?: DocumentSlug }>>
+> {
   const commentId = await ctx.u.comments.addComment({
     threadId: input.threadId,
     body: input.body,
     createdBy: input.createdBy,
     createdAt: ctx.now,
   });
-  return commandOutcome({ commentId });
+  const thread = await ctx.u.comments.getThread(input.threadId);
+  return commandOutcome(
+    thread === undefined
+      ? { commentId }
+      : { commentId, documentSlug: asDocumentSlug(thread.documentSlug) },
+  );
 }
 
 export type ResolveThreadInput = Readonly<{
@@ -144,7 +151,17 @@ export type ResolveThreadInput = Readonly<{
 export async function resolveThreadCommand(
   ctx: ProjectCommandContext,
   input: ResolveThreadInput,
-): Promise<CommandOutcome<Readonly<{ ok: true }>>> {
-  await ctx.u.comments.resolveThread(input.threadId, input.resolvedBy, ctx.now);
-  return commandOutcome({ ok: true });
+): Promise<
+  CommandOutcome<Readonly<{ ok: true; documentSlug?: DocumentSlug }>>
+> {
+  const documentSlug = await ctx.u.comments.resolveThread(
+    input.threadId,
+    input.resolvedBy,
+    ctx.now,
+  );
+  return commandOutcome(
+    documentSlug === undefined
+      ? { ok: true }
+      : { ok: true, documentSlug: asDocumentSlug(documentSlug) },
+  );
 }

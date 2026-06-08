@@ -10,7 +10,7 @@ import type {
   DocumentBlocksResult,
 } from "@/lib/server/comments";
 import type { DocSnapshot, DocVersionEntry } from "@/lib/server/documents";
-import { storeOf } from "@/lib/server/shared";
+import { changedBy, storeOf } from "@/lib/server/shared";
 import type { SuggestionsResult } from "@/lib/server/suggestions";
 import { assertServerContext as srv } from "@/lib/server-context";
 import { compact } from "@/util";
@@ -20,6 +20,9 @@ export type DocumentReviewResult = Readonly<{
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
   suggestions: SuggestionsResult;
+  // The viewing user's id, so the client can tell its own writes' echoes from
+  // genuine remote changes (web writes stamp this same id as the actor).
+  viewerId: string;
 }>;
 
 export type DocumentHistoryResult = Readonly<{
@@ -90,6 +93,7 @@ export const getDocumentReview = createServerFn({ method: "GET" })
         suggestions: [...snapshot.suggestions],
         names: Object.fromEntries(suggestionNames),
       },
+      viewerId: changedBy(c),
     };
   });
 

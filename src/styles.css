@@ -32,12 +32,41 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+@keyframes corpus-change-fade {
+  0% {
+    opacity: 0.72;
+  }
+  18% {
+    opacity: 0.68;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* Rendered-markdown reader surface. One place owns document typography so
  * the read view and the edit preview are byte-identical. Values are
  * DESIGN.md tokens (slate ramp, single blue accent, 8px spacing, type
  * scale) — not Tailwind utilities, so prose stays decoupled from class
  * churn. Decoration stays minimal: the project graph is the only figure. */
 @layer components {
+  .corpus-change-flash {
+    pointer-events: none;
+    position: absolute;
+    z-index: 1;
+    border-radius: 4px;
+    background: rgba(253, 230, 138, 0.78);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.28);
+    animation: corpus-change-fade 5.5s ease-out forwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .corpus-change-flash {
+      /* Keep the positional cue but drop the motion: a steady highlight the
+       * JS timer removes after the flash window, instead of an animated fade. */
+      animation: none;
+      opacity: 0.6;
+    }
+  }
   .md {
     color: #0f172a;
     font-size: 1.125rem;

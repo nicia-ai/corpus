@@ -103,6 +103,14 @@ export type AnchorPositionTarget = Readonly<{
   anchor: HighlightAnchor;
 }>;
 
+export type HighlightRect = Readonly<{
+  key: string;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}>;
+
 // The (text node, offset) for a position in the concatenated text — the
 // last node whose cumulative start is at or before `pos`.
 function locate(idx: TextIndex, pos: number): Located | undefined {
@@ -128,6 +136,57 @@ function rangeAt(
   range.setStart(a.node, a.offset);
   range.setEnd(b.node, b.offset);
   return range;
+}
+
+function blockSpansInText(
+  full: string,
+  blocks: readonly AnchorBlock[],
+): readonly (readonly [AnchorBlock, number, number])[] {
+  const out: (readonly [AnchorBlock, number, number])[] = [];
+  let cursor = 0;
+  for (const block of blocks) {
+    if (block.text.length === 0) continue;
+    const start = full.indexOf(block.text, cursor);
+    if (start === -1) continue;
+    const end = start + block.text.length;
+    out.push([block, start, end]);
+    cursor = end;
+  }
+  return out;
+}
+
+export function measureBlockRects({
+  container,
+  frame,
+  blocks,
+  blockIndexes,
+}: Readonly<{
+  container: HTMLElement;
+  frame: HTMLElement;
+  blocks: readonly AnchorBlock[];
+  blockIndexes: readonly number[];
+}>): readonly HighlightRect[] {
+  const wanted = new Set(blockIndexes);
+  if (wanted.size === 0) return [];
+  const idx = buildIndex(container);
+  const frameRect = frame.getBoundingClientRect();
+  const rects: HighlightRect[] = [];
+  for (const [block, start, end] of blockSpansInText(idx.full, blocks)) {
+    if (!wanted.has(block.index)) continue;
+    const range = rangeAt(idx, start, end);
+    if (range === undefined) continue;
+    [...range.getClientRects()].forEach((rect, i) => {
+      if (rect.width <= 0 || rect.height <= 0) return;
+      rects.push({
+        key: `${block.index}:${i}:${Math.round(rect.top)}:${Math.round(rect.left)}`,
+        top: rect.top - frameRect.top,
+        left: rect.left - frameRect.left,
+        width: rect.width,
+        height: rect.height,
+      });
+    });
+  }
+  return rects;
 }
 
 export function measureAnchorTops({
