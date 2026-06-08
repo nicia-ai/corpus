@@ -265,17 +265,34 @@ export const events = {
 // underlying mutation (no timestamps, no random — those defeat the
 // dedup). For events without a natural composite key (caller.connected,
 // prompt.answered) the caller provides a salt (e.g. project id).
-export function idempotencyKey(event: InstrumentationEvent): string {
+export function idempotencyKey(
+  event: InstrumentationEvent,
+  // The ledger row id of the originating mutation, supplied by the write-path
+  // (outbox) enqueue. It is this mutation's unique identity, used as the
+  // dedup discriminator for events whose natural key is NOT unique per edit:
+  // head-only document edits (rename/archive/filename — docVersion does not
+  // bump) and collection.updated (no version in the event). Stable across
+  // drain retries (the key is stored on the outbox row), so retries still
+  // collapse while distinct edits do not. Omitted on the read/emit path,
+  // whose events carry their own naturally-unique keys.
+  localEventId?: number,
+): string {
   switch (event.type) {
     case "document.created":
     case "document.updated":
+      return `${event.type}:${event.slug}:v${String(event.docVersion)}`;
     case "document.renamed":
     case "document.archived":
     case "document.filename_changed":
-      return `${event.type}:${event.slug}:v${String(event.docVersion)}`;
+      return localEventId === undefined
+        ? `${event.type}:${event.slug}:v${String(event.docVersion)}`
+        : `${event.type}:${event.slug}:e${String(localEventId)}`;
     case "collection.created":
-    case "collection.updated":
       return `${event.type}:${event.collectionSlug}`;
+    case "collection.updated":
+      return localEventId === undefined
+        ? `${event.type}:${event.collectionSlug}`
+        : `${event.type}:${event.collectionSlug}:e${String(localEventId)}`;
     case "collection.attached":
     case "collection.detached": {
       // Either documentSlug or folderSlug identifies the member; the

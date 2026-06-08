@@ -35,7 +35,6 @@ import type {
 import type { ProjectUnit } from "./unit";
 
 const DOC_LIST_LIMIT = 500;
-const SLUG_LIST_LIMIT = 100;
 
 export async function getDocumentProjection(
   u: ProjectUnit,
@@ -66,9 +65,11 @@ export async function listDocumentsProjection(u: ProjectUnit): Promise<
     updatedAt: string;
   }[]
 > {
-  const docs = (await u.docs.list(DOC_LIST_LIMIT)).filter(
-    (d) => d.archivedAt === undefined,
-  );
+  // Drop archived docs BEFORE bounding, so soft-deleted rows can't consume
+  // list slots and silently hide active documents past the limit.
+  const docs = (await u.docs.listAll())
+    .filter((d) => d.archivedAt === undefined)
+    .slice(0, DOC_LIST_LIMIT);
   const [bytes, folders] = await Promise.all([
     u.blobs.getMany(docs.map((d) => d.contentHash)),
     Promise.all(
@@ -88,11 +89,15 @@ export async function listDocumentsProjection(u: ProjectUnit): Promise<
   }));
 }
 
+// Every LIVE document slug. Feeds the editor's broken-link linter, which
+// needs the complete set — a partial/capped list would flag real links as
+// broken — and must exclude archived slugs (which the linter would otherwise
+// treat as valid targets that the documents list doesn't show).
 export async function listDocumentSlugsProjection(
   u: ProjectUnit,
 ): Promise<string[]> {
-  const docs = await u.docs.list(SLUG_LIST_LIMIT);
-  return docs.map((d) => d.slug);
+  const docs = await u.docs.listAll();
+  return docs.filter((d) => d.archivedAt === undefined).map((d) => d.slug);
 }
 
 export function listCollectionsProjection(
@@ -427,7 +432,12 @@ export async function pathIndex(u: ProjectUnit): Promise<
     slugToPath: Map<string, string>;
   }>
 > {
-  const docs = await u.docs.listAll();
+  // Archived docs retain their in_folder edge but must not occupy a path —
+  // otherwise a re-upload at the same path collides and relative-link
+  // resolution becomes non-deterministic (can resolve to the hidden doc).
+  const docs = (await u.docs.listAll()).filter(
+    (d) => d.archivedAt === undefined,
+  );
   const folders = await Promise.all(
     docs.map((d) => u.folders.documentFolder(asDocumentSlug(d.slug))),
   );

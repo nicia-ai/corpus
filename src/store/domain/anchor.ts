@@ -89,18 +89,30 @@ function buildIndex(match: MatchResult): RebaseIndex {
 }
 
 function rebaseOne(anchor: Anchor, index: RebaseIndex): RebaseResult {
-  // 1. The block this id was carried to.
+  // 1. The block this id was carried to (the matcher's authoritative home).
   const carried = index.carried.get(anchor.blockId);
   if (carried !== undefined) {
-    const at = locate(carried.text, anchor.quote);
-    if (at !== undefined) return placed(carried.id, at, anchor.quote);
+    const found = locate(carried.text, anchor.quote);
+    if (found !== undefined) return placed(carried.id, found.at, anchor.quote);
   }
   // 2. Anywhere else the quote survived (cut-and-pasted content, or the
-  //    carrying block dropped the quote).
-  for (const block of index.blocks) {
-    if (block.id === carried?.id) continue;
-    const at = locate(block.text, anchor.quote);
-    if (at !== undefined) return placed(block.id, at, anchor.quote);
+  //    carrying block dropped the quote). Score EVERY candidate block by its
+  //    surrounding context and take the best — not merely the first in
+  //    document order, which would snap a repeated phrase to the wrong block.
+  //    A caret (empty exact) carries no text to recover, so it must orphan
+  //    rather than float onto an arbitrary block.
+  if (anchor.quote.exact !== "") {
+    let best: { id: BlockId; at: number } | undefined;
+    let bestScore = -1;
+    for (const block of index.blocks) {
+      if (block.id === carried?.id) continue;
+      const found = locate(block.text, anchor.quote);
+      if (found !== undefined && found.score > bestScore) {
+        bestScore = found.score;
+        best = { id: block.id, at: found.at };
+      }
+    }
+    if (best !== undefined) return placed(best.id, best.at, anchor.quote);
   }
   // 3. Gone.
   return { status: "orphaned", quote: anchor.quote };
@@ -117,11 +129,14 @@ function placed(
   };
 }
 
-// Find the offset of `quote.exact` in `text`. When the exact text occurs
-// more than once (or is empty — a caret), the surrounding prefix/suffix
-// pick the best-matching occurrence. Returns undefined if the exact text
-// is absent.
-function locate(text: string, quote: TextQuote): number | undefined {
+// Find the best offset of `quote.exact` in `text`, with the context score
+// that won it. When the exact text occurs more than once the surrounding
+// prefix/suffix pick the occurrence; the score lets the caller compare
+// candidates ACROSS blocks. Returns undefined if the exact text is absent.
+function locate(
+  text: string,
+  quote: TextQuote,
+): { at: number; score: number } | undefined {
   const { exact, prefix, suffix } = quote;
   const candidates = occurrences(text, exact);
   if (candidates.length === 0) return undefined;
@@ -137,7 +152,7 @@ function locate(text: string, quote: TextQuote): number | undefined {
       best = at;
     }
   }
-  return best < 0 ? undefined : best;
+  return best < 0 ? undefined : { at: best, score: bestScore };
 }
 
 function occurrences(text: string, exact: string): readonly number[] {

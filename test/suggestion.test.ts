@@ -57,4 +57,16 @@ describe("diffToHunks / applyHunks", () => {
     expect(del).toBeDefined();
     if (del) expect(base.slice(del.baseStart, del.baseEnd)).toBe("beta");
   });
+
+  it("preserves blank lines inside a fenced code block when applying a hunk", () => {
+    // The code block has TWO consecutive blank lines that are significant; a
+    // naive global /\n{3,}/→\n\n would collapse them and corrupt the sample.
+    const base =
+      "intro paragraph\n\n```js\nconst a = 1;\n\n\nconst b = 2;\n```\n\nold tail";
+    const proposed =
+      "intro paragraph\n\n```js\nconst a = 1;\n\n\nconst b = 2;\n```\n\nnew tail";
+    const out = applyHunks(base, diffToHunks(base, proposed));
+    expect(out).toContain("const a = 1;\n\n\nconst b = 2;");
+    expect(out).toContain("new tail");
+  });
 });

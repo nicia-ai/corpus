@@ -201,6 +201,11 @@ export async function applySuggestionCommand(
     appliedFrom: { suggestionId: s.id, by: s.createdBy, channel: s.channel },
   });
   await ctx.u.suggestions.resolve(s.id, "applied", input.appliedBy, ctx.now);
+  // The head just advanced, so every other open suggestion on this doc is now
+  // off-base — mark them stale eagerly instead of leaving them "open" until
+  // someone next tries to apply them (which is when the UI would otherwise
+  // show an "Open" badge alongside an "earlier version" warning).
+  await ctx.u.suggestions.staleOpenForDoc(s.documentSlug);
   return {
     result: { ok: true, docVersion: saved.result.docVersion },
     changes: saved.changes,

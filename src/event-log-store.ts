@@ -27,13 +27,17 @@ export type EventEnvelope = Readonly<{
 }>;
 
 // Caller-supplied portion. The DO assigns `monotonicId` (PK
-// autoincrement) and `timestamp` (wall clock at append).
+// autoincrement). `occurredAt` is when the underlying mutation happened
+// (the change's `changedAt`); the DO falls back to wall-clock at append for
+// callers that have no meaningful occurrence time (e.g. read events). This
+// keeps the stored timestamp the edit time, not a delayed/retried drain time.
 export type EventAppendInput = Readonly<{
   schemaVersion: number;
   projectId: string;
   idempotencyKey: string;
   eventType: string;
   payload: string;
+  occurredAt?: string;
 }>;
 
 // Iterate window. `sinceMonotonicId` is exclusive ("events after this
@@ -76,14 +80,15 @@ export class EventLogStore extends DurableObject<Env> {
   // existing row's id if the idempotency key collides (retry-safe).
   async append(input: EventAppendInput): Promise<number> {
     const db = await this.db();
-    const timestamp = new Date().toISOString();
+    const { occurredAt, ...row } = input;
+    const timestamp = occurredAt ?? new Date().toISOString();
     // ON CONFLICT DO NOTHING + RETURNING gives us either the new id or
     // (on idempotency-key collision) nothing — in which case we look
     // up the prior row's id. Consumer cursoring is identical either
     // way: the same monotonic id surfaces for retries.
     const [inserted] = await db
       .insert(eventLog)
-      .values({ ...input, timestamp })
+      .values({ ...row, timestamp })
       .onConflictDoNothing({ target: eventLog.idempotencyKey })
       .returning({ id: eventLog.monotonicId });
     if (inserted !== undefined) return inserted.id;

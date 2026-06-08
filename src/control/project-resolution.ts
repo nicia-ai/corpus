@@ -111,7 +111,12 @@ async function resolveRef(
       cache.delete(key);
       return undefined;
     }
-    if (live?.epoch === hit.epoch) return hit.ref;
+    // Bind the entry to the principal it was minted for: the cache key is the
+    // raw auth/cookie string, so a stale-but-live epoch alone must not hand
+    // one user another's resolved ProjectRef if that string ever recurs.
+    if (live?.epoch === hit.epoch && hit.ref.userId === session.user.id) {
+      return hit.ref;
+    }
     cache.delete(key);
   }
 

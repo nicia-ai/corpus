@@ -95,6 +95,15 @@ export async function createCommentCommand(
   if (target === undefined) {
     return commandOutcome({ ok: false, reason: "bad-block" });
   }
+  // Reject an inverted/empty/out-of-range selection: it would slice an empty
+  // quote (a caret), which rebases onto arbitrary text instead of orphaning.
+  if (
+    input.start < 0 ||
+    input.start >= input.end ||
+    input.end > target.text.length
+  ) {
+    return commandOutcome({ ok: false, reason: "bad-block" });
+  }
   const anchor = resolveAnchor(target, input.start, input.end);
   const threadId = await ctx.u.comments.createThread({
     documentSlug: input.slug,
