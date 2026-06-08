@@ -28,6 +28,7 @@
 /* Data-dense node cards / version chips must not jitter column width
  * (DESIGN.md typography). */
 body {
+  background: #f8fafc;
   font-variant-numeric: tabular-nums;
 }
 

@@ -69,7 +69,7 @@ function ProjectLayout() {
       <aside
         id="primary-sidebar"
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white px-3 py-5 transition-transform duration-200 ease-out motion-reduce:transition-none md:static md:z-auto md:w-60 md:shrink-0 md:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white px-3 py-5 transition-transform duration-200 ease-out motion-reduce:transition-none md:static md:z-auto md:w-48 md:shrink-0 md:translate-x-0",
           navOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >

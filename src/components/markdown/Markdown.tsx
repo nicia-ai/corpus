@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
-import { Card } from "@/components/ui/Surface";
+import { Card, cardClass } from "@/components/ui/Surface";
 import { cn } from "@/lib/cn";
 import { parseFrontmatter } from "@/store/domain/frontmatter";
 
@@ -32,6 +32,10 @@ function formatValue(v: unknown): string {
   return JSON.stringify(v);
 }
 
+const FRONTMATTER_PANEL_CLASS = "px-6 py-4 sm:px-8";
+export const DOCUMENT_BODY_CLASS =
+  "md min-h-[calc(100vh-15rem)] px-6 py-8 sm:px-10 sm:py-10 lg:px-14 lg:py-12";
+
 // A faint tint inside the white body card read as a smudge; merging onto the
 // same surface read as no separation at all. So metadata is its OWN panel —
 // a sibling white Card, separated from the body by the page-bg gap (the
@@ -40,7 +44,7 @@ function FrontmatterPanel({
   entries,
 }: Readonly<{ entries: readonly (readonly [string, unknown])[] }>) {
   return (
-    <Card className="px-6 py-5">
+    <Card className={FRONTMATTER_PANEL_CLASS}>
       <div className="mb-2 text-sm font-medium tracking-wide text-slate-500 uppercase">
         Metadata
       </div>
@@ -79,14 +83,9 @@ export const Markdown = memo(function Markdown({
   // there's frontmatter, the metadata Card stacks above it with a page-bg
   // gap (`space-y`), so the two read as distinct panels, not one tinted box.
   const bodyCard = (
-    <Card className={cn("md px-6 py-5", bodyClassName)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeSanitize]}
-      >
-        {body}
-      </ReactMarkdown>
-    </Card>
+    <div className={cardClass(cn(DOCUMENT_BODY_CLASS, bodyClassName))}>
+      <MarkdownContent source={body} />
+    </div>
   );
 
   if (entries === undefined) return bodyCard;
@@ -98,3 +97,15 @@ export const Markdown = memo(function Markdown({
     </div>
   );
 });
+
+export function MarkdownContent({
+  source,
+}: Readonly<{
+  source: string;
+}>): React.ReactElement {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+      {source}
+    </ReactMarkdown>
+  );
+}

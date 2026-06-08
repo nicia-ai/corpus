@@ -12,8 +12,15 @@ export type CommentReviewItem = Readonly<{
   kind: "comment";
   sortStart: number;
   active: boolean;
+  anchorEvidence: CommentAnchorEvidence;
   thread: CommentThreadView;
 }>;
+
+export type CommentAnchorEvidence = Readonly<
+  | { status: "present"; original: string }
+  | { status: "changed"; original: string; current: string }
+  | { status: "removed"; original: string }
+>;
 
 export type SuggestionReviewItem = Readonly<{
   id: `suggestion:${number}`;
@@ -64,6 +71,7 @@ export function buildReviewModel(input: Input): ReviewModel {
     kind: "comment",
     sortStart: commentSortStart(thread, byBlockId),
     active: thread.status === "open",
+    anchorEvidence: commentAnchorEvidence(thread, input.blocks, byBlockId),
     thread,
   }));
 
@@ -137,6 +145,73 @@ function suggestionSortStart(suggestion: SuggestionView): number {
     (min, hunk) => Math.min(min, hunk.baseStart),
     Number.MAX_SAFE_INTEGER,
   );
+}
+
+function commentAnchorEvidence(
+  thread: CommentThreadView,
+  blocks: readonly AnchorBlock[],
+  byBlockId: ReadonlyMap<string, AnchorBlock>,
+): CommentAnchorEvidence {
+  const original = quoteExcerpt(thread.quote);
+  const block = byBlockId.get(thread.anchorBlockId);
+  const currentAtAnchor =
+    block === undefined ? undefined : anchoredExcerpt(thread, block);
+
+  if (currentAtAnchor === undefined) {
+    const moved = findQuoteExcerpt(thread.quote.exact, blocks);
+    return moved === undefined
+      ? { status: "removed", original }
+      : { status: "changed", original, current: moved };
+  }
+
+  if (currentAtAnchor.exact === thread.quote.exact) {
+    return { status: "present", original };
+  }
+  return {
+    status: "changed",
+    original,
+    current: currentAtAnchor.excerpt,
+  };
+}
+
+function quoteExcerpt(quote: CommentThreadView["quote"]): string {
+  return quote.prefix + quote.exact + quote.suffix;
+}
+
+function anchoredExcerpt(
+  thread: CommentThreadView,
+  block: AnchorBlock,
+): Readonly<{ exact: string; excerpt: string }> | undefined {
+  if (
+    thread.anchorEnd <= thread.anchorStart ||
+    thread.anchorStart < 0 ||
+    thread.anchorEnd > block.text.length
+  ) {
+    return undefined;
+  }
+  return {
+    exact: block.text.slice(thread.anchorStart, thread.anchorEnd),
+    excerpt: blockExcerpt(block.text, thread.anchorStart, thread.anchorEnd),
+  };
+}
+
+function findQuoteExcerpt(
+  exact: string,
+  blocks: readonly AnchorBlock[],
+): string | undefined {
+  if (exact === "") return undefined;
+  for (const block of blocks) {
+    const at = block.text.indexOf(exact);
+    if (at !== -1) return blockExcerpt(block.text, at, at + exact.length);
+  }
+  return undefined;
+}
+
+function blockExcerpt(text: string, start: number, end: number): string {
+  const before = text.slice(Math.max(0, start - 48), start);
+  const selected = text.slice(start, end);
+  const after = text.slice(end, Math.min(text.length, end + 48));
+  return before + selected + after;
 }
 
 function suggestionMarks(

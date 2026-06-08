@@ -8,14 +8,15 @@ import { cn } from "@/lib/cn";
 type Variant = "primary" | "secondary" | "danger";
 
 const BASE =
-  "rounded-md px-3 py-2 text-base font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50";
 
 const VARIANT: Readonly<Record<Variant, string>> = {
   primary: "bg-blue-600 text-white hover:bg-blue-700",
-  secondary: "border border-slate-300 hover:bg-slate-50",
+  secondary:
+    "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
   // Destructive secondary — the one red action surface (DESIGN.md: red
   // is semantic, inline-only). Shared by every "delete/archive" button.
-  danger: "border border-red-300 text-red-700 hover:bg-red-50",
+  danger: "border border-red-300 bg-white text-red-700 hover:bg-red-50",
 };
 
 export function buttonStyles(
