@@ -5,6 +5,7 @@ import {
   type DocumentSlug,
 } from "../../ids";
 import {
+  type AppliedFrom,
   collectionFolderTreeChanged,
   documentArchived,
   documentChange,
@@ -59,6 +60,9 @@ export type SaveDocumentCommandInput = Readonly<{
   filename?: string;
   clientVersion: number;
   changedBy: string;
+  // Set only by the apply-suggestion path: the durable origin recorded on
+  // this save's change event (`changedBy` stays the human approver).
+  appliedFrom?: AppliedFrom;
   __failAfterWrites?: boolean;
 }>;
 
@@ -113,6 +117,9 @@ export async function saveDocumentCommand(
     contentHash,
     changedBy: input.changedBy,
     changedAt: ctx.now,
+    ...(input.appliedFrom !== undefined
+      ? { appliedFrom: input.appliedFrom }
+      : {}),
   });
   return {
     result: { docVersion },

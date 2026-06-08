@@ -1,5 +1,5 @@
 import type { EventLogStore } from "@/event-log-store";
-import type { CollectionSlug } from "@/ids";
+import { type CollectionSlug, parseCallerRef } from "@/ids";
 import {
   decodeEvent,
   type InstrumentationEvent,
@@ -72,19 +72,14 @@ function labelFor(callerRef: string): {
   callerLabel: string;
   authPath: "apikey" | "oauth";
 } {
-  if (callerRef.startsWith("apikey:")) {
-    const id = callerRef.slice("apikey:".length);
-    return {
-      callerLabel: `API key · ${id.slice(0, 8)}…`,
-      authPath: "apikey",
-    };
+  // Decode through the single sanctioned parser; this function only owns the
+  // display formatting (truncation), not the prefix vocabulary.
+  const { kind, id } = parseCallerRef(callerRef);
+  if (kind === "apikey") {
+    return { callerLabel: `API key · ${id.slice(0, 8)}…`, authPath: "apikey" };
   }
-  if (callerRef.startsWith("oauth:")) {
-    const sub = callerRef.slice("oauth:".length);
-    return {
-      callerLabel: `User · ${sub.slice(0, 8)}…`,
-      authPath: "oauth",
-    };
+  if (kind === "oauth") {
+    return { callerLabel: `User · ${id.slice(0, 8)}…`, authPath: "oauth" };
   }
   return { callerLabel: callerRef, authPath: "apikey" };
 }

@@ -1,9 +1,21 @@
+import { z } from "zod";
+
 import { asCollectionSlug, asDocumentSlug } from "../ids";
 import { parseFrontmatter } from "../store/domain/frontmatter";
 
 import type { McpExecutor } from "./executor";
 import { boundCollectionSlug, documentSlugFromArgs, strField } from "./params";
 import { ERR, err, ok, textContent, TOOLS } from "./protocol";
+
+// suggest_edit args. The document is addressed by slug OR path (resolved
+// via documentSlugFromArgs, like the read tools); these two fields are the
+// proposal itself. Zod at MCP ingestion (AGENTS.md) — this is the first
+// write tool, so it gets real validation rather than the ad-hoc strField
+// the read tools use.
+const SuggestEditArgs = z.object({
+  proposedMarkdown: z.string(),
+  baseDocVersion: z.number().int().nonnegative(),
+});
 
 type ToolHandler = (args: {
   id: unknown;
@@ -86,6 +98,75 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
     );
     return ok(id, textContent(JSON.stringify(result)));
   },
+
+  suggest_edit: async ({ id, exec, params }) => {
+    const fields = SuggestEditArgs.safeParse(params);
+    if (!fields.success) {
+      return err(
+        id,
+        ERR.INVALID_PARAMS,
+        "suggest_edit needs proposedMarkdown (string) and baseDocVersion (number)",
+      );
+    }
+    const requested = await documentSlugFromArgs(exec, params);
+    if (!requested.ok && requested.reason === "missing") {
+      return err(id, ERR.INVALID_PARAMS, "suggest_edit needs slug or path");
+    }
+    if (!requested.ok) {
+      return err(id, ERR.NOT_FOUND, `unknown document: ${requested.label}`);
+    }
+    const res = await exec.suggestEdit(
+      exec.callerRef,
+      requested.slug,
+      fields.data.proposedMarkdown,
+      fields.data.baseDocVersion,
+    );
+    if (res.ok) {
+      return ok(
+        id,
+        textContent(
+          JSON.stringify({
+            suggestionId: res.suggestionId,
+            hunkCount: res.hunkCount,
+          }),
+        ),
+      );
+    }
+    switch (res.reason) {
+      case "conflict":
+        return err(
+          id,
+          ERR.CONFLICT,
+          `document moved to version ${res.currentVersion}; re-read and re-propose against the current head`,
+          { currentVersion: res.currentVersion },
+        );
+      case "no-change":
+        return ok(
+          id,
+          textContent(
+            JSON.stringify({
+              suggestionId: null,
+              hunkCount: 0,
+              note: "no changes",
+            }),
+          ),
+        );
+      case "missing":
+        // The doc was resolvable at slug-resolution but is gone now (or was
+        // gated out by the scoped executor): same NOT_FOUND, no oracle.
+        return err(id, ERR.NOT_FOUND, `unknown document: ${requested.label}`);
+      default: {
+        // Exhaustive: a new CreateSuggestionResult reason is a compile error
+        // here, with a defensive runtime fallback if one ever slips through.
+        const unexpected: never = res;
+        return err(
+          id,
+          ERR.NOT_FOUND,
+          `unexpected suggest result ${String(unexpected)}`,
+        );
+      }
+    }
+  },
 };
 
 export function toolsListResponse(id: unknown): unknown {
@@ -93,7 +174,7 @@ export function toolsListResponse(id: unknown): unknown {
     tools: TOOLS.map((t) => ({
       name: t.name,
       description: t.description,
-      inputSchema: { type: "object" },
+      inputSchema: "inputSchema" in t ? t.inputSchema : { type: "object" },
     })),
   });
 }

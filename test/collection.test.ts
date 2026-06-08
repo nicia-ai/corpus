@@ -227,6 +227,8 @@ describe("MCP JSON-RPC dispatcher", () => {
   const fake: McpExecutor = {
     callerRef: asCallerRef("apikey:test"),
     recordRead: () => Promise.resolve(),
+    suggestEdit: () =>
+      Promise.resolve({ ok: false as const, reason: "missing" as const }),
     listCollections: async () => [{ slug: "c1", name: "C1" }],
     listDocuments: async () => [
       { slug: "d1", title: "D1", docVersion: 1, size: 3, path: "docs/d1.md" },
@@ -294,7 +296,7 @@ describe("MCP JSON-RPC dispatcher", () => {
     expect(r.result.capabilities).toHaveProperty("resources");
   });
 
-  it("tools/list returns the 6 read tools (export_bundle removed in C3)", async () => {
+  it("tools/list returns the 6 read tools plus suggest_edit (the one write tool)", async () => {
     const r = (await handleMcp(
       { jsonrpc: "2.0", id: 2, method: "tools/list" },
       fake,
@@ -305,6 +307,7 @@ describe("MCP JSON-RPC dispatcher", () => {
       "read_collection",
       "read_document",
       "read_document_meta",
+      "suggest_edit",
       "verify_history",
     ]);
   });

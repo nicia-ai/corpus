@@ -49,9 +49,13 @@ version history.
 - **Collections** — an ordered set of documents assembled into one
   corpus, with a token-size estimate so you can see when a collection is
   too large for an agent to use well.
-- **MCP** — each project exposes a read-only MCP endpoint (`/mcp`)
-  authenticated by OAuth bearer token or `cck_`-prefixed API key. An
-  agent only ever sees the project its credential resolves to.
+- **MCP** — each project exposes an MCP endpoint (`/mcp`) authenticated
+  by OAuth bearer token or `cck_`-prefixed API key. An agent only ever
+  sees the Collection its credential is bound to. It reads documents and
+  collections, and can **propose edits** with `suggest_edit` — a
+  reviewable suggestion a human accepts or rejects per hunk, never an
+  auto-applied write. Agents propose; only humans approve. Review state
+  (comments, suggestion threads) is otherwise off-MCP.
 - **CLI** — a Git-free `pull`/`push` tool (`pnpm corpus`) over a
   collection-scoped REST surface (`/api/v1/docs`), for editing documents
   from a terminal or CI with the same optimistic-concurrency contract as

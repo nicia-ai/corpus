@@ -4,7 +4,11 @@ import type {
   SuggestionStatus,
 } from "../../db";
 import { ConflictError } from "../../errors";
-import { asDocumentSlug, type DocumentSlug } from "../../ids";
+import {
+  asDocumentSlug,
+  type CallerChannel,
+  type DocumentSlug,
+} from "../../ids";
 import {
   applyHunks,
   diffToHunks,
@@ -39,6 +43,9 @@ export type SuggestionView = Readonly<{
   baseDocVersion: number;
   proposedMarkdown: string;
   createdBy: string;
+  // How the proposal arrived (web / mcp / cli) — drives the "via" label
+  // next to the author, recorded truth rather than inferred from createdBy.
+  channel: CallerChannel;
   createdAt: string;
   hunks: readonly SuggestionHunkView[];
 }>;
@@ -58,6 +65,9 @@ export type CreateSuggestionInput = Readonly<{
   proposedMarkdown: string;
   clientVersion: number;
   createdBy: string;
+  // The transport the proposal came through. Optional here so direct/test
+  // callers don't have to care; real paths set it (web fn → web, MCP → mcp).
+  channel?: CallerChannel;
 }>;
 
 export type CreateSuggestionResult = Readonly<
@@ -91,6 +101,11 @@ export async function createSuggestionCommand(
     proposedMarkdown: input.proposedMarkdown,
     status: "open",
     createdBy: input.createdBy,
+    // Authoritative default for an omitted channel (direct/test callers);
+    // both real paths set it explicitly. The DB column's own `.default("web")`
+    // exists only for the ADD COLUMN migration backfill, not as a second
+    // runtime default.
+    channel: input.channel ?? "web",
     createdAt: ctx.now,
   });
   await ctx.u.suggestions.addHunks(
@@ -181,6 +196,9 @@ export async function applySuggestionCommand(
     markdown: newMarkdown,
     clientVersion: head.docVersion,
     changedBy: input.appliedBy,
+    // Durable origin: the human approver is `changedBy`; this links the new
+    // version back to the suggestion (and the agent/human that proposed it).
+    appliedFrom: { suggestionId: s.id, by: s.createdBy, channel: s.channel },
   });
   await ctx.u.suggestions.resolve(s.id, "applied", input.appliedBy, ctx.now);
   return {

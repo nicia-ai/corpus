@@ -10,6 +10,7 @@ import {
   text,
 } from "drizzle-orm/sqlite-core";
 
+import { CALLER_CHANNELS } from "./ids";
 import type { BlockKind } from "./store/domain/block-match";
 import { HUNK_OPS } from "./store/domain/suggestion";
 
@@ -182,6 +183,12 @@ export const suggestion = sqliteTable(
     proposedMarkdown: text("proposed_markdown").notNull(),
     status: text("status", { enum: SUGGESTION_STATUSES }).notNull(),
     createdBy: text("created_by").notNull(),
+    // The transport the proposal arrived through, recorded at write time
+    // (default covers the ADD COLUMN migration + any direct insert; real
+    // paths set it explicitly — web fn → web, MCP suggestEdit → mcp).
+    channel: text("channel", { enum: CALLER_CHANNELS })
+      .notNull()
+      .default("web"),
     createdAt: text("created_at").notNull(),
     resolvedBy: text("resolved_by"),
     resolvedAt: text("resolved_at"),

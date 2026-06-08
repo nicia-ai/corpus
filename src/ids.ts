@@ -72,3 +72,34 @@ export function callerRefFromApiKey(apiKeyId: ApiKeyId): CallerRef {
 export function callerRefFromOAuth(userId: UserId): CallerRef {
   return asCallerRef(`oauth:${userId}`);
 }
+
+// Decode a stored author id into its kind + bare id — the inverse of the
+// two constructors above and the single sanctioned site where the
+// `apikey:` / `oauth:` prefixes are READ. Server-side label resolution
+// (resolveAuthorLabels and activity-view's labelFor) classifies through
+// here instead of re-matching the literals. A bare user id (a web edit's
+// author), or a malformed prefix with an empty body, decodes to kind
+// "user".
+export function parseCallerRef(
+  ref: string,
+): Readonly<{ kind: "apikey" | "oauth" | "user"; id: string }> {
+  if (ref.startsWith("apikey:")) {
+    const id = ref.slice("apikey:".length);
+    if (id !== "") return { kind: "apikey", id };
+  }
+  if (ref.startsWith("oauth:")) {
+    const id = ref.slice("oauth:".length);
+    if (id !== "") return { kind: "oauth", id };
+  }
+  return { kind: "user", id: ref };
+}
+
+// The transport a write arrived through, captured at the endpoint boundary
+// — NOT inferred from credential type. A `cck_` key and an OAuth bearer can
+// each drive either surface (an api key authenticates `/mcp` too, and a
+// future CLI may use OAuth), so the channel is recorded as stored truth at
+// write time rather than guessed from the CallerRef prefix later. `web` is
+// an authed browser session; `mcp` the agent endpoint; `cli` the REST/CLI
+// surface.
+export const CALLER_CHANNELS = ["web", "mcp", "cli"] as const;
+export type CallerChannel = (typeof CALLER_CHANNELS)[number];

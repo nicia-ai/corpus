@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import type { CollectionSlug, DocumentSlug, FolderSlug } from "../../ids";
+import type {
+  CallerChannel,
+  CollectionSlug,
+  DocumentSlug,
+  FolderSlug,
+} from "../../ids";
 import { alwaysIncludeBudgetTokensZ, compact } from "../../util";
 
 import type { CollectionDelivery } from "./collection-expand";
@@ -21,6 +26,17 @@ export type CollectionEventType =
   | "collection.detached"
   | "collection.reordered";
 
+// When a save materialized an applied suggestion, the durable origin link:
+// the suggestion id, its author (a user id, or a CallerRef for an agent),
+// and the transport the proposal arrived through. Recorded on the save's
+// change event so an audit can trace a version back to the agent (or human)
+// that proposed it — `changedBy` is the human approver, this is the origin.
+export type AppliedFrom = Readonly<{
+  suggestionId: number;
+  by: string;
+  channel: CallerChannel;
+}>;
+
 export type DocumentChange = Readonly<{
   kind: DocumentEventType;
   slug: DocumentSlug;
@@ -32,6 +48,8 @@ export type DocumentChange = Readonly<{
   // never bump `docVersion`. Threaded into the instrumentation stream so
   // downstream consumers can link `(slug, docVersion)` → blob.
   contentHash?: string;
+  // Present only when this version came from applying a suggestion.
+  appliedFrom?: AppliedFrom;
   changedBy: string;
   changedAt: string;
 }>;
@@ -58,9 +76,10 @@ export function documentChange(
     contentHash: string;
     changedBy: string;
     changedAt: string;
+    appliedFrom?: AppliedFrom;
   }>,
 ): DocumentChange {
-  return {
+  const change: DocumentChange = {
     kind: args.existed ? "document.updated" : "document.created",
     slug: args.slug,
     docVersion: args.docVersion,
@@ -69,6 +88,9 @@ export function documentChange(
     changedBy: args.changedBy,
     changedAt: args.changedAt,
   };
+  return args.appliedFrom === undefined
+    ? change
+    : { ...change, appliedFrom: args.appliedFrom };
 }
 
 // A title-only metadata change. The document's content and `docVersion`

@@ -34,6 +34,9 @@ export type DocListItem = Readonly<{
   docVersion: number;
   size: number;
   collectionCount: number;
+  // Open suggestions awaiting review (agent or human proposals) — the
+  // documents-list badge, the sibling of collectionCount.
+  pendingSuggestions: number;
   filename: string;
   path: string;
   // Stable slug of the document's single home folder; null = project root.
@@ -92,9 +95,10 @@ export const getDocumentList = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .handler(async ({ context }): Promise<DocListItem[]> => {
     const store = storeOf(srv(context));
-    const [docs, members] = await Promise.all([
+    const [docs, members, pendingCounts] = await Promise.all([
       store.listDocuments(),
       store.listResolvedMembers(),
+      store.openSuggestionCounts(),
     ]);
     // Count the distinct collections each document resolves into —
     // including membership via a linked folder, not just direct edges.
@@ -110,6 +114,7 @@ export const getDocumentList = createServerFn({ method: "GET" })
       docVersion: d.docVersion,
       size: d.size,
       collectionCount: contextsByDoc.get(d.slug)?.size ?? 0,
+      pendingSuggestions: pendingCounts[d.slug] ?? 0,
       filename: d.filename,
       path: d.path,
       folderSlug: d.folderSlug === null ? null : asFolderSlug(d.folderSlug),

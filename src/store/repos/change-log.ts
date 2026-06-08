@@ -1,6 +1,7 @@
 import { count, desc, lt, max } from "drizzle-orm";
 
 import { changeEvents, type LedgerDb } from "../../db";
+import { compact } from "../../util";
 import type { CollectionChange, DocumentChange } from "../domain/change-events";
 
 export type RecentChange = Readonly<{
@@ -41,10 +42,15 @@ export class ChangeLog {
       documentSlug: change.slug,
       collectionSlug: null,
       beforeJson: null,
-      afterJson: JSON.stringify({
-        docVersion: change.docVersion,
-        title: change.title,
-      }),
+      afterJson: JSON.stringify(
+        compact({
+          docVersion: change.docVersion,
+          title: change.title,
+          // Durable origin link when this save applied a suggestion (omitted
+          // for ordinary edits).
+          appliedFrom: change.appliedFrom,
+        }),
+      ),
       changedAt: change.changedAt,
       changedBy: change.changedBy,
     });

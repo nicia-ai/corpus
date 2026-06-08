@@ -1,4 +1,5 @@
 import type { CallerRef, CollectionSlug, DocumentSlug } from "../ids";
+import type { CreateSuggestionResult } from "../project-store/commands/suggestions";
 import type { CollectionDelivery } from "../store/domain/collection-expand";
 import type { VerifyResult } from "../store/domain/verify";
 
@@ -72,4 +73,16 @@ export type McpExecutor = Readonly<{
     collectionSlug: string,
     versionCapturedAtRead: Readonly<Record<string, number>>,
   ) => Promise<void>;
+  // The only write on the port. The agent proposes a full replacement
+  // body for one document in the bound Collection; the store diffs it into
+  // per-hunk suggestions pending human review (never auto-applied).
+  // `callerRef` is the enforced author (see scoped-executor); `baseDocVersion`
+  // is the version the agent read — a mismatch with head yields the
+  // `conflict` result so the agent re-reads rather than proposing blind.
+  suggestEdit: (
+    callerRef: CallerRef,
+    slug: DocumentSlug,
+    proposedMarkdown: string,
+    baseDocVersion: number,
+  ) => Promise<CreateSuggestionResult>;
 }>;
