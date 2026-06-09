@@ -27,7 +27,7 @@ function Collections() {
   const [creating, setCreating] = useState(false);
 
   return (
-    <div className="mx-auto max-w-4xl pb-12">
+    <div className="pb-12">
       <PageHeader
         title="Collections"
         subtitle={

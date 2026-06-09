@@ -216,7 +216,7 @@ export function CorpusBrowser({
       )}
 
       {needle !== "" ? (
-        <div className="max-h-[28rem] divide-y divide-slate-200 overflow-y-auto">
+        <div className="max-h-112 divide-y divide-slate-200 overflow-y-auto">
           {folderHits.length === 0 && docHits.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-slate-500">
               Nothing matches “{q}”.
@@ -243,7 +243,7 @@ export function CorpusBrowser({
           )}
         </div>
       ) : (
-        <div className="max-h-[28rem] divide-y divide-slate-200 overflow-y-auto">
+        <div className="max-h-112 divide-y divide-slate-200 overflow-y-auto">
           {(childFolders.get(null) ?? []).map((f) => renderFolder(f, 0))}
           {(docsByFolder.get(null) ?? []).map((d) => docRow(d, 0, false))}
         </div>

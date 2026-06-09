@@ -98,7 +98,7 @@ function Home(
   const recent = props.changes.slice(0, 12);
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div>
       <PageHeader
         title="Home"
         subtitle={`${docCount} document${docCount === 1 ? "" : "s"} · ${colCount} collection${colCount === 1 ? "" : "s"} — no copies, one source of truth.`}
@@ -227,7 +227,7 @@ function CollectionStrip(
           <Link
             to="/p/$projectId/collections"
             params={{ projectId: props.projectId }}
-            className="flex h-full min-h-[110px] items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-500 hover:border-slate-400 hover:text-slate-900"
+            className="flex h-full min-h-28 items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-500 hover:border-slate-400 hover:text-slate-900"
           >
             <Plus className="size-4" />
             New collection

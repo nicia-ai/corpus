@@ -167,8 +167,8 @@ export function ReviewWorkspace({
         className={cn(
           "min-w-0",
           showReview
-            ? "grid items-start gap-6 lg:grid-cols-[minmax(0,54rem)_20rem] xl:gap-8"
-            : "mx-auto max-w-[54rem]",
+            ? "grid items-start gap-6 lg:grid-cols-[minmax(0,var(--container-doc))_20rem] xl:gap-8"
+            : "max-w-doc",
         )}
       >
         <AnnotatableMarkdown
