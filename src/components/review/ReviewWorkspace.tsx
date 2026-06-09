@@ -15,9 +15,11 @@ import { useSubmit } from "@/lib/forms";
 import {
   applyReviewHighlights,
   clearHighlights,
+  measureBlockRects,
   measureAnchorTops,
   resolveSelectionAnchor,
   type AnchorPositionTarget,
+  type HighlightRect,
 } from "@/lib/highlight";
 import type { ReviewModel } from "@/lib/review-items";
 import {
@@ -41,6 +43,16 @@ type Pending = Readonly<{
 
 type Mode = "menu" | "comment" | "suggest";
 
+export type ChangeFlash = Readonly<{
+  id: number;
+  blockIndexes: readonly number[];
+}>;
+
+// How long a change-flash stays painted. Must outlast the CSS fade
+// (corpus-change-fade, 5.5s); the parent (DocumentCurrentPage) clears its
+// flash request on the same budget so the cue is shown once, then forgotten.
+export const CHANGE_FLASH_DURATION_MS = 5600;
+
 const EMPTY_REVIEW_LAYOUT: ReviewRailLayout = {
   itemTops: {},
   documentHeight: 0,
@@ -56,6 +68,7 @@ export function ReviewWorkspace({
   suggestions,
   model,
   presence,
+  changeFlash,
   showReview,
   mobileOpen,
   onMobileOpenChange,
@@ -71,6 +84,7 @@ export function ReviewWorkspace({
   suggestions: SuggestionsResult;
   model: ReviewModel;
   presence: readonly PresenceUser[];
+  changeFlash?: ChangeFlash | undefined;
   showReview: boolean;
   mobileOpen: boolean;
   onMobileOpenChange: (open: boolean) => void;
@@ -165,6 +179,7 @@ export function ReviewWorkspace({
           blocks={blocks}
           comments={comments}
           suggestionMarks={model.inlineSuggestionMarks}
+          changeFlash={changeFlash}
           onReviewLayoutChange={updateReviewLayout}
           onChange={onChange}
           onSuggest={onSuggest}
@@ -249,6 +264,7 @@ function AnnotatableMarkdown({
   blocks,
   comments,
   suggestionMarks,
+  changeFlash,
   onReviewLayoutChange,
   onChange,
   onSuggest,
@@ -260,6 +276,7 @@ function AnnotatableMarkdown({
   blocks: readonly BlockView[];
   comments: CommentsResult;
   suggestionMarks: ReviewModel["inlineSuggestionMarks"];
+  changeFlash?: ChangeFlash | undefined;
   onReviewLayoutChange: (layout: ReviewRailLayout) => void;
   onChange: () => void;
   onSuggest: (proposedMarkdown: string) => Promise<string | undefined>;
@@ -269,10 +286,16 @@ function AnnotatableMarkdown({
   const selectionFrameRef = useRef<number | undefined>(undefined);
   const selectionTimerRef = useRef<number | undefined>(undefined);
   const modeRef = useRef<Mode>("menu");
+  const changeFlashIdRef = useRef<number | undefined>(undefined);
+  const changeFlashTimerRef = useRef<number | undefined>(undefined);
+  // The flash currently being painted, so a reflow within the window can
+  // re-measure its rects (the document can shift after fonts/images load).
+  const activeFlashRef = useRef<ChangeFlash | undefined>(undefined);
   const [pending, setPending] = useState<Pending>();
   const [mode, setMode] = useState<Mode>("menu");
   const [body, setBody] = useState("");
   const [edited, setEdited] = useState("");
+  const [changeRects, setChangeRects] = useState<readonly HighlightRect[]>([]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -306,6 +329,21 @@ function AnnotatableMarkdown({
         documentHeight: Math.ceil(frame.scrollHeight),
       });
     };
+    // Re-derive the flash rects from the live DOM. Runs on the initial flash
+    // and again on every reflow (resize/observer) while a flash is active, so
+    // the absolutely-positioned highlights track the text they point at.
+    const measureFlash = (): void => {
+      const active = activeFlashRef.current;
+      if (active === undefined || frame === null) return;
+      setChangeRects(
+        measureBlockRects({
+          container: prose,
+          frame,
+          blocks,
+          blockIndexes: active.blockIndexes,
+        }).map((rect) => ({ ...rect, key: `${active.id}:${rect.key}` })),
+      );
+    };
     applyReviewHighlights({
       container: prose,
       comments: comments.threads
@@ -320,12 +358,31 @@ function AnnotatableMarkdown({
       blocks,
     });
     measure();
+    if (
+      changeFlash !== undefined &&
+      changeFlash.blockIndexes.length > 0 &&
+      changeFlashIdRef.current !== changeFlash.id &&
+      frame !== null
+    ) {
+      changeFlashIdRef.current = changeFlash.id;
+      activeFlashRef.current = changeFlash;
+      measureFlash();
+      if (changeFlashTimerRef.current !== undefined) {
+        window.clearTimeout(changeFlashTimerRef.current);
+      }
+      changeFlashTimerRef.current = window.setTimeout(() => {
+        changeFlashTimerRef.current = undefined;
+        activeFlashRef.current = undefined;
+        setChangeRects([]);
+      }, CHANGE_FLASH_DURATION_MS);
+    }
     let frameId: number | undefined;
     const scheduleMeasure = (): void => {
       if (frameId !== undefined) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
         frameId = undefined;
         measure();
+        measureFlash();
       });
     };
     const observer =
@@ -344,6 +401,7 @@ function AnnotatableMarkdown({
   }, [
     blocks,
     comments.threads,
+    changeFlash,
     markdown,
     onReviewLayoutChange,
     suggestionMarks,
@@ -352,6 +410,9 @@ function AnnotatableMarkdown({
   useEffect(
     () => () => {
       cancelScheduledSelectionCapture();
+      if (changeFlashTimerRef.current !== undefined) {
+        window.clearTimeout(changeFlashTimerRef.current);
+      }
     },
     [],
   );
@@ -512,6 +573,19 @@ function AnnotatableMarkdown({
       <div ref={proseRef}>
         <Markdown source={markdown} />
       </div>
+      {changeRects.map((rect) => (
+        <span
+          key={rect.key}
+          aria-hidden="true"
+          className="corpus-change-flash"
+          style={{
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+          }}
+        />
+      ))}
       {pending !== undefined && (
         <div
           className="absolute z-10 max-w-[calc(100vw-2rem)]"

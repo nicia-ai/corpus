@@ -11,20 +11,27 @@ import { alwaysIncludeBudgetTokensZ, compact } from "../../util";
 import type { CollectionDelivery } from "./collection-expand";
 
 // The change-event vocabulary — the single source of event-type
-// strings, so callers stay typed instead of hand-building literals.
-export type DocumentEventType =
-  | "document.created"
-  | "document.updated"
-  | "document.renamed"
-  | "document.filename_changed"
-  | "document.archived";
+// strings, so callers stay typed instead of hand-building literals. The
+// runtime `as const` arrays let the real-time wire enum (presence.ts) derive
+// its action list from this one source, so a new kind can't silently fail
+// the WebSocket channel's validation.
+export const DOCUMENT_EVENT_TYPES = [
+  "document.created",
+  "document.updated",
+  "document.renamed",
+  "document.filename_changed",
+  "document.archived",
+] as const;
+export type DocumentEventType = (typeof DOCUMENT_EVENT_TYPES)[number];
 
-export type CollectionEventType =
-  | "collection.created"
-  | "collection.updated"
-  | "collection.attached"
-  | "collection.detached"
-  | "collection.reordered";
+export const COLLECTION_EVENT_TYPES = [
+  "collection.created",
+  "collection.updated",
+  "collection.attached",
+  "collection.detached",
+  "collection.reordered",
+] as const;
+export type CollectionEventType = (typeof COLLECTION_EVENT_TYPES)[number];
 
 // When a save materialized an applied suggestion, the durable origin link:
 // the suggestion id, its author (a user id, or a CallerRef for an agent),

@@ -53,6 +53,15 @@ export class CommentRepo {
       .orderBy(commentThread.id);
   }
 
+  async getThread(threadId: number): Promise<CommentThreadRow | undefined> {
+    const [row] = await this.db
+      .select()
+      .from(commentThread)
+      .where(eq(commentThread.id, threadId))
+      .limit(1);
+    return row;
+  }
+
   async createThread(row: NewCommentThread): Promise<number> {
     const [r] = await this.db
       .insert(commentThread)
@@ -103,14 +112,18 @@ export class CommentRepo {
       .where(eq(commentThread.id, threadId));
   }
 
+  // Returns the resolved thread's owning document slug (for the real-time
+  // nudge) from the same UPDATE, so the caller needs no follow-up read.
   async resolveThread(
     threadId: number,
     resolvedBy: string,
     resolvedAt: string,
-  ): Promise<void> {
-    await this.db
+  ): Promise<string | undefined> {
+    const [row] = await this.db
       .update(commentThread)
       .set({ status: "resolved", resolvedBy, resolvedAt })
-      .where(eq(commentThread.id, threadId));
+      .where(eq(commentThread.id, threadId))
+      .returning({ documentSlug: commentThread.documentSlug });
+    return row?.documentSlug;
   }
 }

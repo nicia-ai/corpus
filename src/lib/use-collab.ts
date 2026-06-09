@@ -1,27 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { z } from "zod";
 
 import type { ProjectId } from "@/ids";
+import {
+  ServerMessage,
+  type PresenceUser,
+  type RealtimeChange,
+} from "@/project-store/presence";
 
-export type PresenceUser = Readonly<{
-  userId: string;
-  userName: string;
-  docSlug: string | null;
-}>;
-
-const ServerMessage = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("presence"),
-    users: z.array(
-      z.object({
-        userId: z.string(),
-        userName: z.string(),
-        docSlug: z.string().nullable(),
-      }),
-    ),
-  }),
-  z.object({ type: z.literal("changed") }),
-]);
+export type { PresenceUser, RealtimeChange } from "@/project-store/presence";
 
 const RETRY_MS = 2000;
 
@@ -32,7 +18,7 @@ const RETRY_MS = 2000;
 export function useCollab(
   projectId: ProjectId,
   docSlug: string,
-  onChanged: () => void,
+  onChanged: (change: RealtimeChange | undefined) => void,
 ): readonly PresenceUser[] {
   const [presence, setPresence] = useState<readonly PresenceUser[]>([]);
   // Keep the latest callback without tearing down the socket each render
@@ -68,7 +54,7 @@ export function useCollab(
         const parsed = ServerMessage.safeParse(raw);
         if (!parsed.success) return;
         if (parsed.data.type === "presence") setPresence(parsed.data.users);
-        else onChangedRef.current();
+        else onChangedRef.current(parsed.data.change);
       };
       ws.onclose = () => {
         if (!closed) retry = setTimeout(connect, RETRY_MS);

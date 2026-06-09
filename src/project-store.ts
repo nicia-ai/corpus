@@ -24,6 +24,8 @@ import {
 import {
   type CommandOutcome,
   collectionSnapshotMembers,
+  type DomainChange,
+  isDocumentChange,
   type ProjectCommandContext,
 } from "./project-store/command";
 import {
@@ -111,6 +113,7 @@ import { ProjectInstrumentation } from "./project-store/outbox";
 import {
   ClientMessage,
   presenceFrom,
+  type RealtimeChange,
   SocketAttachment,
   type SocketMeta,
 } from "./project-store/presence";
@@ -192,6 +195,14 @@ export type {
 
 type Unit = ProjectUnit;
 
+// Maps a committed command's outcome to the real-time change to broadcast,
+// or undefined to fall back to the domain-derived change. Always a function
+// so the broadcast can be conditioned on whether the command actually
+// succeeded (a returned `{ ok: false }` must not broadcast a phantom event).
+type RealtimeChangeResolver<T> = (
+  outcome: CommandOutcome<T>,
+) => RealtimeChange | undefined;
+
 export type DocumentReviewSnapshot = Readonly<{
   doc: DocumentSnapshot | undefined;
   blocks: DocumentBlocksResult;
@@ -237,6 +248,33 @@ function fingerprintVersions(map: Readonly<Record<string, number>>): string {
     .sort()
     .map((k) => `${k}=${String(map[k] ?? 0)}`)
     .join(",");
+}
+
+function realtimeChangeFromDomain(
+  changes: readonly DomainChange[],
+): RealtimeChange | undefined {
+  // Prefer the document change when a command emits several (archiving a doc
+  // that's in collections emits detach/reorder changes first, then the
+  // document.archived — the document one is what a viewer needs to hear).
+  const change = changes.find(isDocumentChange) ?? changes[0];
+  if (change === undefined) return undefined;
+  if (isDocumentChange(change)) {
+    return compact({
+      area: "document" as const,
+      action: change.kind,
+      actorId: change.changedBy,
+      docSlug: change.slug,
+      docVersion: change.docVersion,
+      title: change.title,
+    });
+  }
+  return compact({
+    area: "collection" as const,
+    action: change.kind,
+    actorId: change.changedBy,
+    collectionSlug: change.collectionSlug,
+    docSlug: change.documentSlug,
+  });
 }
 
 // One ProjectStore instance per Project. TypeGraph (Document/
@@ -308,6 +346,7 @@ export class ProjectStore extends DurableObject<Env> {
   private async writeCommand<T>(
     now: string,
     fn: (ctx: ProjectCommandContext) => Promise<CommandOutcome<T>>,
+    realtime?: RealtimeChangeResolver<T>,
   ): Promise<CommandOutcome<T>> {
     const outcome = await this.write(async (u) => {
       const out = await fn(this.commandContext(u, now));
@@ -318,7 +357,9 @@ export class ProjectStore extends DurableObject<Env> {
     await this.instrumentation().drain();
     // Nudge connected clients that something in this project changed so they
     // re-fetch (comments / suggestions / the document). Ephemeral, best-effort.
-    this.broadcastChanged();
+    this.broadcastChanged(
+      realtime?.(outcome) ?? realtimeChangeFromDomain(outcome.changes),
+    );
     return outcome;
   }
 
@@ -387,8 +428,13 @@ export class ProjectStore extends DurableObject<Env> {
     this.broadcast({ type: "presence", users: presenceFrom(metas) });
   }
 
-  private broadcastChanged(): void {
-    this.broadcast({ type: "changed" });
+  private broadcastChanged(change?: RealtimeChange): void {
+    this.broadcast({
+      type: "changed",
+      ...(change === undefined
+        ? {}
+        : { change: this.withPresenceActorName(change) }),
+    });
   }
 
   private broadcast(message: unknown): void {
@@ -401,6 +447,27 @@ export class ProjectStore extends DurableObject<Env> {
         continue;
       }
     }
+  }
+
+  private withPresenceActorName(change: RealtimeChange): RealtimeChange {
+    // mcp/cli actors are agents/scripts with no presence socket — scanning
+    // every socket would never match, so skip the work; the name already set,
+    // or no actor, also short-circuits.
+    if (
+      change.actorName !== undefined ||
+      change.actorId === undefined ||
+      change.channel === "mcp" ||
+      change.channel === "cli"
+    ) {
+      return change;
+    }
+    for (const ws of this.ctx.getWebSockets()) {
+      const m = SocketAttachment.safeParse(ws.deserializeAttachment());
+      if (m.success && m.data.userId === change.actorId) {
+        return { ...change, actorName: m.data.userName };
+      }
+    }
+    return change;
   }
 
   // — Read-path event emission ————————————————————————————————————————
@@ -931,8 +998,18 @@ export class ProjectStore extends DurableObject<Env> {
   async createComment(input: CreateCommentInput): Promise<CreateCommentResult> {
     const now = new Date().toISOString();
     try {
-      const outcome = await this.writeCommand(now, (ctx) =>
-        createCommentCommand(ctx, input),
+      const outcome = await this.writeCommand(
+        now,
+        (ctx) => createCommentCommand(ctx, input),
+        (out) =>
+          out.result.ok
+            ? {
+                area: "review",
+                action: "comment.created",
+                actorId: input.createdBy,
+                docSlug: input.slug,
+              }
+            : undefined,
       );
       return outcome.result;
     } catch (err) {
@@ -951,20 +1028,40 @@ export class ProjectStore extends DurableObject<Env> {
     input: AddCommentInput,
   ): Promise<Readonly<{ commentId: number }>> {
     const now = new Date().toISOString();
-    const outcome = await this.writeCommand(now, (ctx) =>
-      addCommentCommand(ctx, input),
+    const outcome = await this.writeCommand(
+      now,
+      (ctx) => addCommentCommand(ctx, input),
+      (out) =>
+        out.result.documentSlug === undefined
+          ? undefined
+          : {
+              area: "review",
+              action: "comment.replied",
+              actorId: input.createdBy,
+              docSlug: out.result.documentSlug,
+            },
     );
-    return outcome.result;
+    return { commentId: outcome.result.commentId };
   }
 
   async resolveCommentThread(
     input: ResolveThreadInput,
   ): Promise<Readonly<{ ok: true }>> {
     const now = new Date().toISOString();
-    const outcome = await this.writeCommand(now, (ctx) =>
-      resolveThreadCommand(ctx, input),
+    const outcome = await this.writeCommand(
+      now,
+      (ctx) => resolveThreadCommand(ctx, input),
+      (out) =>
+        out.result.documentSlug === undefined
+          ? undefined
+          : {
+              area: "review",
+              action: "comment.resolved",
+              actorId: input.resolvedBy,
+              docSlug: out.result.documentSlug,
+            },
     );
-    return outcome.result;
+    return { ok: outcome.result.ok };
   }
 
   // — Suggestions (per-hunk proposed edits) ——————————————————————————
@@ -974,8 +1071,19 @@ export class ProjectStore extends DurableObject<Env> {
   ): Promise<CreateSuggestionResult> {
     const now = new Date().toISOString();
     try {
-      const outcome = await this.writeCommand(now, (ctx) =>
-        createSuggestionCommand(ctx, input),
+      const outcome = await this.writeCommand(
+        now,
+        (ctx) => createSuggestionCommand(ctx, input),
+        (out) =>
+          out.result.ok
+            ? {
+                area: "review",
+                action: "suggestion.created",
+                actorId: input.createdBy,
+                docSlug: input.slug,
+                channel: input.channel ?? "web",
+              }
+            : undefined,
       );
       return outcome.result;
     } catch (err) {
@@ -1074,20 +1182,43 @@ export class ProjectStore extends DurableObject<Env> {
     input: ApplySuggestionInput,
   ): Promise<ApplySuggestionResult> {
     const now = new Date().toISOString();
-    const outcome = await this.writeCommand(now, (ctx) =>
-      applySuggestionCommand(ctx, input),
+    const outcome = await this.writeCommand(
+      now,
+      (ctx) => applySuggestionCommand(ctx, input),
+      (out) =>
+        out.result.ok
+          ? {
+              area: "review",
+              action: "suggestion.applied",
+              actorId: input.appliedBy,
+              docSlug: out.result.documentSlug,
+              docVersion: out.result.docVersion,
+            }
+          : undefined,
     );
-    return outcome.result;
+    return outcome.result.ok
+      ? { ok: true, docVersion: outcome.result.docVersion }
+      : outcome.result;
   }
 
   async rejectSuggestion(
     input: RejectSuggestionInput,
   ): Promise<Readonly<{ ok: boolean }>> {
     const now = new Date().toISOString();
-    const outcome = await this.writeCommand(now, (ctx) =>
-      rejectSuggestionCommand(ctx, input),
+    const outcome = await this.writeCommand(
+      now,
+      (ctx) => rejectSuggestionCommand(ctx, input),
+      (out) =>
+        out.result.ok && out.result.documentSlug !== undefined
+          ? {
+              area: "review",
+              action: "suggestion.rejected",
+              actorId: input.rejectedBy,
+              docSlug: out.result.documentSlug,
+            }
+          : undefined,
     );
-    return outcome.result;
+    return { ok: outcome.result.ok };
   }
 
   // Rename a document = a title-only head-pointer edit. Distinct from
