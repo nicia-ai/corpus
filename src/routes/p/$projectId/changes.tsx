@@ -17,7 +17,7 @@ export const Route = createFileRoute("/p/$projectId/changes")({
 function Changes() {
   const { changes } = Route.useLoaderData();
   return (
-    <div className="mx-auto max-w-4xl">
+    <div>
       <PageHeader
         title="Changes"
         subtitle="Every edit and attachment across this project — click any row for the full recorded event."

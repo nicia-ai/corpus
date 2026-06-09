@@ -23,6 +23,14 @@
     "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono:
     "Geist Mono", ui-monospace, "SF Mono", "Cascadia Code", monospace;
+
+  /* Doc reading-column cap, shared by the review layout (doc track beside
+   * the 20rem rail) and the no-rail layout so the prose measure doesn't
+   * shift when review toggles. A capped width, not a fluid 1fr: it bounds
+   * line length. Sized to fit beside the rail in the max-w-7xl shell —
+   * wider than ideal for prose (~90ch at the .md body size), narrower than
+   * DESIGN.md's max-w-5xl. Revisit if the rail width or shell max-w change. */
+  --container-doc: 54rem;
 }
 
 /* Data-dense node cards / version chips must not jitter column width

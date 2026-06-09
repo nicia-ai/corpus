@@ -93,7 +93,7 @@ export function DocRow({
             setEditing(true);
           }}
           title="Rename file"
-          className="hidden max-w-[12rem] truncate font-mono text-sm text-slate-500 hover:text-slate-900 sm:inline"
+          className="hidden max-w-48 truncate font-mono text-sm text-slate-500 hover:text-slate-900 sm:inline"
         >
           {doc.filename}
         </button>

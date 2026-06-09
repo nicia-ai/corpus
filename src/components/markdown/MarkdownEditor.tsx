@@ -184,7 +184,7 @@ export function MarkdownEditor({
   return (
     <div
       ref={host}
-      className="min-h-[28rem] overflow-hidden rounded-md border border-slate-300 bg-white focus-within:border-blue-600 focus-within:outline-2 focus-within:outline-blue-600"
+      className="min-h-112 overflow-hidden rounded-md border border-slate-300 bg-white focus-within:border-blue-600 focus-within:outline-2 focus-within:outline-blue-600"
     />
   );
 }

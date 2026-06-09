@@ -60,7 +60,7 @@ const MarkdownEditor = lazy(() =>
 );
 
 const editorFallback = (
-  <div className="min-h-[28rem] rounded-md border border-slate-300 bg-white" />
+  <div className="min-h-112 rounded-md border border-slate-300 bg-white" />
 );
 
 type RemoteFlashRequest = Readonly<
@@ -639,7 +639,7 @@ function Editor({
           </Suspense>
         )
       ) : (
-        <Markdown source={draft} bodyClassName="min-h-[28rem]" />
+        <Markdown source={draft} bodyClassName="min-h-112" />
       )}
       <div className="mt-3 flex items-center gap-3">
         <Button disabled={pending} onClick={() => void save(head, draft)}>
