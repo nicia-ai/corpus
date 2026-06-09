@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import {
   type HunkDecision,
@@ -114,5 +114,20 @@ export class SuggestionRepo {
       .update(suggestion)
       .set({ status: "stale" })
       .where(eq(suggestion.id, id));
+  }
+
+  // Mark every still-open suggestion for a document stale. Called when the
+  // document's head advances (e.g. a suggestion is applied): the others'
+  // stored base source ranges no longer match the head, so they can't apply.
+  async staleOpenForDoc(documentSlug: string): Promise<void> {
+    await this.db
+      .update(suggestion)
+      .set({ status: "stale" })
+      .where(
+        and(
+          eq(suggestion.documentSlug, documentSlug),
+          eq(suggestion.status, "open"),
+        ),
+      );
   }
 }

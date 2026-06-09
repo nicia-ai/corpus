@@ -750,15 +750,17 @@ export class ProjectStore extends DurableObject<Env> {
       return { ok: false, conflict: true, currentVersion: err.currentVersion };
     }
     // A racing N+1: both saves create `DocumentVersion (slug, N+1)`; the
-    // loser hits the node-unique constraint (TypeGraph UniquenessError)
-    // and its whole enlisted tx rolls back. Map to the same 409.
+    // loser hits the node-unique constraint (TypeGraph UniquenessError) and
+    // its whole enlisted tx rolls back. Confirm it really was a version race
+    // — the head advanced past the client's base — before reporting a 409.
+    // A UniquenessError on any OTHER constraint (e.g. a Document-slug create
+    // collision) with the head unchanged is a real fault, not a conflict, and
+    // must surface rather than be disguised as "someone else edited this".
     if (isUniqueViolation(err)) {
       const head = await this.getDocument(input.slug);
-      return {
-        ok: false,
-        conflict: true,
-        currentVersion: head?.docVersion ?? input.clientVersion,
-      };
+      if (head !== undefined && head.docVersion > input.clientVersion) {
+        return { ok: false, conflict: true, currentVersion: head.docVersion };
+      }
     }
     throw err;
   }

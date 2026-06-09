@@ -177,6 +177,46 @@ describe("rebaseAnchors", () => {
     expect(r.status).toBe("anchored");
     if (r.status === "anchored") expect(r.anchor.start).toBe(8);
   });
+
+  it("cross-block recovery picks the block whose context matches, not the first", () => {
+    // The carrying block is rewritten so the quote must recover elsewhere;
+    // the same exact phrase exists in TWO surviving blocks. Context decides.
+    const A = block("A", "carrier mentioning approved once");
+    const B = block("B", "left side then approved and a bit more");
+    const C = block("C", "the plan was approved yesterday afternoon");
+    const anchor = resolveAnchor(C, 13, 21); // "approved" with C's context
+    const match = matchBlocks({
+      prev: [A, B, C],
+      next: [
+        { kind: "paragraph", text: "carrier totally rewritten now gone" },
+        { kind: "paragraph", text: "left side then approved and a bit more" },
+        {
+          kind: "paragraph",
+          text: "the plan was approved yesterday afternoon",
+        },
+      ],
+      mintId: minter(),
+    });
+    const r = rebaseOneAnchor(anchor, match);
+    expect(r.status).toBe("anchored");
+    // Must land on C (its surrounding context), not B (the earlier match).
+    if (r.status === "anchored") {
+      expect(r.anchor.blockId).toBe(asBlockId("C"));
+      expect(slice(r, match)).toBe("approved");
+    }
+  });
+
+  it("a caret (empty selection) orphans when its block is gone rather than floating", () => {
+    const A = block("A", "delete this whole paragraph");
+    const caret = resolveAnchor(A, 27, 27); // zero-width: exact === ""
+    const match = matchBlocks({
+      prev: [A],
+      next: [{ kind: "paragraph", text: "completely different replacement" }],
+      mintId: minter(),
+    });
+    const r = rebaseOneAnchor(caret, match);
+    expect(r.status).toBe("orphaned");
+  });
 });
 
 // --- safety property: an anchored result NEVER lands on wrong text -----

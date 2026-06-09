@@ -130,8 +130,36 @@ export function applyHunks(base: string, hunks: readonly Hunk[]): string {
     }
   }
   out += base.slice(cursor);
-  return out
-    .replace(/\n{3,}/g, "\n\n")
+  return collapseBlankRunsOutsideCode(out)
     .replace(/^\n+/, "")
     .replace(/\s+$/, "");
+}
+
+// Collapse runs of blank lines to a single blank line (the gaps a delete
+// leaves), but NEVER inside a fenced code block — there blank lines are
+// significant content. Equivalent to `/\n{3,}/→\n\n` for prose while leaving
+// ``` / ~~~ fences intact, so applying a suggestion can't silently rewrite a
+// code sample's blank lines.
+function collapseBlankRunsOutsideCode(markdown: string): string {
+  const lines = markdown.split("\n");
+  const out: string[] = [];
+  let fence: string | undefined;
+  let blankRun = 0;
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    const run = /^(`{3,}|~{3,})/.exec(trimmed)?.[1];
+    if (fence === undefined) {
+      if (run !== undefined) fence = run[0];
+    } else if (run?.[0] === fence) {
+      fence = undefined;
+    }
+    if (fence === undefined && line.trim() === "") {
+      blankRun += 1;
+      if (blankRun >= 2) continue; // keep at most one blank line
+    } else {
+      blankRun = 0;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
 }

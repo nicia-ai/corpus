@@ -176,6 +176,21 @@ export class VersionRepo {
       .map(toCollectionVersionRow)
       .sort((a, b) => a.collectionSlug.localeCompare(b.collectionSlug));
   }
+
+  // EVERY membership snapshot, not just the latest per collection. Retention
+  // pins document versions referenced by any live CollectionVersion (not only
+  // the head snapshot), so an older snapshot can never be left referencing a
+  // reaped version/blob.
+  async allCollectionVersions(): Promise<readonly CollectionVersionRow[]> {
+    const nodes = await findAll((w) => this.g.nodes.CollectionVersion.find(w));
+    return nodes
+      .map(toCollectionVersionRow)
+      .sort(
+        (a, b) =>
+          a.collectionSlug.localeCompare(b.collectionSlug) ||
+          a.collectionVersion - b.collectionVersion,
+      );
+  }
 }
 
 function toDocumentVersionRow(n: DocumentVersionNode): DocumentVersionRow {

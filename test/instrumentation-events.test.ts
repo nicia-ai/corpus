@@ -184,6 +184,41 @@ describe("instrumentation-events — idempotency keys", () => {
     expect(idempotencyKey(a)).toBe("document.updated:doc-1:v5");
   });
 
+  it("head-only document events disambiguate distinct edits by localEventId (docVersion does not bump, so repeats would otherwise collide)", () => {
+    const first = events.documentRenamed({
+      slug: "doc-1",
+      docVersion: 5,
+      title: "B",
+      changedBy: "u",
+    });
+    const second = events.documentRenamed({
+      slug: "doc-1",
+      docVersion: 5, // unchanged — a rename never bumps the version
+      title: "C",
+      changedBy: "u",
+    });
+    // Without the ledger id (read/emit path) the natural key is reused.
+    expect(idempotencyKey(first)).toBe(idempotencyKey(second));
+    // With it (write/outbox path) two distinct renames never collapse, while a
+    // drain retry of the SAME ledger row reuses its stored key.
+    expect(idempotencyKey(first, 11)).toBe("document.renamed:doc-1:e11");
+    expect(idempotencyKey(first, 11)).not.toBe(idempotencyKey(second, 12));
+    expect(idempotencyKey(first, 11)).toBe(idempotencyKey(first, 11));
+  });
+
+  it("collection.updated disambiguates distinct metadata edits by localEventId", () => {
+    const a = events.collectionUpdated({
+      collectionSlug: "c-1",
+      changedBy: "u",
+    });
+    const b = events.collectionUpdated({
+      collectionSlug: "c-1",
+      changedBy: "u",
+    });
+    expect(idempotencyKey(a, 7)).toBe("collection.updated:c-1:e7");
+    expect(idempotencyKey(a, 7)).not.toBe(idempotencyKey(b, 8));
+  });
+
   it("collection.attached keys on (type, collectionSlug, member) — member is doc:<slug> or folder:<slug>", () => {
     expect(
       idempotencyKey(

@@ -15,8 +15,11 @@ export async function reapExpiredRecords(
   let versionsDeleted = 0;
   let survivingHashes: readonly string[] | undefined;
   if (retention.documentVersionDays !== undefined) {
+    // Pin versions referenced by EVERY stored CollectionVersion, not just the
+    // latest per collection — older immutable snapshots are live records too,
+    // and reaping a version (or its blob) they pin would dangle them.
     const pinned = new Set<string>();
-    for (const c of await u.versions.latestCollectionVersions()) {
+    for (const c of await u.versions.allCollectionVersions()) {
       for (const m of c.members) {
         pinned.add(versionKey(m.documentSlug, m.docVersion));
       }
