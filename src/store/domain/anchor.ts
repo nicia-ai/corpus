@@ -24,6 +24,8 @@ import type { MatchedBlock, MatchResult } from "./block-match";
 // selection, used to disambiguate which occurrence of the quote is meant.
 const QUOTE_CONTEXT = 32;
 
+export const MIN_ANCHOR_CHARS = 8;
+
 export type TextQuote = Readonly<{
   prefix: string;
   exact: string;
@@ -93,7 +95,7 @@ function rebaseOne(anchor: Anchor, index: RebaseIndex): RebaseResult {
   const carried = index.carried.get(anchor.blockId);
   if (carried !== undefined) {
     const found = locate(carried.text, anchor.quote);
-    if (found !== undefined) return placed(carried.id, found.at, anchor.quote);
+    if (found !== undefined) return placed(carried, found.at, anchor.quote);
   }
   // 2. Anywhere else the quote survived (cut-and-pasted content, or the
   //    carrying block dropped the quote). Score EVERY candidate block by its
@@ -102,30 +104,30 @@ function rebaseOne(anchor: Anchor, index: RebaseIndex): RebaseResult {
   //    A caret (empty exact) carries no text to recover, so it must orphan
   //    rather than float onto an arbitrary block.
   if (anchor.quote.exact !== "") {
-    let best: { id: BlockId; at: number } | undefined;
+    let best: { block: MatchedBlock; at: number } | undefined;
     let bestScore = -1;
     for (const block of index.blocks) {
       if (block.id === carried?.id) continue;
       const found = locate(block.text, anchor.quote);
       if (found !== undefined && found.score > bestScore) {
         bestScore = found.score;
-        best = { id: block.id, at: found.at };
+        best = { block, at: found.at };
       }
     }
-    if (best !== undefined) return placed(best.id, best.at, anchor.quote);
+    if (best !== undefined) return placed(best.block, best.at, anchor.quote);
   }
   // 3. Gone.
   return { status: "orphaned", quote: anchor.quote };
 }
 
 function placed(
-  blockId: BlockId,
+  block: MatchedBlock,
   start: number,
   quote: TextQuote,
 ): RebaseResult {
   return {
     status: "anchored",
-    anchor: { blockId, start, end: start + quote.exact.length, quote },
+    anchor: resolveAnchor(block, start, start + quote.exact.length),
   };
 }
 

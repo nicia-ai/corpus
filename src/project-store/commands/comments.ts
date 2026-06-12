@@ -1,7 +1,7 @@
 import type { CommentStatus } from "../../db";
 import { ConflictError } from "../../errors";
 import { asDocumentSlug, type DocumentSlug } from "../../ids";
-import { resolveAnchor } from "../../store/domain/anchor";
+import { MIN_ANCHOR_CHARS, resolveAnchor } from "../../store/domain/anchor";
 import type { BlockKind } from "../../store/domain/block-match";
 import {
   type CommandOutcome,
@@ -69,7 +69,7 @@ export type CreateCommentInput = Readonly<{
 
 export type CreateCommentResult = Readonly<
   | { ok: true; threadId: number; commentId: number }
-  | { ok: false; reason: "missing" | "bad-block" }
+  | { ok: false; reason: "missing" | "bad-block" | "anchor-too-short" }
   // Mapped from ConflictError at the DO boundary when the head moved under
   // the selection (the command itself throws, like saveDocument's 409).
   | { ok: false; reason: "conflict"; currentVersion: number }
@@ -103,6 +103,9 @@ export async function createCommentCommand(
     input.end > target.text.length
   ) {
     return commandOutcome({ ok: false, reason: "bad-block" });
+  }
+  if (input.end - input.start < MIN_ANCHOR_CHARS) {
+    return commandOutcome({ ok: false, reason: "anchor-too-short" });
   }
   const anchor = resolveAnchor(target, input.start, input.end);
   const threadId = await ctx.u.comments.createThread({

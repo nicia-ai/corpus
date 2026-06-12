@@ -118,6 +118,25 @@ describe("rebaseAnchors", () => {
     expect(slice(r, match)).toBe("retention policy");
   });
 
+  it("refreshes quote context after a successful rebase", () => {
+    const A = block("A", "old prefix selected phrase old suffix");
+    const anchor = anchorOn(A, "selected phrase");
+    const match = matchBlocks({
+      prev: [A],
+      next: [{ kind: "paragraph", text: "new prefix selected phrase fresh" }],
+      mintId: minter(),
+    });
+    const r = rebaseOneAnchor(anchor, match);
+    expect(r.status).toBe("anchored");
+    if (r.status === "anchored") {
+      expect(r.anchor.quote).toEqual({
+        prefix: "new prefix ",
+        exact: "selected phrase",
+        suffix: " fresh",
+      });
+    }
+  });
+
   it("orphans when the quoted text is edited away (even if the block carries)", () => {
     const A = block("A", "alpha beta gamma delta epsilon zeta");
     const anchor = anchorOn(A, "gamma");

@@ -47,10 +47,15 @@ describe("comment anchors (DO + D1 integration)", () => {
       }),
     ).toMatchObject({ ok: true, docVersion: 1 });
 
-    const created = await commentOn(store, slug, "beta middle here", "middle");
+    const created = await commentOn(
+      store,
+      slug,
+      "beta middle here",
+      "middle here",
+    );
     expect(created.ok).toBe(true);
 
-    // Prepend "PREFIX " to the anchored block — 'middle' shifts 5 → 12.
+    // Prepend "PREFIX " to the anchored block — 'middle here' shifts 5 → 12.
     expect(
       await store.saveDocument({
         slug,
@@ -63,9 +68,44 @@ describe("comment anchors (DO + D1 integration)", () => {
     const threads = await store.listComments(slug);
     expect(threads).toHaveLength(1);
     expect(threads[0]?.status).toBe("open");
-    expect(threads[0]?.quote.exact).toBe("middle");
+    expect(threads[0]?.quote.exact).toBe("middle here");
     expect(threads[0]?.anchorStart).toBe(12);
-    expect(threads[0]?.anchorEnd).toBe(18);
+    expect(threads[0]?.anchorEnd).toBe(23);
+  });
+
+  it("re-mints quote context when an anchor rebases", async () => {
+    const store = freshStore("remint");
+    const slug = docSlug("notes");
+    await store.saveDocument({
+      slug,
+      markdown:
+        "alpha lead\n\nold context middle here stale tail\n\ngamma tail",
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+    expect(
+      (await commentOn(store, slug, "old context", "middle here")).ok,
+    ).toBe(true);
+
+    await store.saveDocument({
+      slug,
+      markdown:
+        "alpha lead\n\nnew context middle here fresh tail\n\ngamma tail",
+      clientVersion: 1,
+      changedBy: "bob",
+    });
+
+    const threads = await store.listComments(slug);
+    expect(threads[0]?.status).toBe("open");
+    expect(threads[0]?.anchorStart).toBe("new context ".length);
+    expect(threads[0]?.anchorEnd).toBe(
+      "new context ".length + "middle here".length,
+    );
+    expect(threads[0]?.quote).toEqual({
+      prefix: "new context ",
+      exact: "middle here",
+      suffix: " fresh tail",
+    });
   });
 
   it("orphans an anchor when its quoted text is gone", async () => {
@@ -78,10 +118,10 @@ describe("comment anchors (DO + D1 integration)", () => {
       changedBy: "alice",
     });
     expect(
-      (await commentOn(store, slug, "beta middle here", "middle")).ok,
+      (await commentOn(store, slug, "beta middle here", "middle here")).ok,
     ).toBe(true);
 
-    // Replace the anchored block entirely — 'middle' exists nowhere.
+    // Replace the anchored block entirely — 'middle here' exists nowhere.
     await store.saveDocument({
       slug,
       markdown: "alpha lead\n\ncompletely unrelated replacement\n\ngamma tail",
@@ -91,7 +131,7 @@ describe("comment anchors (DO + D1 integration)", () => {
 
     const threads = await store.listComments(slug);
     expect(threads[0]?.status).toBe("orphaned");
-    expect(threads[0]?.quote.exact).toBe("middle"); // quote preserved for re-anchor
+    expect(threads[0]?.quote.exact).toBe("middle here"); // quote preserved for re-anchor
   });
 
   it("follows a block that moves to a new position", async () => {
@@ -103,9 +143,9 @@ describe("comment anchors (DO + D1 integration)", () => {
       clientVersion: 0,
       changedBy: "alice",
     });
-    expect((await commentOn(store, slug, "beta middle", "middle")).ok).toBe(
-      true,
-    );
+    expect(
+      (await commentOn(store, slug, "beta middle", "beta middle")).ok,
+    ).toBe(true);
 
     // Drag "beta middle" to the top — content unchanged.
     await store.saveDocument({
@@ -117,7 +157,7 @@ describe("comment anchors (DO + D1 integration)", () => {
 
     const threads = await store.listComments(slug);
     expect(threads[0]?.status).toBe("open");
-    expect(threads[0]?.anchorStart).toBe(5); // 'middle' in "beta middle"
+    expect(threads[0]?.anchorStart).toBe(0); // "beta middle" at the start
   });
 
   it("exposes current block ids for anchored comment highlighting", async () => {
@@ -129,7 +169,9 @@ describe("comment anchors (DO + D1 integration)", () => {
       clientVersion: 0,
       changedBy: "alice",
     });
-    expect((await commentOn(store, slug, "same text", "same")).ok).toBe(true);
+    expect((await commentOn(store, slug, "same text", "same text")).ok).toBe(
+      true,
+    );
 
     const threads = await store.listComments(slug);
     const blocks = await store.getDocumentBlocks(slug);
@@ -146,7 +188,7 @@ describe("comment anchors (DO + D1 integration)", () => {
       clientVersion: 0,
       changedBy: "alice",
     });
-    const created = await commentOn(store, slug, "beta middle", "middle");
+    const created = await commentOn(store, slug, "beta middle", "beta middle");
     if (!created.ok) throw new Error("createComment failed");
 
     await store.addComment({
@@ -212,6 +254,33 @@ describe("comment anchors (DO + D1 integration)", () => {
       createdBy: "alice",
     });
     expect(r).toMatchObject({ ok: false, reason: "bad-block" });
+  });
+
+  it("rejects selections shorter than the minimum anchor length", async () => {
+    const store = freshStore("short");
+    const slug = docSlug("notes");
+    await store.saveDocument({
+      slug,
+      markdown: THREE_PARAS,
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+    const blocks = await store.getDocumentBlocks(slug);
+    if (!blocks.found) throw new Error("doc not found");
+    const target = blocks.blocks[1];
+    if (target === undefined) throw new Error("missing target block");
+    const start = target.text.indexOf("middle");
+    const r = await store.createComment({
+      slug,
+      blockIndex: 1,
+      start,
+      end: start + "middle".length,
+      body: "too short",
+      clientVersion: blocks.docVersion,
+      createdBy: "alice",
+    });
+    expect(r).toMatchObject({ ok: false, reason: "anchor-too-short" });
+    expect(await store.listComments(slug)).toEqual([]);
   });
 
   it("409s when the head moved under the selection", async () => {

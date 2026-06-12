@@ -437,7 +437,9 @@ function AnnotatableMarkdown({
       throw new Error(
         r.reason === "conflict"
           ? "The document changed; reload and try again."
-          : "Could not add the comment.",
+          : r.reason === "anchor-too-short"
+            ? "Select at least 8 characters."
+            : "Could not add the comment.",
       );
     }
     reset();

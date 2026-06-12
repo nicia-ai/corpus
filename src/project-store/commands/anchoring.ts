@@ -136,6 +136,7 @@ export async function maintainAnchorsOnSave(
             blockId: r.anchor.blockId,
             start: r.anchor.start,
             end: r.anchor.end,
+            quote: r.anchor.quote,
           })
         : ctx.u.comments.markOrphaned(thread.id);
     }),

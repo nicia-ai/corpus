@@ -6,6 +6,7 @@ import {
   exactSpans,
   resolveAnchorInText,
 } from "../src/lib/text-anchor";
+import { MIN_ANCHOR_CHARS } from "../src/store/domain/anchor";
 
 // Adjacent block elements concatenate in the rendered text with no
 // separator, so the flat text of [A, B] is `A.text + B.text`.
@@ -19,12 +20,12 @@ describe("resolveAnchorInText (selection → block + offset)", () => {
     // Two identical paragraphs; the selection lands in the SECOND.
     const blocks = [block(0, "the cat sat"), block(1, "the cat sat")];
     const full = "the cat satthe cat sat";
-    // "cat" of the second block: offset 11 + 4 = 15..18.
-    expect(resolveAnchorInText(full, 15, 18, blocks)).toEqual({
+    // Full text of the second block: offset 11..22.
+    expect(resolveAnchorInText(full, 11, 22, blocks)).toEqual({
       blockIndex: 1,
-      start: 4,
-      end: 7,
-      exact: "cat",
+      start: 0,
+      end: 11,
+      exact: "the cat sat",
       sourceStart: 0,
       sourceEnd: 11,
     });
@@ -33,28 +34,35 @@ describe("resolveAnchorInText (selection → block + offset)", () => {
   it("anchors to the first block when the selection is in it", () => {
     const blocks = [block(0, "the cat sat"), block(1, "the cat sat")];
     const full = "the cat satthe cat sat";
-    expect(resolveAnchorInText(full, 4, 7, blocks)).toMatchObject({
+    expect(resolveAnchorInText(full, 0, 11, blocks)).toMatchObject({
       blockIndex: 0,
-      start: 4,
-      end: 7,
-      exact: "cat",
+      start: 0,
+      end: 11,
+      exact: "the cat sat",
     });
   });
 
   it("picks the selected occurrence of a phrase repeated WITHIN a block", () => {
-    const blocks = [block(0, "na na na batman")];
-    const full = "na na na batman";
-    // The third "na" is at offset 6..8 — not the first that indexOf finds.
-    expect(resolveAnchorInText(full, 6, 8, blocks)).toMatchObject({
+    const blocks = [block(0, "alpha beta alpha beta")];
+    const full = "alpha beta alpha beta";
+    // The second "alpha beta" is at offset 11..21.
+    expect(resolveAnchorInText(full, 11, 21, blocks)).toMatchObject({
       blockIndex: 0,
-      start: 6,
-      end: 8,
-      exact: "na",
+      start: 11,
+      end: 21,
+      exact: "alpha beta",
     });
   });
 
   it("returns undefined for an empty selection", () => {
     expect(resolveAnchorInText("abc", 1, 1, [block(0, "abc")])).toBeUndefined();
+  });
+
+  it("returns undefined for a short selection", () => {
+    const text = "short text";
+    expect(
+      resolveAnchorInText(text, 0, MIN_ANCHOR_CHARS - 1, [block(0, text)]),
+    ).toBeUndefined();
   });
 
   it("returns undefined for a selection crossing block boundaries", () => {
@@ -85,13 +93,13 @@ describe("resolveAnchorInText (selection → block + offset)", () => {
   });
 
   it("clamps browser-added leading whitespace from paragraph selection", () => {
-    const blocks = [block(0, "first"), block(1, "second")];
-    const full = "first\nsecond";
+    const blocks = [block(0, "first"), block(1, "second para")];
+    const full = "first\nsecond para";
     expect(resolveAnchorInText(full, 5, full.length, blocks)).toMatchObject({
       blockIndex: 1,
       start: 0,
-      end: "second".length,
-      exact: "second",
+      end: "second para".length,
+      exact: "second para",
     });
   });
 
@@ -100,9 +108,9 @@ describe("resolveAnchorInText (selection → block + offset)", () => {
     // drop, so it isn't found in `full` — it must be skipped, not matched.
     const blocks = [block(0, "a | b"), block(1, "tail para")];
     const full = "abtail para";
-    expect(resolveAnchorInText(full, 2, 6, blocks)).toMatchObject({
+    expect(resolveAnchorInText(full, 2, 11, blocks)).toMatchObject({
       blockIndex: 1,
-      exact: "tail",
+      exact: "tail para",
     });
     // A selection over the unaligned row resolves to nothing, not block 0.
     expect(resolveAnchorInText(full, 0, 2, blocks)).toBeUndefined();
