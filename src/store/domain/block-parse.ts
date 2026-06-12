@@ -37,7 +37,8 @@ const processor = unified().use(remarkParse).use(remarkGfm).freeze();
 // A parsed block plus its half-open source range [sourceStart, sourceEnd)
 // in the ORIGINAL markdown (frontmatter offset already applied), so a
 // caller can slice `markdown.slice(sourceStart, sourceEnd)` to recover the
-// block's source — used to render a document block-by-block for commenting.
+// block's source — used to render a document block-by-block for commenting
+// and to splice review suggestions back into the original markdown.
 export type ParsedBlock = Readonly<{
   kind: BlockKind;
   text: string;
@@ -162,7 +163,7 @@ function emitListItems(
       }
     }
     const start =
-      (firstOwn?.position?.start.offset ?? item.position?.start.offset ?? 0) +
+      (item.position?.start.offset ?? firstOwn?.position?.start.offset ?? 0) +
       bodyOffset;
     const end =
       (lastOwn?.position?.end.offset ?? item.position?.end.offset ?? 0) +
