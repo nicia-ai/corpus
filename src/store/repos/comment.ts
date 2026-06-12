@@ -10,6 +10,13 @@ import {
   type NewCommentThread,
 } from "../../db";
 
+type AnchorUpdate = Readonly<{
+  blockId: string;
+  start: number;
+  end: number;
+  quote: Readonly<{ prefix: string; exact: string; suffix: string }>;
+}>;
+
 // Anchored comment threads + their messages, as a repository. Non-canonical
 // human review layer (off-bundle, off-MCP). The status union and every row
 // type are inferred from the schema, so an invalid status cannot be written
@@ -90,16 +97,16 @@ export class CommentRepo {
   }
 
   // After a rebase relocates a thread's anchor within the new document.
-  async updateAnchor(
-    threadId: number,
-    anchor: Readonly<{ blockId: string; start: number; end: number }>,
-  ): Promise<void> {
+  async updateAnchor(threadId: number, anchor: AnchorUpdate): Promise<void> {
     await this.db
       .update(commentThread)
       .set({
         anchorBlockId: anchor.blockId,
         anchorStart: anchor.start,
         anchorEnd: anchor.end,
+        quotePrefix: anchor.quote.prefix,
+        quoteExact: anchor.quote.exact,
+        quoteSuffix: anchor.quote.suffix,
         status: "open",
       })
       .where(eq(commentThread.id, threadId));

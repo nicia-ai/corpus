@@ -9,6 +9,8 @@
 // surrounding text. Neither uses a bare `indexOf`/`includes` that would
 // silently pick the first match anywhere.
 
+import { MIN_ANCHOR_CHARS } from "@/store/domain/anchor";
+
 export type AnchorBlock = Readonly<{
   id?: string;
   index: number;
@@ -90,6 +92,7 @@ export function resolveAnchorInText(
     if (clampedEnd <= clampedStart) continue;
     if (!isBlank(full.slice(selStart, clampedStart))) continue;
     if (!isBlank(full.slice(clampedEnd, selEnd))) continue;
+    if (clampedEnd - clampedStart < MIN_ANCHOR_CHARS) continue;
     const start = clampedStart - b.at;
     const end = clampedEnd - b.at;
     return {
