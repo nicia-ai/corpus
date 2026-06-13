@@ -19,6 +19,34 @@ export type SidebarLink = Readonly<{
   external: boolean;
 }>;
 
+const EmailProviderSchema = z.enum(["cloudflare", "resend"]);
+
+export type EmailProvider = z.infer<typeof EmailProviderSchema>;
+
+export type EmailConfig = Readonly<{
+  provider: EmailProvider | undefined;
+  from: string | undefined;
+  resendApiKey: string | undefined;
+}>;
+
+// A set-but-invalid EMAIL_PROVIDER is dropped with a warning, never a
+// startup/request failure — matching resolveSupport/resolveDocs. The provider
+// only disambiguates when both backends are configured, so an unrecognized
+// value falls through to auto-detection. Failing hard here would be uniquely
+// dangerous: getAuth resolves the env on every request, so one typo would 500
+// every authenticated route, not just invites.
+function resolveEmailProvider(
+  value: string | undefined,
+): EmailProvider | undefined {
+  if (value === undefined) return undefined;
+  const parsed = EmailProviderSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  console.warn(
+    `[email] ignoring EMAIL_PROVIDER (not "cloudflare" or "resend"): ${value}`,
+  );
+  return undefined;
+}
+
 const DEFAULT_SUPPORT_LABEL = "Help";
 const DEFAULT_DOCS_LABEL = "Docs";
 
@@ -109,6 +137,13 @@ const ServerEnvSchema = z
     SUPPORT_URL: optionalSecret,
     SUPPORT_EMAIL: optionalSecret,
     SUPPORT_LABEL: optionalSecret,
+    // Optional outbound invite email. Missing or partial config is valid:
+    // the invite link is still created and returned for manual sharing.
+    // EMAIL_PROVIDER chooses a provider when more than one is configured;
+    // unset picks Cloudflare Email Service first, then Resend.
+    EMAIL_PROVIDER: optionalSecret,
+    EMAIL_FROM: optionalSecret,
+    RESEND_API_KEY: optionalSecret,
     // Optional "Docs" link in the sidebar. Off by default. Set DOCS_URL to a
     // same-origin path ("/docs", the hosted default) or an absolute URL. The
     // OSS app ships no docs site, so self-hosters point this at their own
@@ -130,6 +165,9 @@ const ServerEnvSchema = z
       SUPPORT_URL,
       SUPPORT_EMAIL,
       SUPPORT_LABEL,
+      EMAIL_PROVIDER,
+      EMAIL_FROM,
+      RESEND_API_KEY,
       DOCS_URL,
       ADMIN_EMAILS,
       ...rest
@@ -154,6 +192,11 @@ const ServerEnvSchema = z
           : undefined;
       const support = resolveSupport(SUPPORT_URL, SUPPORT_EMAIL, SUPPORT_LABEL);
       const docs = resolveDocs(DOCS_URL);
+      const email: EmailConfig = {
+        provider: resolveEmailProvider(EMAIL_PROVIDER),
+        from: EMAIL_FROM,
+        resendApiKey: RESEND_API_KEY,
+      };
       // Lowercased so the request-time match is case-insensitive —
       // Better Auth normalizes stored emails to lowercase, but a
       // hand-typed env entry might not.
@@ -168,6 +211,7 @@ const ServerEnvSchema = z
         posthog,
         support,
         docs,
+        email,
         adminEmails,
       };
     },

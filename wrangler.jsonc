@@ -35,6 +35,11 @@
       "migrations_dir": "./drizzle",
     },
   ],
+  // Optional outbound invite email:
+  // - Resend: set EMAIL_FROM + RESEND_API_KEY.
+  // - Cloudflare Email Service: add "send_email": [{ "name": "EMAIL" }]
+  //   after configuring Email Service, and set EMAIL_FROM.
+  // Leaving email unset keeps invite links copy-only.
   // Dev-only. Production sets BETTER_AUTH_SECRET via `wrangler secret put`.
   "vars": {
     "BETTER_AUTH_SECRET": "dev-only-secret-change-me-min-32-chars-long",

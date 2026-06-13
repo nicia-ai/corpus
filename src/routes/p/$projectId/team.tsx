@@ -18,6 +18,7 @@ import {
   changeMemberRole,
   inviteMember,
   listTeam,
+  type InviteMemberResult,
   type PendingInvite,
   removeMember,
   revokeInvitation,
@@ -215,13 +216,14 @@ function InviteForm({
 }: Readonly<{ projectId: ProjectId; onInvited: () => void }>) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("member");
-  const [link, setLink] = useState<string>();
+  const [lastInvite, setLastInvite] = useState<InviteMemberResult>();
   const { pending, error, run } = useSubmit(async () => {
+    setLastInvite(undefined);
     const r = await inviteMember({
       data: { projectId, email: email.trim(), role },
     });
     track("member_invited", { projectId, role });
-    setLink(r.inviteUrl);
+    setLastInvite(r);
     setEmail("");
     onInvited();
   });
@@ -243,20 +245,36 @@ function InviteForm({
         </Button>
       </form>
       {error && <p className="text-base text-red-600">{error}</p>}
-      {link !== undefined && (
-        <div className="rounded-md border border-slate-200 bg-white p-3 text-sm">
-          <p className="mb-2 font-medium text-slate-700">
-            Invite link — share it with your teammate. They must sign up with
-            the invited email.
-          </p>
-          <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2">
-            <code className="min-w-0 flex-1 truncate font-mono text-slate-700">
-              {link}
-            </code>
-            <CopyButton value={link} label="Copy invite link" />
-          </div>
-        </div>
-      )}
+      {lastInvite !== undefined && <InviteResult invite={lastInvite} />}
+    </div>
+  );
+}
+
+// The link is shown a single time, so it stays copyable on every outcome —
+// even a "sent" report only means the provider accepted the message, not that
+// it was delivered. Email success just changes the framing and tone.
+function InviteResult({
+  invite,
+}: Readonly<{ invite: InviteMemberResult }>): React.ReactElement {
+  const note = invite.emailSent
+    ? `Invite emailed to ${invite.email}. Keep this link as a backup.`
+    : invite.emailReason === "send-failed"
+      ? "Email could not be sent — share this link yourself."
+      : "Email is not configured — share this link yourself.";
+  const tone = invite.emailSent
+    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+    : "border-slate-200 bg-white text-slate-700";
+  return (
+    <div className={`rounded-md border p-3 text-sm ${tone}`}>
+      <p className="mb-2 font-medium">
+        {note} They must sign up with the invited email.
+      </p>
+      <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+        <code className="min-w-0 flex-1 truncate font-mono text-slate-700">
+          {invite.inviteUrl}
+        </code>
+        <CopyButton value={invite.inviteUrl} label="Copy invite link" />
+      </div>
     </div>
   );
 }

@@ -21,10 +21,11 @@ keep agents pointed at it.
 On the **Team** page (owners only), under **Invite a teammate**, enter
 the person's **Email**, pick a **Role**, and click **Create invite**.
 
-Corpus does **not** send the email. It shows you an **invite link
-once** — copy it and send it to the person however you normally would
-(Slack, email, etc.). The link is shown a single time per invite; if you
-lose it, revoke and re-invite.
+If outbound email is configured, Corpus emails the invite link to that
+address. If email is not configured or the provider rejects the send,
+the invite still works: Corpus shows you an **invite link once** to copy
+and send however you normally would (Slack, email, etc.). The link is
+shown a single time per invite; if you lose it, revoke and re-invite.
 
 The invitation is bound to the email you entered. The recipient must
 sign up or sign in **with that exact address** to accept — a leaked link

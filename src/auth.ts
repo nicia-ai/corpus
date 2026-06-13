@@ -224,11 +224,11 @@ function create(env: Env, runtime: ServerEnv) {
       }),
       // Org plugin owns organization + member + invitation. Nicia owns
       // `project` (one ProjectStore DO per project — no Better Auth
-      // concept), wired via organizationHooks. No `sendInvitationEmail`
-      // (we have no email infra) + `requireEmailVerificationOnInvitation:
-      // false` → the chosen model: owner shares the invite link
-      // out-of-band; the invitee accepts after signing up with the
-      // invited email (Better Auth binds acceptance to that email).
+      // concept), wired via organizationHooks. No plugin-level
+      // `sendInvitationEmail`: the team server fn creates the invitation
+      // first, then optionally sends fail-soft email. With
+      // `requireEmailVerificationOnInvitation: false`, Better Auth still
+      // binds acceptance to the invited email.
       organization({
         creatorRole: "owner",
         requireEmailVerificationOnInvitation: false,
