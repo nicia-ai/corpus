@@ -71,9 +71,10 @@ client can't do OAuth, use an [API key](./api-keys.md) instead.
 
 ## I lost an API key / invite link
 
-Both are shown once. For a key, **Revoke** it and create a new one. For
-an invitation, revoke the pending invite and send a fresh one. Nothing
-can re-display the original secret.
+API keys and manually shared invite links are shown once. For a key,
+**Revoke** it and create a new one. For an invitation, revoke the
+pending invite and send a fresh one. Nothing can re-display the original
+secret.
 
 ## Two of us edited the same document — did I lose work?
 

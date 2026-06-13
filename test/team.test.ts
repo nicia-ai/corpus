@@ -1,10 +1,13 @@
 import { env } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import { getAuth } from "../src/auth";
 import { connectControlDb } from "../src/control/db";
 import { membershipCount } from "../src/control/project-admin";
 import { resolveProject } from "../src/control/project-resolution";
+import { invitation } from "../src/control/schema/better-auth";
+import { createTeamInvitation } from "../src/lib/server/team";
 
 import { signUpSession } from "./_helpers";
 
@@ -98,6 +101,52 @@ describe("team management — Better Auth org plugin ⇄ tenancy", () => {
     // Membership unchanged — the wrong user did not slip in.
     expect(await membershipCount(db, ref.organizationId)).toBe(1);
   });
+
+  it.each([
+    ["not-configured", { sent: false as const, reason: "not-configured" }],
+    ["send-failed", { sent: false as const, reason: "send-failed" }],
+    ["sent", { sent: true as const }],
+  ])(
+    "creates the invitation before reporting invite email %s",
+    async (label, sendResult) => {
+      const { owner, ref } = await bootstrapOrg(`mail-${label}`);
+      const email = `mail-${label}-${ref.organizationId}@example.com`;
+      const sentMessages: { to: string; text: string }[] = [];
+
+      const result = await createTeamInvitation({
+        api: getAuth(env).api,
+        headers: owner.headers,
+        organizationId: ref.organizationId,
+        env,
+        email,
+        role: "member",
+        mailer: (_env, message) => {
+          sentMessages.push({ to: message.to, text: message.text });
+          return Promise.resolve(sendResult);
+        },
+      });
+
+      expect(result.inviteUrl).toMatch(/\/invite\/.+/);
+      expect(result.email).toBe(email);
+      expect(result.emailSent).toBe(sendResult.sent);
+      if (sendResult.sent) {
+        expect("emailReason" in result).toBe(false);
+      } else {
+        expect(result.emailReason).toBe(sendResult.reason);
+      }
+      expect(sentMessages).toEqual([
+        { to: email, text: expect.stringContaining(result.inviteUrl) },
+      ]);
+
+      const invitationId = result.inviteUrl.split("/invite/")[1];
+      expect(invitationId).toBeDefined();
+      const rows = await connectControlDb(env.DB)
+        .select({ email: invitation.email, status: invitation.status })
+        .from(invitation)
+        .where(eq(invitation.id, invitationId ?? ""));
+      expect(rows).toEqual([{ email: email.toLowerCase(), status: "pending" }]);
+    },
+  );
 
   it("removing a member fires the epoch hook → access denied promptly", async () => {
     const { owner, ref } = await bootstrapOrg("c");

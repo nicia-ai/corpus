@@ -29,6 +29,20 @@ SUPPORT_URL=""
 SUPPORT_EMAIL=""
 SUPPORT_LABEL=""
 
+# Optional outbound invite email. Leave all unset to keep copy-link invites.
+# EMAIL_PROVIDER is optional; set it to "resend" or "cloudflare" only when
+# both are configured and you want to choose explicitly. EMAIL_FROM must be a
+# verified sender for the selected provider.
+EMAIL_PROVIDER=""
+EMAIL_FROM=""
+
+# Resend provider: set EMAIL_PROVIDER="resend" when also using Cloudflare.
+RESEND_API_KEY=""
+
+# Cloudflare Email Service provider: add a Cloudflare `send_email` binding
+# named EMAIL in wrangler.jsonc. Set EMAIL_PROVIDER="cloudflare" when also
+# using Resend.
+
 # Optional "Docs" link in the sidebar. Off by default. Set DOCS_URL to a
 # same-origin path (the hosted deploy uses "/docs") or an absolute URL. The
 # OSS app ships no docs site of its own, so self-hosters point this at their

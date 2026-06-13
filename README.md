@@ -146,12 +146,15 @@ Set in `wrangler.jsonc` `vars` for dev; in production set secrets with
 `wrangler secret put`. Optional local secrets (the Google credentials
 below) go in `.dev.vars` — copy `.dev.vars.example` to get started.
 
-| Variable               | Required | Notes                                                                                                                                              |
-| ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BETTER_AUTH_SECRET`   | Yes      | ≥32 chars. The committed dev value is a placeholder — set a real secret via `wrangler secret put BETTER_AUTH_SECRET` for any deployed environment. |
-| `BETTER_AUTH_URL`      | Prod     | Public base URL. Defaults to `http://localhost:8787`, so it's optional for local dev; set it for any deployed environment.                         |
-| `GOOGLE_CLIENT_ID`     | No       | Google OAuth client id. Set **both** Google vars to add "Continue with Google" to sign-in/sign-up; unset keeps email/password only.                |
-| `GOOGLE_CLIENT_SECRET` | No       | Google OAuth client secret. Redirect URI is `<BETTER_AUTH_URL>/api/auth/callback/google`.                                                          |
+| Variable               | Required | Notes                                                                                                                                                                          |
+| ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BETTER_AUTH_SECRET`   | Yes      | ≥32 chars. The committed dev value is a placeholder — set a real secret via `wrangler secret put BETTER_AUTH_SECRET` for any deployed environment.                             |
+| `BETTER_AUTH_URL`      | Prod     | Public base URL. Defaults to `http://localhost:8787`, so it's optional for local dev; set it for any deployed environment.                                                     |
+| `GOOGLE_CLIENT_ID`     | No       | Google OAuth client id. Set **both** Google vars to add "Continue with Google" to sign-in/sign-up; unset keeps email/password only.                                            |
+| `GOOGLE_CLIENT_SECRET` | No       | Google OAuth client secret. Redirect URI is `<BETTER_AUTH_URL>/api/auth/callback/google`.                                                                                      |
+| `EMAIL_PROVIDER`       | No       | Optional invite-email provider selector: `cloudflare` or `resend`. Unset auto-detects the Cloudflare binding first, then Resend; missing email config keeps copy-link invites. |
+| `EMAIL_FROM`           | No       | Verified sender address for invite emails, for example `Corpus <noreply@example.com>`. Required only when enabling outbound email.                                             |
+| `RESEND_API_KEY`       | No       | Resend API key for invite emails. Set with `EMAIL_FROM`; set `EMAIL_PROVIDER=resend` when Cloudflare email is also configured.                                                 |
 
 Bindings (in `wrangler.jsonc`, not env vars):
 
@@ -160,6 +163,10 @@ Bindings (in `wrangler.jsonc`, not env vars):
 - `DB` — D1 database for the control plane. Before deploying remotely,
   run `wrangler d1 create corpus-control` and replace the
   `database_id` placeholder in `wrangler.jsonc`.
+- Optional `EMAIL` — Cloudflare Email Service `send_email` binding for
+  invite emails. Configure it as a binding named `EMAIL` with
+  `EMAIL_FROM`; if it is absent, Corpus can use Resend or copy-link
+  fallback.
 
 ## Self-hosting
 
