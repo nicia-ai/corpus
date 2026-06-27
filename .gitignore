@@ -11,6 +11,7 @@ worker-configuration.d.ts
 .DS_Store
 .tanstack/
 .gstack/
+.impeccable/
 *.sqlite
 *.sqlite-journal
 .idea/

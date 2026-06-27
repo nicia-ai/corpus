@@ -1724,7 +1724,7 @@ export class ProjectStore extends DurableObject<Env> {
     const folderChain = (leaf: FolderSlug | null): readonly FolderSlug[] => {
       const chain: FolderSlug[] = [];
       const seen = new Set<string>();
-      for (let cur: string | null = leaf; cur !== null && !seen.has(cur); ) {
+      for (let cur: string | null = leaf; cur !== null && !seen.has(cur);) {
         seen.add(cur);
         chain.unshift(asFolderSlug(cur));
         cur = parentOf.get(cur) ?? null;

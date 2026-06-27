@@ -1,4 +1,9 @@
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Outlet,
+  redirect,
+  useMatches,
+} from "@tanstack/react-router";
 import { Menu } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -33,6 +38,13 @@ function ProjectLayout() {
   const { orgId, orgName } = shell.current;
   // Mobile-only off-canvas drawer state; md+ keeps the sidebar in flow.
   const [navOpen, setNavOpen] = useState(false);
+
+  // Per-page ground: data-dense pages keep the slate-50 desk so their white
+  // cards read; the single-document surface gets a white ground so the
+  // borderless document is the open white figure (see DESIGN.md figure/ground).
+  const onDocumentSurface = useMatches().some(
+    (m) => m.routeId === "/p/$projectId/documents/$slug/",
+  );
 
   // Attribute product events to the active organization so analytics can
   // segment by org (per-org funnels, retention, expansion).
@@ -69,7 +81,7 @@ function ProjectLayout() {
       <aside
         id="primary-sidebar"
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white px-3 py-5 transition-transform duration-200 ease-out motion-reduce:transition-none md:static md:z-auto md:w-48 md:shrink-0 md:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-slate-100 px-3 py-5 transition-transform duration-200 ease-out motion-reduce:transition-none md:static md:z-auto md:w-48 md:shrink-0 md:translate-x-0",
           navOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -90,7 +102,12 @@ function ProjectLayout() {
           />
         </div>
       </aside>
-      <main className="flex-1 px-5 py-6 md:px-8 md:py-8">
+      <main
+        className={cn(
+          "flex-1 px-5 py-6 md:px-8 md:py-8",
+          onDocumentSurface && "bg-white",
+        )}
+      >
         <div className="mx-auto max-w-7xl">
           <Outlet />
         </div>

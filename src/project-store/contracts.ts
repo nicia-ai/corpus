@@ -52,8 +52,7 @@ export type SaveResult = Readonly<
 // which the credential may never write. The existence check is decided
 // inside the create transaction, so the refusal is atomic with the write.
 export type CreateInCollectionResult =
-  | SaveResult
-  | Readonly<{ ok: false; forbidden: true }>;
+  SaveResult | Readonly<{ ok: false; forbidden: true }>;
 
 export type DocumentSnapshot = Readonly<{
   slug: string;

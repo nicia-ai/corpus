@@ -50,7 +50,7 @@ function indexFolders(folders: readonly FolderRow[]): FolderIndex {
 function folderNamePath(index: FolderIndex, slug: FolderSlug | null): string[] {
   const out: string[] = [];
   const seen = new Set<FolderSlug>();
-  for (let cur = slug; cur !== null && !seen.has(cur); ) {
+  for (let cur = slug; cur !== null && !seen.has(cur);) {
     const f = index.get(cur);
     if (f === undefined) break;
     seen.add(cur);
@@ -374,7 +374,7 @@ function Review({
             >
               <span className="truncate">{f.path}</span>
               {existingPaths.has(f.path) && (
-                <span className="shrink-0 font-sans text-xs text-amber-700">
+                <span className="shrink-0 font-sans text-sm text-amber-700">
                   updates existing
                 </span>
               )}

@@ -5,7 +5,10 @@ import remarkGfm from "remark-gfm";
 
 import { Card, cardClass } from "@/components/ui/Surface";
 import { cn } from "@/lib/cn";
-import { parseFrontmatter } from "@/store/domain/frontmatter";
+import {
+  formatFrontmatterValue,
+  parseFrontmatter,
+} from "@/store/domain/frontmatter";
 
 // The reader-first surface: canonical documents are authored by non-engineers
 // and read far more than edited, so the rendered view is the default. GFM
@@ -24,15 +27,10 @@ import { parseFrontmatter } from "@/store/domain/frontmatter";
 // the Preview tab falls back to rendering the raw source verbatim — the
 // save path is what rejects it, the preview never blanks.
 
-function formatValue(v: unknown): string {
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (Array.isArray(v)) return v.map(formatValue).join(", ");
-  if (v === null || v === undefined) return "";
-  return JSON.stringify(v);
-}
-
-const FRONTMATTER_PANEL_CLASS = "px-6 py-4 sm:px-8";
+// slate-100 fill (not the default white card): on the white document ground the
+// slate-200 hairline alone is ~1.2:1, so the panel needs a tinted fill to read
+// as a distinct metadata block (slate-100 matches the code-block tint).
+const FRONTMATTER_PANEL_CLASS = "bg-slate-100 px-6 py-4 sm:px-8";
 export const DOCUMENT_BODY_CLASS =
   "md min-h-[calc(100vh-15rem)] px-6 py-8 sm:px-10 sm:py-10 lg:px-14 lg:py-12";
 
@@ -53,7 +51,7 @@ function FrontmatterPanel({
           <div key={k} className="contents">
             <dt className="font-medium text-slate-500 tabular-nums">{k}</dt>
             <dd className="text-slate-900 [overflow-wrap:anywhere]">
-              {formatValue(v)}
+              {formatFrontmatterValue(v)}
             </dd>
           </div>
         ))}
@@ -68,9 +66,13 @@ function FrontmatterPanel({
 export const Markdown = memo(function Markdown({
   source,
   bodyClassName,
+  bare,
 }: Readonly<{
   source: string;
   bodyClassName?: string;
+  // Borderless body (no surrounding Card) for the full-page editor's
+  // first-paint fallback, so it matches the borderless live-preview surface.
+  bare?: boolean;
 }>): React.ReactElement {
   const fm = parseFrontmatter(source);
   const body = fm.ok ? fm.body : source;
@@ -82,7 +84,15 @@ export const Markdown = memo(function Markdown({
   // Markdown owns the surface: the body is its own `.md`-typed Card. When
   // there's frontmatter, the metadata Card stacks above it with a page-bg
   // gap (`space-y`), so the two read as distinct panels, not one tinted box.
-  const bodyCard = (
+  // `bare` drops the Card (full-page editor surface), aligning the body with
+  // the page measure instead of a contained card.
+  const bodyCard = bare ? (
+    // min-h matches the editor host so the first-paint → editor swap doesn't
+    // jump vertically.
+    <div className={cn("md min-h-112 py-2", bodyClassName)}>
+      <MarkdownContent source={body} />
+    </div>
+  ) : (
     <div className={cardClass(cn(DOCUMENT_BODY_CLASS, bodyClassName))}>
       <MarkdownContent source={body} />
     </div>

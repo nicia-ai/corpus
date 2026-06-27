@@ -55,9 +55,7 @@ export function ReviewRail({
         <>
           <PresenceRow users={presence} />
           <div className="flex items-center justify-between">
-            <div className="text-sm font-medium tracking-wide text-slate-500 uppercase">
-              Review
-            </div>
+            <div className="text-sm font-medium text-slate-500">Review</div>
             <span className="text-sm text-slate-500 tabular-nums">
               {items.length}
             </span>
@@ -171,9 +169,7 @@ function PresenceRow({
   const extra = users.length - shown.length;
   return (
     <div className="flex items-center justify-between gap-3">
-      <div className="text-sm font-medium tracking-wide text-slate-500 uppercase">
-        Viewing now
-      </div>
+      <div className="text-sm font-medium text-slate-500">Viewing now</div>
       <div
         className="flex -space-x-1"
         aria-label={`Viewing now: ${users.map((u) => u.userName).join(", ")}`}
@@ -182,13 +178,13 @@ function PresenceRow({
           <span
             key={user.userId}
             title={user.userName}
-            className="grid size-7 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600 ring-2 ring-white"
+            className="grid size-7 place-items-center rounded-full bg-slate-100 text-sm font-semibold text-slate-600 ring-2 ring-white"
           >
             {initials(user.userName)}
           </span>
         ))}
         {extra > 0 && (
-          <span className="grid size-7 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-600 ring-2 ring-white">
+          <span className="grid size-7 place-items-center rounded-full bg-slate-200 text-sm font-semibold text-slate-600 ring-2 ring-white">
             +{extra}
           </span>
         )}

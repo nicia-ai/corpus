@@ -301,3 +301,31 @@ Deliberate exceptions — do not "fix" these:
   with their feature file and are imported by `session.ts` (acyclic).
 - Only `control/schema/index.ts` is a sanctioned barrel; broad
   `index.ts` re-exports are rejected (tree-shaking, cycle risk).
+
+## Design context
+
+UI work starts with `PRODUCT.md` (strategic: register, users, purpose,
+personality, anti-references, design principles, accessibility) and
+`DESIGN.md` (visual: palette, type, spacing, layout, motion, decisions
+log), both at the repo root. Read them before touching any surface in
+`src/routes/` or `src/components/`.
+
+- **Register:** `product` — design serves the product. Marketing
+  (corpus-site) is a separate repo; do not import its lighter blue-500
+  accent into the app.
+- **Five strategic principles** (PRODUCT.md): the system recedes so the
+  graph speaks · show the truth, not the tool · never lose a write ·
+  approve, then serve · one source, many readers.
+- **Visual discipline (DESIGN.md):** slate neutral ramp + exactly ONE
+  accent (`#2563eb` blue-600), spent on primary action and the
+  shared-linkage fan-out only. Review-state colors (amber/green/rose)
+  and code-syntax colors are scoped exceptions, not new accents.
+  Minimal-functional motion (cap 250ms; graph never animates layout).
+  Geist (self-hosted) throughout; tabular-nums on all numeric data.
+- **Anti-references (PRODUCT.md):** no SaaS marketing dashboards, no
+  Notion-style decorative chrome, no AI-default cream/warm-neutral
+  body, no generic Linear-clone surface (dark-by-default / glass /
+  kinetic motion).
+- **Accessibility:** target WCAG 2.1 AA. Review states must not rely on
+  hue alone — pair every wash with a text/icon cue. `prefers-reduced-motion`
+  honored (motion is minimal by default).

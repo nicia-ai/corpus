@@ -1,7 +1,8 @@
 // `tone` carries the page's primary/secondary hierarchy: a primary
 // section is a solid slate-900 title with an optional count chip; a
-// secondary section is a quiet uppercase eyebrow. One component so the
-// styling can't drift between Collection detail and Activity.
+// secondary section is a quiet medium-weight slate-500 label. One
+// component so the styling can't drift between Collection detail and
+// Activity.
 
 export function Section({
   label,
@@ -30,7 +31,7 @@ export function Section({
           )}
         </h2>
       ) : (
-        <h2 className="text-sm font-medium uppercase tracking-wide text-slate-500">
+        <h2 className="text-sm font-medium text-slate-500">
           {label}
           {count !== undefined && (
             <span className="ml-2 tabular-nums text-slate-400">{count}</span>

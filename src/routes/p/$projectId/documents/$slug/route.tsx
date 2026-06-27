@@ -18,6 +18,7 @@ function DocumentLayout(): React.ReactElement {
         to="/p/$projectId/documents"
         projectId={projectId}
         label="Documents"
+        className="mb-2 inline-block"
       />
       <Outlet />
     </>

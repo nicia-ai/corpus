@@ -68,7 +68,7 @@ export function DeliveryToggle({
         onChange(on ? "reference" : "core");
       }}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-medium transition-colors",
         on
           ? "border-blue-200 bg-blue-50 text-blue-700"
           : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",

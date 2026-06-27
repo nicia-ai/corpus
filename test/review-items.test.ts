@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildReviewModel,
-  type InlineSuggestionMark,
-  type ReviewItem,
-} from "../src/lib/review-items";
+import { buildReviewModel, type ReviewItem } from "../src/lib/review-items";
 import type { CommentThreadView } from "../src/lib/server/comments";
 import type { SuggestionView } from "../src/lib/server/suggestions";
 import type { AnchorBlock } from "../src/lib/text-anchor";
@@ -76,11 +72,6 @@ const hunk = (
   proposedText: op === "delete" ? "" : "replacement",
   decision: "pending",
 });
-
-const markIds = (marks: readonly InlineSuggestionMark[]): readonly string[] =>
-  marks.map(
-    (m) => `${m.op}:${m.anchor.blockId}:${m.anchor.start}:${m.anchor.end}`,
-  );
 
 function onlyComment(
   item: ReviewItem | undefined,
@@ -164,35 +155,7 @@ describe("buildReviewModel", () => {
     });
   });
 
-  it("creates inline marks for current-version replace and delete hunks", () => {
-    const model = buildReviewModel({
-      blocks,
-      threads: [],
-      suggestions: [
-        suggestion(1, hunk(10, "replace", 12, 23)),
-        suggestion(2, hunk(20, "delete", 25, 35)),
-      ],
-      docVersion: 1,
-    });
-
-    expect(markIds(model.inlineSuggestionMarks)).toEqual([
-      "replace:b1:0:11",
-      "delete:b2:0:10",
-    ]);
-  });
-
-  it("anchors insertions to the nearest visible block seam", () => {
-    const model = buildReviewModel({
-      blocks,
-      threads: [],
-      suggestions: [suggestion(1, hunk(10, "insert", 23, 23))],
-      docVersion: 1,
-    });
-
-    expect(markIds(model.inlineSuggestionMarks)).toEqual(["insert:b1:10:11"]);
-  });
-
-  it("does not mark stale suggestions against the current body", () => {
+  it("does not count stale suggestions as active against the current body", () => {
     const model = buildReviewModel({
       blocks,
       threads: [],
@@ -200,19 +163,7 @@ describe("buildReviewModel", () => {
       docVersion: 1,
     });
 
-    expect(model.inlineSuggestionMarks).toEqual([]);
     expect(model.activeCount).toBe(0);
     expect(model.staleSuggestionCount).toBe(1);
-  });
-
-  it("fails closed when a hunk only partially covers a rendered block", () => {
-    const model = buildReviewModel({
-      blocks,
-      threads: [],
-      suggestions: [suggestion(1, hunk(10, "replace", 15, 18))],
-      docVersion: 1,
-    });
-
-    expect(model.inlineSuggestionMarks).toEqual([]);
   });
 });

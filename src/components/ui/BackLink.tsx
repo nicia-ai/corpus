@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 
 import { textLinkClass } from "@/components/ui/text-link";
 import type { CollectionSlug, ProjectId } from "@/ids";
+import { cn } from "@/lib/cn";
 
 // `to` covers the list routes AND the collection-detail route so a
 // sub-page (activity, MCP setup launched from a Collection) points
@@ -13,12 +14,14 @@ export function BackLink(
         to: "/p/$projectId/collections" | "/p/$projectId/documents";
         projectId: ProjectId;
         label: string;
+        className?: string | undefined;
       }
     | {
         to: "/p/$projectId/collections/$slug";
         projectId: ProjectId;
         slug: CollectionSlug;
         label: string;
+        className?: string | undefined;
       }
   >,
 ): React.ReactElement {
@@ -27,7 +30,7 @@ export function BackLink(
       <Link
         to={props.to}
         params={{ projectId: props.projectId, slug: props.slug }}
-        className={textLinkClass("text-sm")}
+        className={cn(textLinkClass("text-base font-medium"), props.className)}
       >
         ← {props.label}
       </Link>
@@ -37,7 +40,7 @@ export function BackLink(
     <Link
       to={props.to}
       params={{ projectId: props.projectId }}
-      className={textLinkClass("text-sm")}
+      className={cn(textLinkClass("text-base font-medium"), props.className)}
     >
       ← {props.label}
     </Link>

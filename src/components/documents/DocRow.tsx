@@ -58,60 +58,66 @@ export function DocRow({
         className="size-4 shrink-0 accent-blue-600"
       />
       <FileText className="size-4 shrink-0 text-slate-400" aria-hidden />
-      <Link
-        to="/p/$projectId/documents/$slug"
-        params={{ projectId, slug: doc.slug }}
-        className="min-w-0 flex-1 truncate font-medium text-blue-600 hover:underline"
-      >
-        {doc.title}
-      </Link>
-      {editing ? (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const v = name.trim();
-            if (v === "" || v === doc.filename) {
-              setEditing(false);
-              return;
-            }
-            void onRename(v).then(() => setEditing(false));
-          }}
-        >
-          <input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => setEditing(false)}
-            className={fieldInputClass("w-44 py-1 font-mono text-sm")}
-          />
-        </form>
-      ) : (
-        <button
-          type="button"
-          onClick={() => {
-            setName(doc.filename);
-            setEditing(true);
-          }}
-          title="Rename file"
-          className="hidden max-w-48 truncate font-mono text-sm text-slate-500 hover:text-slate-900 sm:inline"
-        >
-          {doc.filename}
-        </button>
-      )}
-      {doc.pendingSuggestions > 0 && (
-        <span
-          title={`${doc.pendingSuggestions} suggestion${doc.pendingSuggestions === 1 ? "" : "s"} awaiting review`}
-          className="inline-flex w-fit items-center rounded-sm bg-amber-50 px-1.5 text-sm font-medium text-amber-700 tabular-nums"
-        >
-          {doc.pendingSuggestions} pending
-        </span>
-      )}
-      {doc.collectionCount > 0 && (
-        <CollectionCountBadge count={doc.collectionCount} />
-      )}
-      <span className="shrink-0 text-sm text-slate-400 tabular-nums">
-        v{doc.docVersion} · ~{doc.size} tok
-      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <Link
+            to="/p/$projectId/documents/$slug"
+            params={{ projectId, slug: doc.slug }}
+            className="truncate font-medium text-blue-600 hover:underline"
+          >
+            {doc.title}
+          </Link>
+          {doc.pendingSuggestions > 0 && (
+            <span
+              title={`${doc.pendingSuggestions} suggestion${doc.pendingSuggestions === 1 ? "" : "s"} awaiting review`}
+              className="inline-flex w-fit shrink-0 items-center rounded-sm bg-amber-50 px-1.5 text-sm font-medium text-amber-700 tabular-nums"
+            >
+              {doc.pendingSuggestions} pending
+            </span>
+          )}
+          {doc.collectionCount > 0 && (
+            <CollectionCountBadge count={doc.collectionCount} />
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-sm tabular-nums text-slate-400">
+          <span className="shrink-0">
+            v{doc.docVersion} · ~{doc.size} tokens
+          </span>
+          {editing ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const v = name.trim();
+                if (v === "" || v === doc.filename) {
+                  setEditing(false);
+                  return;
+                }
+                void onRename(v).then(() => setEditing(false));
+              }}
+            >
+              <input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onBlur={() => setEditing(false)}
+                className={fieldInputClass("w-44 py-1 font-mono text-sm")}
+              />
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setName(doc.filename);
+                setEditing(true);
+              }}
+              title="Rename file"
+              className="hidden max-w-48 truncate font-mono text-slate-400 hover:text-slate-900 sm:inline"
+            >
+              {doc.filename}
+            </button>
+          )}
+        </div>
+      </div>
       <InlineConfirm
         prompt="Delete?"
         label="Delete document"

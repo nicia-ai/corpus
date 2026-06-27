@@ -5,9 +5,15 @@ import { Card } from "@/components/ui/Surface";
 
 export function RoutePending(): React.ReactElement {
   return (
-    <Card className="mx-auto max-w-xl">
-      <p className="text-base text-slate-500">Loading…</p>
-    </Card>
+    <div role="status" className="mx-auto max-w-xl space-y-4">
+      <span className="sr-only">Loading…</span>
+      <div className="h-7 w-48 rounded-md bg-slate-200" />
+      <div className="space-y-2">
+        <div className="h-4 w-full rounded bg-slate-100" />
+        <div className="h-4 w-full rounded bg-slate-100" />
+        <div className="h-4 w-2/3 rounded bg-slate-100" />
+      </div>
+    </div>
   );
 }
 

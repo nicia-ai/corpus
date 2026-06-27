@@ -80,7 +80,7 @@ export function ProjectGraph(props: Props): React.ReactElement {
         {COLUMN_LABELS.map((label, col) => (
           <div
             key={label}
-            className="absolute text-sm font-medium uppercase tracking-wide text-slate-500"
+            className="absolute text-sm font-medium text-slate-500"
             style={{
               left: columnX(col as 0 | 1 | 2),
               top: 0,

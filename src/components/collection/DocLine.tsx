@@ -63,7 +63,7 @@ export function docMeta(d: {
 }): React.ReactNode {
   return (
     <>
-      v{d.docVersion} · ~{d.size} tok · updated{" "}
+      v{d.docVersion} · ~{d.size} tokens · updated{" "}
       <RelativeTime iso={d.updatedAt} />
     </>
   );
