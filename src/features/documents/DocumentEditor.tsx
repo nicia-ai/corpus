@@ -154,7 +154,25 @@ export function DocumentEditor({
     (change: RealtimeChange | undefined): void => {
       const isSelf =
         change?.actorId !== undefined && change.actorId === viewerId;
-      if (!isSelf && shouldFlashContentChange(change, head.slug)) {
+      const remoteContentChange =
+        !isSelf && shouldFlashContentChange(change, head.slug);
+
+      // refreshRoute() re-runs the loader, which bumps doc.docVersion and
+      // remounts this component (the version-keyed remount that normally
+      // resets state after OUR OWN save). Doing that here over an unsaved
+      // draft would silently discard it. Route through the same "someone
+      // else edited this" panel a save-time 409 shows instead — nothing is
+      // lost, and the loader/route stays untouched until the user resolves it.
+      if (remoteContentChange && dirty) {
+        void getDocument({ data: { projectId, slug: head.slug } }).then(
+          (theirs) => {
+            if (theirs !== undefined) setConflict(theirs);
+          },
+        );
+        return;
+      }
+
+      if (remoteContentChange) {
         onRemoteContentChange({
           slug: head.slug,
           docVersion: head.docVersion,
@@ -173,11 +191,13 @@ export function DocumentEditor({
       if (message !== undefined) showToast(message);
     },
     [
+      dirty,
       head.docVersion,
       head.markdown,
       head.slug,
       onRemoteContentChange,
       onRemoteSuggestionChange,
+      projectId,
       refreshRoute,
       suggestions.suggestions,
       viewerId,
@@ -777,7 +797,13 @@ export function DocumentEditor({
           />
         </div>
         {showReview && (
-          <div className="hidden lg:block">{rail(reviewLayout)}</div>
+          <div className="hidden lg:block">
+            {/* reviewMarks is suppressed while dirty (above), so the measured
+                itemTops go empty too — pass the empty layout rather than the
+                last-measured one, or every card would render "unpositioned"
+                below an empty column as tall as the editor. */}
+            {rail(dirty ? EMPTY_REVIEW_LAYOUT : reviewLayout)}
+          </div>
         )}
       </div>
       {editBar}

@@ -2,7 +2,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import type { ProjectId } from "@/ids";
-import { hrefToDocSlug, isExternalHref } from "@/lib/doc-href";
+import {
+  hrefToDocSlug,
+  isExternalHref,
+  isSafeExternalHref,
+} from "@/lib/doc-href";
 
 // Follow a rendered markdown link: an external target opens in a new tab; an
 // in-project document slug routes within the project. Shared by the editor and
@@ -15,7 +19,7 @@ export function useFollowDocLink(projectId: ProjectId): (href: string) => void {
   return useCallback(
     (href: string): void => {
       if (isExternalHref(href)) {
-        window.open(href, "_blank", "noopener");
+        if (isSafeExternalHref(href)) window.open(href, "_blank", "noopener");
         return;
       }
       const slug = hrefToDocSlug(href);

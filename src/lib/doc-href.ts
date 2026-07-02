@@ -8,6 +8,17 @@ export function isExternalHref(href: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//");
 }
 
+const SAFE_EXTERNAL_SCHEME = /^(https?|mailto|tel):/i;
+
+// A subset of isExternalHref that's actually safe to hand to window.open.
+// isExternalHref only decides "not an in-project doc link" (so a
+// `javascript:`/`data:`/`vbscript:` target correctly skips the slug
+// resolution below), but a document is teammate- or agent-authored markdown,
+// not trusted code — an active scheme must never reach window.open.
+export function isSafeExternalHref(href: string): boolean {
+  return SAFE_EXTERNAL_SCHEME.test(href) || href.startsWith("//");
+}
+
 // A schemeless target resolved to a bare document slug: drop any query/fragment,
 // leading slashes, a `documents/` route prefix, and a `.md` suffix. Returns ""
 // for a target that resolves to nothing (e.g. a pure `#anchor`).
