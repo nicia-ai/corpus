@@ -52,16 +52,40 @@ exists to deliver.
   - lg 1.125 (body, node titles, rendered-document body)
   - xl 1.25 (section headings)
   - 2xl 1.5 (page title "Home")
-  - Line-height: 1.5 body, 1.25 headings.
+  - Line-height: 1.5 app body, 1.25 headings.
+  - **Rendered-document prose (`.md`) is the exception** — a calmer
+    reading surface authored by non-engineers and read far more than
+    edited. Body line-height **1.7**; headings ride one extra ladder
+    step (h1 3xl 1.875 / h2 2xl 1.5 / h3 xl 1.25 / h4–h6 lg 1.125) with
+    tight tracking on h1 (−0.02em) / h2 (−0.015em) and a 40px top
+    rhythm. The live-preview editor (`MarkdownEditor`) mirrors this
+    **scale** — sizes, line-height, tracking — via shared `--doc-*`
+    tokens (`styles.css @theme`), so the read view and edit preview
+    can't drift. Heading _rhythm_ is intentionally NOT shared: the read
+    surface uses 40px margins; the editor uses a tighter em-based
+    padding suited to the denser edit surface (and required by
+    CodeMirror's height model — margins desync click geometry). Still
+    the stock Tailwind rem ladder — no off-ladder sizes, no paper tint
+    (the slate ramp + white surface are unchanged).
 
 ## Color
 
 - **Approach:** Restrained. A slate neutral ramp plus exactly ONE accent.
   Color is spent almost entirely on the shared-linkage moment so it reads as
   meaningful, never decorative.
-- **Neutrals (slate):**
-  - page bg `#f8fafc` (slate-50)
-  - surface `#ffffff`
+- **Neutrals (slate) — figure/ground is PER-PAGE (decided 2026-06-26):**
+  - desk / default page bg `#f8fafc` (slate-50) — the ground for data-dense
+    pages (lists, graph, settings) so their white cards read by bg contrast
+    - hairline.
+  - single-document surface `#ffffff` (white) — the document route
+    (`/p/$projectId/documents/$slug/`) gets a white ground, set per-route in
+    the shell (`route.tsx` `<main>`), so the borderless document is the open
+    white figure (Notion/Linear-like). Not a global flip — list pages keep
+    the slate-50 desk.
+  - sidebar rail `#f1f5f9` (slate-100) — a touch deeper than the slate-50
+    desk so the rail reads on BOTH grounds (slate-50 desk and white doc);
+    hairline `border-r` slate-200.
+  - surface / card `#ffffff` with a slate-200 hairline.
   - hairline border `#e2e8f0` (slate-200)
   - ghost stroke `#cbd5e1` (slate-300)
   - secondary text `#64748b` (slate-500)
@@ -82,12 +106,32 @@ exists to deliver.
   - success `#15803d` warning `#b45309` error `#b91c1c` info `#2563eb`
   - toast surface `#334155` (slate-700) on white text
 - **Review semantics (document annotation only):**
-  - comment wash `#fef3c7` — amber highlight for human discussion
-  - suggestion replace wash `#dcfce7` — green accepted/additive proposal
-  - suggestion delete wash `#ffe4e6` + rose text `#9f1239` — removal proposal
-  - suggestion insert cue `#bbf7d0` + green text `#166534` — nearest-seam marker
+  - comment wash `#fef3c7` — amber highlight for human discussion, dotted
+    underline (hue-independent cue vs. suggestion replace)
+  - suggestion replace wash `#dcfce7` — green accepted/additive proposal,
+    solid underline
+  - suggestion delete wash `#ffe4e6` + rose text `#9f1239` — removal proposal,
+    strikethrough
+  - suggestion insert cue `#bbf7d0` fill + `#166534` text — a small inline "+"
+    badge at the seam (there is no existing span to underline for a pure
+    insertion); same colors as before, now a zero-width widget instead of an
+    underlined adjacent character
   - These colors are semantic review states, not new action accents; primary
-    actions stay blue.
+    actions stay blue. Every wash pairs with a non-hue cue (underline style,
+    strikethrough, or the insert badge) per the accessibility rule below.
+- **Code syntax (fenced code in the editor only):** a restrained token palette
+  on the slate-100 code box, applied via a CodeMirror `HighlightStyle`
+  (`codeHighlight` in `MarkdownEditor.tsx`). Like review colors, these are a
+  scoped exception to the single-accent rule — confined to code, never UI chrome.
+  - keyword `#7c3aed` (violet-600)
+  - string / attribute value `#047857` (emerald-700)
+  - comment `#64748b` (slate-500), italic
+  - number / literal / attribute name `#b45309` (amber-700)
+  - function name `#2563eb` (blue-600) — the accent reused inside code
+  - type / class / tag `#0e7490` (cyan-700)
+  - operators, punctuation, variables, properties stay primary ink `#0f172a`
+    (un-colored) so code doesn't over-saturate. The rendered read view and
+    version history are NOT highlighted (the editor is the live surface).
 - **Dark mode:** Not in v0. Strategy when added: redesign surfaces (do not
   invert), reduce accent saturation ~15%, keep the single-accent discipline.
 
@@ -136,11 +180,14 @@ these tokens in an `@theme { … }` block in `styles.css` (CSS variables), NOT a
 
 ## Decisions Log
 
-| Date       | Decision                      | Rationale                                                                                                                                                  |
-| ---------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-05-17 | Initial design system created | /design-consultation; formalizes the existing slate/blue Tailwind system + design-review token block                                                       |
-| 2026-05-17 | Typeface = Geist (not Inter)  | Purpose-built product UI face, strong tabular-nums for data-dense nodes, avoids the converged-on AI-default signal. Overrides design-doc D4.               |
-| 2026-05-17 | Single-accent discipline      | Color budget spent on the shared-linkage fan-out so the product's one memorable moment is unmissable                                                       |
-| 2026-05-17 | No motion on graph layout     | Determinism and legibility at 40 nodes beat demo-gif delight                                                                                               |
-| 2026-05-17 | Type roles +1 standard step   | App-wide readability bump done in component `text-*` utilities + the `.md` block (no root/CSS override): body sm→base→lg, etc. Stock Tailwind scale, no px |
-| 2026-06-08 | Review colors are semantic    | Document comments/suggestions get amber/green/rose annotation states while the app keeps blue reserved for primary action and graph linkage.               |
+| Date       | Decision                       | Rationale                                                                                                                                                                                                                                                                                                                   |
+| ---------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-05-17 | Initial design system created  | /design-consultation; formalizes the existing slate/blue Tailwind system + design-review token block                                                                                                                                                                                                                        |
+| 2026-05-17 | Typeface = Geist (not Inter)   | Purpose-built product UI face, strong tabular-nums for data-dense nodes, avoids the converged-on AI-default signal. Overrides design-doc D4.                                                                                                                                                                                |
+| 2026-05-17 | Single-accent discipline       | Color budget spent on the shared-linkage fan-out so the product's one memorable moment is unmissable                                                                                                                                                                                                                        |
+| 2026-05-17 | No motion on graph layout      | Determinism and legibility at 40 nodes beat demo-gif delight                                                                                                                                                                                                                                                                |
+| 2026-05-17 | Type roles +1 standard step    | App-wide readability bump done in component `text-*` utilities + the `.md` block (no root/CSS override): body sm→base→lg, etc. Stock Tailwind scale, no px                                                                                                                                                                  |
+| 2026-06-08 | Review colors are semantic     | Document comments/suggestions get amber/green/rose annotation states while the app keeps blue reserved for primary action and graph linkage.                                                                                                                                                                                |
+| 2026-06-26 | Document prose typography lift | Rendered `.md` surface + live-preview editor get 1.7 body line-height, +1 ladder-step headings, tight tracking. User-approved (Flashtype reference); stays on stock Tailwind ladder, no paper tint.                                                                                                                         |
+| 2026-06-26 | Per-page figure/ground         | Document route gets a white ground (borderless doc = the figure); data-dense pages keep the slate-50 desk so white cards read. Sidebar rail → slate-100 (reads on both). Set per-route in the shell, not a global bg flip. Document editor is borderless — no card, no blue focus ring.                                     |
+| 2026-06-27 | Code syntax highlighting       | Fenced code blocks highlight per language in the editor (CodeMirror `codeLanguages` via `@codemirror/language-data`, lazy-loaded) with a restrained token palette; the ``` fences hide off-cursor. Scoped exception to single-accent, like review colors. Editor surface only; read view/history stay plain. User-approved. |

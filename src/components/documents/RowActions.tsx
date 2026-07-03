@@ -68,7 +68,7 @@ export function InlineConfirm({
       </button>
     </span>
   ) : (
-    <span className="opacity-0 group-hover:opacity-100">
+    <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
       <IconButton label={label} onClick={() => setConfirming(true)} danger>
         <Trash2 className="size-4" />
       </IconButton>

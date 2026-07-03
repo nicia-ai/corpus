@@ -11,8 +11,7 @@ runCli(async () => {
     documentSlug === undefined ? {} : { documentSlug },
   );
   const result = JSON.parse(text) as
-    | { ok: true }
-    | { ok: false; brokenAt: unknown };
+    { ok: true } | { ok: false; brokenAt: unknown };
   console.log(JSON.stringify(result, null, 2));
   return result.ok ? 0 : 1;
 });

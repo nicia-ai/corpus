@@ -32,7 +32,10 @@ import { parseFrontmatter } from "./frontmatter";
 // byte-identical re-parse ⇒ a safe zip of stored ids onto re-parsed text.
 export const BLOCK_PARSER_VERSION = 1;
 
-const processor = unified().use(remarkParse).use(remarkGfm).freeze();
+// Exported so the editor's source↔plain offset adapter (src/lib/block-offsets.ts)
+// parses with the EXACT same config — its plain text must equal `block.text`,
+// which only holds if both use this processor. Tied to BLOCK_PARSER_VERSION.
+export const processor = unified().use(remarkParse).use(remarkGfm).freeze();
 
 // A parsed block plus its half-open source range [sourceStart, sourceEnd)
 // in the ORIGINAL markdown (frontmatter offset already applied), so a

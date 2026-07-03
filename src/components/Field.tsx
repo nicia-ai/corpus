@@ -11,6 +11,19 @@ export function fieldInputClass(className?: string): string {
   );
 }
 
+// The form-row caption. Shared so label-less controls (e.g. the CodeMirror
+// MarkdownEditor, which isn't a labelable element) match `Field`'s typography
+// without copying the class string.
+export function FieldLabel(
+  props: Readonly<{ children: React.ReactNode }>,
+): React.ReactElement {
+  return (
+    <span className="mb-1 block text-sm font-medium text-slate-700">
+      {props.children}
+    </span>
+  );
+}
+
 export function Field(
   props: Readonly<{
     label: string;
@@ -21,20 +34,20 @@ export function Field(
     rows?: number;
     required?: boolean;
     mono?: boolean;
+    ariaDescribedBy?: string | undefined;
   }>,
 ): React.ReactElement {
   const required = props.required ?? true;
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-slate-700">
-        {props.label}
-      </span>
+      <FieldLabel>{props.label}</FieldLabel>
       {props.as === "textarea" ? (
         <textarea
           required={required}
           rows={props.rows ?? 12}
           value={props.value}
           onChange={(e) => props.onChange(e.target.value)}
+          aria-describedby={props.ariaDescribedBy}
           className={fieldInputClass(
             props.mono === true ? "font-mono" : undefined,
           )}
@@ -45,6 +58,7 @@ export function Field(
           required={required}
           value={props.value}
           onChange={(e) => props.onChange(e.target.value)}
+          aria-describedby={props.ariaDescribedBy}
           className={fieldInputClass()}
         />
       )}

@@ -10,9 +10,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   DOCUMENT_BODY_CLASS,
-  Markdown,
   MarkdownContent,
 } from "@/components/markdown/Markdown";
+import { MarkdownEditor } from "@/components/markdown/MarkdownEditor";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { AbsoluteTime } from "@/components/ui/DateTime";
@@ -28,6 +28,7 @@ import {
   type DocVersionEntry,
   saveDocument,
 } from "@/lib/server/documents";
+import { useFollowDocLink } from "@/lib/use-follow-doc-link";
 
 const CHANGE_PREVIEW_LIMIT = 8;
 
@@ -116,9 +117,7 @@ function VersionChangeSummary({
     <section className="mb-4 rounded-md border border-slate-200 bg-white px-4 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="text-sm font-medium tracking-wide text-slate-500 uppercase">
-            What changed
-          </div>
+          <div className="text-sm font-medium text-slate-500">What changed</div>
           <div className="mt-1 text-base text-slate-700">
             Current v{currentVersion} compared with v{activeVersion}:{" "}
             {changeCountLabel(lines)}
@@ -250,9 +249,7 @@ function ChangeNavigator({
   return (
     <section className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="text-sm font-medium tracking-wide text-slate-500 uppercase">
-          Change
-        </div>
+        <div className="text-sm font-medium text-slate-500">Change</div>
         <div className="text-sm text-slate-500 tabular-nums">
           {(index + 1).toString()} / {count.toString()}
         </div>
@@ -305,6 +302,7 @@ export function DocumentHistory({
   const changeRefs = useRef<(HTMLDivElement | null)[]>([]);
   const router = useRouter();
   const navigate = useNavigate();
+  const followLink = useFollowDocLink(projectId);
 
   const active =
     entries.find((e) => e.docVersion === picked) ?? entries[1] ?? entries[0];
@@ -467,7 +465,26 @@ export function DocumentHistory({
                 onCompare={() => showCompareAt(0)}
               />
             )}
-            <Markdown source={active.markdown} />
+            {/* Read-only live-preview: the SAME renderer as the editor, so the
+                viewed version styles prose identically (code syntax highlighting
+                is editor-only per DESIGN.md; the CodeMirror surface brings its
+                own `.md`-equivalent typography, so this card carries padding
+                only, not the `.md` class). Keyed by version so each selection
+                mounts clean state. */}
+            <div
+              className={cardClass(
+                "px-6 py-8 sm:px-10 sm:py-10 lg:px-14 lg:py-12",
+              )}
+            >
+              <MarkdownEditor
+                key={active.docVersion}
+                readOnly
+                fill
+                value={active.markdown}
+                ariaLabel={`Version ${active.docVersion} of ${current.title}`}
+                onFollowLink={followLink}
+              />
+            </div>
           </>
         )}
       </div>

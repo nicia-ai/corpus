@@ -124,9 +124,8 @@ export function collectionInstrumentationEvent(
       );
     case "collection.reordered": {
       const resolvedReason:
-        | "delivery-changed"
-        | "folder-tree-changed"
-        | "drag-reorder" = reason ?? "drag-reorder";
+        "delivery-changed" | "folder-tree-changed" | "drag-reorder" =
+        reason ?? "drag-reorder";
       return buildEvent.collectionReordered(
         compact({
           collectionSlug: change.collectionSlug,

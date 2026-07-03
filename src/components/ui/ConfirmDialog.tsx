@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
-import { focusableIn } from "@/components/ui/dialog-focus";
+import { useDialogFocusTrap } from "@/components/ui/dialog-focus";
 
 // Replaces `window.confirm` so the destructive-action surface matches
 // the rest of the product. One `<ConfirmHost>` is mounted at the root
@@ -36,8 +36,7 @@ export function confirmDialog(init: ConfirmInit): Promise<boolean> {
 export function ConfirmHost(): React.ReactElement | null {
   const [pending, setPending] = useState<Pending>();
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     hostOpen = (p) => setPending(p);
@@ -46,54 +45,25 @@ export function ConfirmHost(): React.ReactElement | null {
     };
   }, []);
 
-  useEffect(() => {
-    if (pending === undefined) return;
-    restoreFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    confirmRef.current?.focus();
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        pending.resolve(false);
-        setPending(undefined);
-        return;
-      }
-      if (e.key !== "Tab") return;
-      if (dialogRef.current === null) return;
-      const focusable = focusableIn(dialogRef.current);
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (first === undefined || last === undefined) return;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      // Only restore when the trigger still lives in the DOM — destructive
-      // flows commonly unmount the trigger row (revoke/archive/delete) by
-      // the time the dialog closes; .focus() on a detached node silently
-      // moves focus to body and keyboard users lose their place.
-      const target = restoreFocusRef.current;
-      restoreFocusRef.current = null;
-      if (target !== null && document.body.contains(target)) target.focus();
-    };
-  }, [pending]);
+  const finish = (value: boolean): void => {
+    pending?.resolve(value);
+    setPending(undefined);
+  };
+
+  // For destructive actions, focus the safe option first so an accidental
+  // Enter cancels rather than confirms (Apple HIG, WCAG 3.3.4 Error
+  // Prevention — legal/financial/destructive).
+  const isDanger = (pending?.init.tone ?? "default") === "danger";
+  const dialogRef = useDialogFocusTrap({
+    open: pending !== undefined,
+    onClose: () => finish(false),
+    initialFocus: isDanger ? cancelRef : confirmRef,
+  });
 
   if (pending === undefined) return null;
 
-  const { init, resolve } = pending;
+  const { init } = pending;
   const tone = init.tone ?? "default";
-  const finish = (value: boolean): void => {
-    resolve(value);
-    setPending(undefined);
-  };
 
   return (
     <div className="fixed inset-0 z-70 flex items-center justify-center p-4">
@@ -117,7 +87,11 @@ export function ConfirmHost(): React.ReactElement | null {
           <p className="mt-1 text-base text-slate-500">{init.body}</p>
         )}
         <div className="mt-5 flex items-center justify-end gap-3">
-          <Button variant="secondary" onClick={() => finish(false)}>
+          <Button
+            ref={cancelRef}
+            variant="secondary"
+            onClick={() => finish(false)}
+          >
             {init.cancelLabel ?? "Cancel"}
           </Button>
           <Button

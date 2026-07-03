@@ -87,3 +87,14 @@ export function frontmatterTitle(
   const t = fm?.title;
   return typeof t === "string" && t.trim() !== "" ? t.trim() : undefined;
 }
+
+// Format a frontmatter value for display in the metadata panel. Shared by
+// the rendered Markdown surface (Markdown.tsx) and the editor's live-preview
+// frontmatter widget (block-widgets.ts) so the two panels render identically.
+export function formatFrontmatterValue(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return v.map(formatFrontmatterValue).join(", ");
+  if (v === null || v === undefined) return "";
+  return JSON.stringify(v);
+}

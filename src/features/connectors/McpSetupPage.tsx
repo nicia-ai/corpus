@@ -1,5 +1,5 @@
 import { useRouter } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { AgentPromptSection } from "@/components/collection/AgentPromptSection";
@@ -13,7 +13,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, EmptyState, listSurface } from "@/components/ui/Surface";
 import { Tabs } from "@/components/ui/Tabs";
 import { showToast } from "@/components/ui/Toast";
-import { asCollectionSlug, type CollectionSlug, type ProjectId } from "@/ids";
+import { asCollectionSlug, type ProjectId } from "@/ids";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { COLLECTION_SCOPE_PROMISE } from "@/lib/copy";
@@ -337,26 +337,75 @@ export function McpSetupPage({
           live name/description so the prompt stays accurate when the
           owner edits the collection — no second copy to keep aligned.
           Only renders when the collection is loaded; a not-found (race
-          after delete) silently skips it. */}
+          after delete) silently skips it. Collapsed behind <details> so
+          the primary handoff (the snippet above) stays the focus. */}
       {mode.kind === "collection" && col?.found === true && (
-        <AgentPromptSection
-          serverName={mode.serverName}
-          name={col.name}
-          description={col.description}
-        />
+        <CollapsibleSection
+          className="mt-10"
+          title="Tell the agent to use it"
+          description="MCP gives the agent access. This prompt tells it when to reach for the collection. Paste it where your agent reads project guidance."
+        >
+          <AgentPromptSection
+            serverName={mode.serverName}
+            name={col.name}
+            description={col.description}
+          />
+        </CollapsibleSection>
       )}
 
       {/* Visible regardless of the auth toggle: the toggle is a snippet-
-          presentation choice, not a reason to hide existing keys. */}
+          presentation choice, not a reason to hide existing keys.
+          Collapsed by default; the snippet's "Replace <YOUR_API_KEY>"
+          note is the signal to expand this. */}
       {mode.kind === "collection" && (
-        <ApiKeysSection
-          projectId={projectId}
-          collectionSlug={mode.slug}
-          connection={connection}
-          isOwner={isOwner}
-        />
+        <CollapsibleSection
+          className="mt-6"
+          title="API Keys"
+          description={
+            <>
+              For headless clients that can't do OAuth. Each key is scoped to
+              the <code className="font-mono">{mode.slug}</code> collection —
+              agents using it see exactly this collection, nothing else.
+            </>
+          }
+        >
+          <ApiKeysSection
+            projectId={projectId}
+            connection={connection}
+            isOwner={isOwner}
+          />
+        </CollapsibleSection>
       )}
     </div>
+  );
+}
+
+// Collapsed section behind a native <details>: the snippet above is the
+// primary handoff, so these secondary affordances (agent prompt, API keys)
+// stay folded until the owner reaches for them.
+function CollapsibleSection({
+  title,
+  description,
+  className,
+  children,
+}: Readonly<{
+  title: string;
+  description: React.ReactNode;
+  className?: string | undefined;
+  children: React.ReactNode;
+}>): React.ReactElement {
+  return (
+    <details className={cn("group border-t border-slate-200 pt-8", className)}>
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-lg font-semibold text-slate-900">
+        {title}
+        <ChevronRight
+          aria-hidden
+          className="size-4 shrink-0 text-slate-400 transition-transform group-open:rotate-90"
+        />
+      </summary>
+      <p className="mt-0.5 text-sm text-slate-500">{description}</p>
+      {children}
+    </details>
   );
 }
 
@@ -365,28 +414,18 @@ export function McpSetupPage({
 // before "Connect this collection" ran, or a non-owner who can't mint it.
 function ApiKeysSection({
   projectId,
-  collectionSlug,
   connection,
   isOwner,
 }: Readonly<{
   projectId: ProjectId;
-  collectionSlug: CollectionSlug;
   connection: ConnectionKeysView | undefined;
   isOwner: boolean;
-}>) {
+}>): React.ReactElement {
   return (
-    <section className="mt-10 border-t border-slate-200 pt-8">
-      <header className="mb-4">
-        <h2 className="text-lg font-semibold text-slate-900">API Keys</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          For headless clients that can’t do OAuth. Each key is scoped to the{" "}
-          <code className="font-mono">{collectionSlug}</code> collection —
-          agents using it see exactly this collection, nothing else.
-        </p>
-      </header>
+    <div className="mt-4">
       {connection === undefined ? (
         <EmptyState>
-          No Connection for this collection yet. Click “Connect this collection”
+          No Connection for this collection yet. Click "Connect this collection"
           on the collection page first.
         </EmptyState>
       ) : (
@@ -397,7 +436,7 @@ function ApiKeysSection({
           isOwner={isOwner}
         />
       )}
-    </section>
+    </div>
   );
 }
 

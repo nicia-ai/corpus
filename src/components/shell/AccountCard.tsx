@@ -44,7 +44,7 @@ export function AccountCard({
       {isAdmin && (
         <Link
           to="/admin"
-          className="mb-1 flex items-center gap-2.5 rounded-md px-2 py-2 text-base font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          className="mb-1 flex items-center gap-2.5 rounded-md px-2 py-2 text-base font-medium text-slate-600 hover:bg-slate-200 hover:text-slate-900"
         >
           <ShieldCheck className="size-4 shrink-0" />
           Admin
@@ -53,7 +53,7 @@ export function AccountCard({
       <div className="flex items-center gap-3 rounded-md px-2 py-2">
         <div
           aria-hidden
-          className="grid size-8 shrink-0 place-items-center rounded-md bg-slate-100 text-sm font-semibold tabular-nums text-slate-600"
+          className="grid size-8 shrink-0 place-items-center rounded-md bg-slate-200 text-sm font-semibold tabular-nums text-slate-600"
         >
           {initials(display)}
         </div>
@@ -61,7 +61,7 @@ export function AccountCard({
           <div className="truncate text-base font-medium text-slate-900">
             {user.name ?? "Signed in"}
           </div>
-          <div className="truncate text-sm text-slate-500">
+          <div className="truncate text-sm text-slate-600">
             {user.email ?? ""}
           </div>
         </div>
@@ -74,7 +74,7 @@ export function AccountCard({
               window.location.href = "/sign-in";
             });
           }}
-          className="grid size-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-900"
+          className="grid size-8 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-slate-200 hover:text-slate-900"
         >
           <LogOut className="size-4" />
         </button>

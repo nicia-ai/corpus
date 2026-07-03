@@ -130,7 +130,7 @@ export function FolderHeader({
           </button>
         </span>
       ) : (
-        <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+        <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <IconButton label="New subfolder" onClick={onAddChild}>
             <FolderPlus className="size-4" />
           </IconButton>

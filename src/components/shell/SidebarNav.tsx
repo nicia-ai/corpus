@@ -67,7 +67,7 @@ export function SidebarNav({
             }}
             inactiveProps={{
               className:
-                "flex items-center gap-3 rounded-md px-3 py-2 text-base text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                "flex items-center gap-3 rounded-md px-3 py-2 text-base text-slate-600 hover:bg-slate-200 hover:text-slate-900",
             }}
           >
             <Icon className="size-4 shrink-0" />

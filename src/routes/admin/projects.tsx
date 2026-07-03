@@ -30,7 +30,7 @@ function AdminProjectsPage(): React.ReactElement {
       ) : (
         <div className={listSurface()}>
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs tracking-wide text-slate-500 uppercase">
+            <thead className="border-b border-slate-200 bg-slate-50 text-sm text-slate-500">
               <tr>
                 <th className="px-4 py-2 font-medium">Project</th>
                 <th className="px-4 py-2 font-medium">Organization</th>
@@ -49,7 +49,7 @@ function AdminProjectsPage(): React.ReactElement {
                 <tr key={p.id}>
                   <td className="px-4 py-2">
                     <div className="font-medium text-slate-900">{p.name}</div>
-                    <div className="text-xs text-slate-500">{p.slug}</div>
+                    <div className="text-sm text-slate-500">{p.slug}</div>
                   </td>
                   <td className="px-4 py-2 text-slate-600">
                     {p.organizationName}
@@ -69,7 +69,7 @@ function AdminProjectsPage(): React.ReactElement {
         </div>
       )}
       {truncatedAt !== null && (
-        <p className="text-xs text-slate-500">
+        <p className="text-sm text-slate-500">
           Showing the {truncatedAt} most recent projects — per-project content
           is read one Durable Object at a time, so the list is capped.
           Pagination is the next step.

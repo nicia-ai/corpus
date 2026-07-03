@@ -1,7 +1,8 @@
 import { Folder as FolderIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useRef } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { useDialogFocusTrap } from "@/components/ui/dialog-focus";
 import type { FolderSlug } from "@/ids";
 import { cn } from "@/lib/cn";
 import type { FolderRow } from "@/lib/server/folders";
@@ -31,13 +32,15 @@ export function MoveDialog({
   onPick: (target: DropTarget) => void;
   onClose: () => void;
 }>): React.ReactElement {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const topRef = useRef<HTMLButtonElement>(null);
+  // The component is conditionally rendered (mounted = open), not toggled by
+  // an `open` prop, so this is a constant "always open while mounted" — the
+  // hook's restore-focus/Tab-trap cleanup runs on unmount either way.
+  const dialogRef = useDialogFocusTrap({
+    open: true,
+    onClose,
+    initialFocus: topRef,
+  });
 
   const blocked = new Set<FolderSlug>();
   if (disabledSubtree !== undefined) {
@@ -83,6 +86,7 @@ export function MoveDialog({
         className="absolute inset-0 bg-slate-900/40"
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -93,6 +97,7 @@ export function MoveDialog({
         </h2>
         <div className="min-h-0 flex-1 overflow-auto py-1">
           <button
+            ref={topRef}
             type="button"
             onClick={() => onPick(null)}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-base text-slate-900 hover:bg-slate-50"

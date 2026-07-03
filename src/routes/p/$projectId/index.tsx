@@ -266,7 +266,7 @@ function CollectionCard(
         <div className="mt-1 text-sm text-slate-500">
           {docs} · {agents}
         </div>
-        <div className="mt-2 text-xs text-slate-400">
+        <div className="mt-2 text-sm text-slate-400">
           {lastActivityAt === undefined ? (
             "no activity yet"
           ) : (

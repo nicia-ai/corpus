@@ -1,9 +1,6 @@
 import type { CommentThreadView } from "@/lib/server/comments";
-import type {
-  SuggestionHunkView,
-  SuggestionView,
-} from "@/lib/server/suggestions";
-import type { AnchorBlock, HighlightAnchor } from "@/lib/text-anchor";
+import type { SuggestionView } from "@/lib/server/suggestions";
+import type { AnchorBlock } from "@/lib/text-anchor";
 
 export type ReviewItem = CommentReviewItem | SuggestionReviewItem;
 
@@ -31,24 +28,13 @@ export type SuggestionReviewItem = Readonly<{
   suggestion: SuggestionView;
 }>;
 
-export type InlineSuggestionMark = Readonly<{
-  id: `suggestion:${number}:hunk:${number}`;
-  suggestionId: number;
-  hunkId: number;
-  op: SuggestionHunkView["op"];
-  anchor: HighlightAnchor;
-}>;
-
 export type ReviewModel = Readonly<{
   items: readonly ReviewItem[];
-  inlineSuggestionMarks: readonly InlineSuggestionMark[];
   activeCount: number;
   activeCommentCount: number;
   activeSuggestionCount: number;
   staleSuggestionCount: number;
 }>;
-
-const MAX_INLINE_SUGGESTION_MARKS = 80;
 
 type Input = Readonly<{
   blocks: readonly AnchorBlock[];
@@ -89,11 +75,6 @@ export function buildReviewModel(input: Input): ReviewModel {
     },
   );
 
-  const inlineSuggestionMarks = input.suggestions
-    .filter((s) => isOpenCurrentSuggestion(s, input.docVersion))
-    .flatMap((s) => suggestionMarks(s, input.blocks))
-    .slice(0, MAX_INLINE_SUGGESTION_MARKS);
-
   const activeCommentCount = commentItems.filter((i) => i.active).length;
   const activeSuggestionCount = suggestionItems.filter((i) => i.active).length;
   const staleSuggestionCount = suggestionItems.filter(
@@ -102,7 +83,6 @@ export function buildReviewModel(input: Input): ReviewModel {
 
   return {
     items: [...commentItems, ...suggestionItems].sort(itemSort),
-    inlineSuggestionMarks,
     activeCount: activeCommentCount + activeSuggestionCount,
     activeCommentCount,
     activeSuggestionCount,
@@ -119,15 +99,6 @@ function isCurrentSuggestion(
   docVersion: number,
 ): boolean {
   return suggestion.baseDocVersion === docVersion;
-}
-
-function isOpenCurrentSuggestion(
-  suggestion: SuggestionView,
-  docVersion: number,
-): boolean {
-  return (
-    isOpenSuggestion(suggestion) && isCurrentSuggestion(suggestion, docVersion)
-  );
 }
 
 function commentSortStart(
@@ -212,91 +183,4 @@ function blockExcerpt(text: string, start: number, end: number): string {
   const selected = text.slice(start, end);
   const after = text.slice(end, Math.min(text.length, end + 48));
   return before + selected + after;
-}
-
-function suggestionMarks(
-  suggestion: SuggestionView,
-  blocks: readonly AnchorBlock[],
-): readonly InlineSuggestionMark[] {
-  return suggestion.hunks.flatMap((hunk) => {
-    const anchors =
-      hunk.op === "insert"
-        ? insertionAnchors(hunk, blocks)
-        : rangeAnchors(hunk, blocks);
-    return anchors.map((anchor) => ({
-      id: `suggestion:${suggestion.id}:hunk:${hunk.id}` as const,
-      suggestionId: suggestion.id,
-      hunkId: hunk.id,
-      op: hunk.op,
-      anchor,
-    }));
-  });
-}
-
-function rangeAnchors(
-  hunk: SuggestionHunkView,
-  blocks: readonly AnchorBlock[],
-): readonly HighlightAnchor[] {
-  if (hunk.baseEnd <= hunk.baseStart) return [];
-  return blocks.flatMap((block) => {
-    if (
-      block.id === undefined ||
-      block.text.length === 0 ||
-      !hunkFullyCoversBlock(hunk, block)
-    ) {
-      return [];
-    }
-    return [
-      {
-        blockId: block.id,
-        start: 0,
-        end: block.text.length,
-        quote: { prefix: "", exact: block.text, suffix: "" },
-      },
-    ];
-  });
-}
-
-function hunkFullyCoversBlock(
-  hunk: SuggestionHunkView,
-  block: AnchorBlock,
-): boolean {
-  return hunk.baseStart <= block.sourceStart && hunk.baseEnd >= block.sourceEnd;
-}
-
-function insertionAnchors(
-  hunk: SuggestionHunkView,
-  blocks: readonly AnchorBlock[],
-): readonly HighlightAnchor[] {
-  const before = [...blocks]
-    .reverse()
-    .find(
-      (b) =>
-        b.id !== undefined &&
-        b.text.length > 0 &&
-        b.sourceEnd <= hunk.baseStart,
-    );
-  const after = blocks.find(
-    (b) =>
-      b.id !== undefined &&
-      b.text.length > 0 &&
-      b.sourceStart >= hunk.baseStart,
-  );
-  const block = before ?? after;
-  if (block?.id === undefined || block.text.length === 0) return [];
-  const atEnd = before !== undefined;
-  const start = atEnd ? block.text.length - 1 : 0;
-  const end = atEnd ? block.text.length : 1;
-  return [
-    {
-      blockId: block.id,
-      start,
-      end,
-      quote: {
-        prefix: "",
-        exact: block.text.slice(start, end),
-        suffix: "",
-      },
-    },
-  ];
 }
