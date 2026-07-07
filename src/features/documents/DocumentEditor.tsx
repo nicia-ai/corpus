@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ProseDiff, DiffPanel } from "@/components/diff/Diff";
 import { DocHeader } from "@/components/document/DocHeader";
+import { DocumentActionBar } from "@/components/document/DocumentActionBar";
 import { Field } from "@/components/Field";
 import type {
   ReviewMark,
@@ -688,7 +689,17 @@ export function DocumentEditor({
   // (whose comments are positioned relative to editor text). A top bar
   // that appears on first keystroke pushes everything down — jarring.
   const editBar = dirty && (
-    <div className="sticky bottom-0 z-20 mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 bg-white py-3">
+    <DocumentActionBar
+      broken={broken}
+      error={
+        <>
+          {error && <span className="text-sm text-red-600">{error}</span>}
+          {suggestError !== undefined && (
+            <span className="text-sm text-red-600">{suggestError}</span>
+          )}
+        </>
+      }
+    >
       <span className="text-sm font-medium text-slate-600">
         Unsaved changes
       </span>
@@ -705,16 +716,7 @@ export function DocumentEditor({
       >
         Suggest changes
       </Button>
-      {broken > 0 && (
-        <span className="text-sm text-amber-700">
-          {broken} link{broken > 1 ? "s" : ""} to a missing document
-        </span>
-      )}
-      {error && <span className="text-sm text-red-600">{error}</span>}
-      {suggestError !== undefined && (
-        <span className="text-sm text-red-600">{suggestError}</span>
-      )}
-    </div>
+    </DocumentActionBar>
   );
 
   // Desktop passes the measured layout (positions cards beside their text);
@@ -777,7 +779,6 @@ export function DocumentEditor({
       >
         <div className="min-w-0">
           <MarkdownEditor
-            fill
             review
             value={draft}
             onChange={setDraft}

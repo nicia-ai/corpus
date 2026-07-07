@@ -40,10 +40,13 @@ function ProjectLayout() {
   const [navOpen, setNavOpen] = useState(false);
 
   // Per-page ground: data-dense pages keep the slate-50 desk so their white
-  // cards read; the single-document surface gets a white ground so the
-  // borderless document is the open white figure (see DESIGN.md figure/ground).
+  // cards read; the single-document surface (read/edit AND the new-document
+  // composer) gets a white ground so the borderless document is the open
+  // white figure (see DESIGN.md figure/ground).
   const onDocumentSurface = useMatches().some(
-    (m) => m.routeId === "/p/$projectId/documents/$slug/",
+    (m) =>
+      m.routeId === "/p/$projectId/documents/$slug/" ||
+      m.routeId === "/p/$projectId/documents/new",
   );
 
   // Attribute product events to the active organization so analytics can

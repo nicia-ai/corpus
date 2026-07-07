@@ -479,7 +479,6 @@ export function DocumentHistory({
               <MarkdownEditor
                 key={active.docVersion}
                 readOnly
-                fill
                 value={active.markdown}
                 ariaLabel={`Version ${active.docVersion} of ${current.title}`}
                 onFollowLink={followLink}

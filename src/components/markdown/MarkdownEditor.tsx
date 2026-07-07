@@ -320,14 +320,6 @@ const designTheme = EditorView.theme({
   },
 });
 
-// Boxed usages (the create form) bound the height and scroll internally so they
-// don't push surrounding page controls below the fold; the full-page document
-// surface (`fill`) omits this and grows with content (the page scrolls).
-const boundedHeight = EditorView.theme({
-  "&": { maxHeight: "60vh" },
-  ".cm-scroller": { overflow: "auto" },
-});
-
 const NO_SLUGS: readonly string[] = [];
 
 type Props = Readonly<{
@@ -347,9 +339,6 @@ type Props = Readonly<{
   ariaLabel?: string;
   // ID of an element that describes the editor (e.g. a validation error).
   ariaDescribedBy?: string | undefined;
-  // Full-page document surface: a bare full-width host that grows with content
-  // (the page scrolls), vs the default bordered, height-bounded box.
-  fill?: boolean;
   // Cmd/Ctrl-click on a rendered link; receives the raw href.
   onFollowLink?: (href: string) => void;
   // Cmd/Ctrl-S in the editor.
@@ -377,7 +366,6 @@ export function MarkdownEditor({
   onBrokenChange,
   ariaLabel,
   ariaDescribedBy,
-  fill,
   onFollowLink,
   onSave,
   review,
@@ -538,7 +526,6 @@ export function MarkdownEditor({
                 }),
               ]
             : []),
-          ...(fill === true ? [] : [boundedHeight]),
           ...(editing
             ? [
                 EditorView.updateListener.of((u) => {
@@ -617,21 +604,19 @@ export function MarkdownEditor({
     view.current?.dispatch({ effects: setReviewPopoverOpen.of(popoverOpen) });
   }, [review, popoverOpen]);
 
-  // Shared with the pre-mount fallback below (bare Markdown wrapped in the
-  // same box) so first paint → live editor never jumps size, and with any
-  // lazy-loading caller's own Suspense fallback (see host-class.ts) so that
-  // placeholder can't drift out of sync with the mounted editor either.
-  const hostClassName = markdownEditorHostClass(fill === true);
-
   return (
     <div className="relative">
       <div
         ref={host}
         style={{ display: mounted ? undefined : "none" }}
-        className={hostClassName}
+        className={markdownEditorHostClass}
       />
+      {/* Same box class as the mounted host above (bare Markdown wrapped in
+          it) so first paint → live editor never jumps size; also shared with
+          any lazy-loading caller's own Suspense fallback (see
+          host-class.ts) so that placeholder can't drift out of sync either. */}
       {!mounted && (
-        <div className={hostClassName}>
+        <div className={markdownEditorHostClass}>
           <Markdown source={value} bare />
         </div>
       )}

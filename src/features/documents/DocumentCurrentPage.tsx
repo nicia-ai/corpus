@@ -33,12 +33,9 @@ const DocumentEditor = lazy(() =>
   })),
 );
 
-// DocumentEditor always renders MarkdownEditor with `fill` — same box class
-// the mounted editor uses (host-class.ts), so the Suspense fallback can't
-// drift out of sync with it.
-const documentEditorFallback = (
-  <div className={markdownEditorHostClass(true)} />
-);
+// Same box class the mounted editor uses (host-class.ts), so the Suspense
+// fallback can't drift out of sync with it.
+const documentEditorFallback = <div className={markdownEditorHostClass} />;
 
 // A remote change the page hasn't flashed yet. `content` carries the
 // pre-change snapshot so the flash can diff against the new head; `suggestion`
