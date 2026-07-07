@@ -63,6 +63,7 @@ export type DocVersionEntry = Readonly<{
 export type SaveResult = Readonly<
   | { ok: true; docVersion: number }
   | { ok: false; conflict: true; currentVersion: number }
+  | { ok: false; segmentCollision: true }
   | { ok: false; rolledBack: true }
 >;
 
@@ -163,6 +164,15 @@ export const saveDocument = createServerFn({ method: "POST" })
       slug: z.string().min(1),
       title: z.string().optional(),
       markdown: z.string(),
+      // Basename incl. extension. Only meaningful on create (clientVersion:
+      // 0) — an existing document keeps its filename via renameFilename.
+      // Same basename rule as renameFilename: no path separator.
+      filename: z
+        .string()
+        .trim()
+        .min(1)
+        .refine((v) => !v.includes("/"), "filename cannot contain a path")
+        .optional(),
       clientVersion: z.number().int().nonnegative(),
     }),
   )
@@ -185,6 +195,7 @@ export const saveDocument = createServerFn({ method: "POST" })
         slug: asDocumentSlug(data.slug),
         markdown: data.markdown,
         title: data.title,
+        filename: data.filename,
         clientVersion: data.clientVersion,
         changedBy: changedBy(c),
       }),
@@ -192,6 +203,9 @@ export const saveDocument = createServerFn({ method: "POST" })
     if (r.ok) return { ok: true, docVersion: r.docVersion };
     if ("conflict" in r) {
       return { ok: false, conflict: true, currentVersion: r.currentVersion };
+    }
+    if ("segmentCollision" in r) {
+      return { ok: false, segmentCollision: true };
     }
     return { ok: false, rolledBack: true };
   });

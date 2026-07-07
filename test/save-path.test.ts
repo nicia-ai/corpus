@@ -111,3 +111,79 @@ describe("save path — atomic enlisted transaction (TypeGraph 0.26 do-sqlite)",
     expect((await store.getDocument(docSlug("pricing")))?.docVersion).toBe(2);
   });
 });
+
+// A caller-chosen filename on create (the new-document page's "Rename
+// file" control). No filename at all keeps the pre-existing default
+// (`<slug>.md`, always free — derived from the already-unique slug); an
+// explicit filename can collide with a sibling at the project root, since
+// editor-created documents are never folder-placed.
+describe("saveDocument — caller-chosen filename on create", () => {
+  it("defaults to <slug>.md when no filename is given", async () => {
+    const store = freshProject();
+    await store.saveDocument({
+      slug: docSlug("handbook"),
+      markdown: "# Handbook",
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+    expect((await store.getDocument(docSlug("handbook")))?.filename).toBe(
+      "handbook.md",
+    );
+  });
+
+  it("uses a caller-supplied filename", async () => {
+    const store = freshProject();
+    await store.saveDocument({
+      slug: docSlug("handbook"),
+      markdown: "# Handbook",
+      filename: "employee-handbook.md",
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+    expect((await store.getDocument(docSlug("handbook")))?.filename).toBe(
+      "employee-handbook.md",
+    );
+  });
+
+  it("rejects a filename already used by another root document, writes nothing", async () => {
+    const store = freshProject();
+    await store.saveDocument({
+      slug: docSlug("a"),
+      markdown: "# A",
+      filename: "notes.md",
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+
+    const r = await store.saveDocument({
+      slug: docSlug("b"),
+      markdown: "# B",
+      filename: "notes.md",
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+    expect(r).toEqual({ ok: false, segmentCollision: true });
+    expect(await store.getDocument(docSlug("b"))).toBeUndefined();
+  });
+
+  it("an explicit filename on an UPDATE is not collision-checked (create-only guard)", async () => {
+    const store = freshProject();
+    await store.saveDocument({
+      slug: docSlug("handbook"),
+      markdown: "# Handbook",
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+
+    // Same slug, so this is an update (clientVersion: 1) — the collision
+    // guard only runs when the document doesn't exist yet.
+    const r = await store.saveDocument({
+      slug: docSlug("handbook"),
+      markdown: "# Handbook v2",
+      filename: "handbook.md",
+      clientVersion: 1,
+      changedBy: "alice",
+    });
+    expect(r).toEqual({ ok: true, docVersion: 2 });
+  });
+});

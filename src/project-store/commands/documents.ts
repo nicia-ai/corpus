@@ -53,6 +53,16 @@ export class ImportAbort extends Error {
   }
 }
 
+// Same sentinel pattern as ImportAbort, for saveDocumentCommand's narrower
+// case: a caller-supplied filename on a brand-new document collides with
+// an existing sibling's filename at the project root.
+export class FilenameCollision extends Error {
+  constructor() {
+    super("segment-collision");
+    this.name = "FilenameCollision";
+  }
+}
+
 export type SaveDocumentCommandInput = Readonly<{
   slug: DocumentSlug;
   markdown: string;
@@ -78,6 +88,16 @@ export async function saveDocumentCommand(
   const head = await ctx.u.docs.find(input.slug);
   const filename =
     input.filename ?? head?.filename ?? defaultFilename(input.slug);
+  // Only a brand-new document with a caller-chosen (not auto-derived)
+  // filename can collide: the auto-default is always free (it's derived
+  // from the already-unique slug), and an existing document keeps its own
+  // filename slot unless renamed via renameFilenameCommand, which already
+  // guards this. Editor-created documents are never folder-placed, so the
+  // whole root namespace is the collision scope (folderSlug: null).
+  if (head === undefined && input.filename !== undefined) {
+    const occupant = await ctx.u.folders.documentAt(null, filename);
+    if (occupant !== undefined) throw new FilenameCollision();
+  }
   const parsed = parseFrontmatter(input.markdown);
   const body = parsed.ok ? parsed.body : input.markdown;
   const fmTitle = parsed.ok ? frontmatterTitle(parsed.frontmatter) : undefined;
