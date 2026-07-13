@@ -44,6 +44,7 @@ export type UpdateCollectionInput = Readonly<{
 export type SaveResult = Readonly<
   | { ok: true; docVersion: number }
   | { ok: false; conflict: true; currentVersion: number }
+  | { ok: false; segmentCollision: true }
   | { ok: false; rolledBack: true }
 >;
 

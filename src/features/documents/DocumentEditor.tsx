@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ProseDiff, DiffPanel } from "@/components/diff/Diff";
 import { DocHeader } from "@/components/document/DocHeader";
-import { Field } from "@/components/Field";
+import { DocumentActionBar } from "@/components/document/DocumentActionBar";
+import { RenameField } from "@/components/document/RenameField";
 import type {
   ReviewMark,
   SourceRange,
@@ -688,7 +689,17 @@ export function DocumentEditor({
   // (whose comments are positioned relative to editor text). A top bar
   // that appears on first keystroke pushes everything down — jarring.
   const editBar = dirty && (
-    <div className="sticky bottom-0 z-20 mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 bg-white py-3">
+    <DocumentActionBar
+      broken={broken}
+      error={
+        <>
+          {error && <span className="text-sm text-red-600">{error}</span>}
+          {suggestError !== undefined && (
+            <span className="text-sm text-red-600">{suggestError}</span>
+          )}
+        </>
+      }
+    >
       <span className="text-sm font-medium text-slate-600">
         Unsaved changes
       </span>
@@ -705,16 +716,7 @@ export function DocumentEditor({
       >
         Suggest changes
       </Button>
-      {broken > 0 && (
-        <span className="text-sm text-amber-700">
-          {broken} link{broken > 1 ? "s" : ""} to a missing document
-        </span>
-      )}
-      {error && <span className="text-sm text-red-600">{error}</span>}
-      {suggestError !== undefined && (
-        <span className="text-sm text-red-600">{suggestError}</span>
-      )}
-    </div>
+    </DocumentActionBar>
   );
 
   // Desktop passes the measured layout (positions cards beside their text);
@@ -777,7 +779,6 @@ export function DocumentEditor({
       >
         <div className="min-w-0">
           <MarkdownEditor
-            fill
             review
             value={draft}
             onChange={setDraft}
@@ -1019,62 +1020,5 @@ function ReviewTabSummary({
         </button>
       )}
     </span>
-  );
-}
-
-// Inline metadata editor for title and filename. Both are head-only
-// (no version/content change), so they share this lightweight surface
-// instead of the read/edit/conflict machinery above. `hint` carries the
-// filename-specific note that relative links keep resolving.
-function RenameField({
-  label,
-  initial,
-  pending,
-  error,
-  mono,
-  hint,
-  onSave,
-  onCancel,
-}: Readonly<{
-  label: string;
-  initial: string;
-  pending: boolean;
-  error?: string | undefined;
-  mono?: boolean;
-  hint?: string;
-  onSave: (value: string) => void;
-  onCancel: () => void;
-}>): React.ReactElement {
-  const [value, setValue] = useState(initial);
-  return (
-    <form
-      className="mb-5 space-y-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSave(value);
-      }}
-    >
-      <Field
-        label={label}
-        value={value}
-        onChange={setValue}
-        mono={mono ?? false}
-      />
-      {hint !== undefined && <p className="text-sm text-slate-500">{hint}</p>}
-      <div className="flex items-center gap-3">
-        <Button type="submit" disabled={pending}>
-          Save
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={pending}
-          onClick={onCancel}
-        >
-          Cancel
-        </Button>
-        {error && <span className="text-base text-red-600">{error}</span>}
-      </div>
-    </form>
   );
 }

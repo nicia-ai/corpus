@@ -328,6 +328,9 @@ export const api = new Hono<{ Bindings: Env }>()
         409,
       );
     }
+    if ("segmentCollision" in r) {
+      return c.json({ ok: false, segmentCollision: true }, 409);
+    }
     return c.json({ ok: false, rolledBack: true }, 409);
   })
   .get("/.well-known/oauth-authorization-server", (c) =>

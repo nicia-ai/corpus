@@ -57,6 +57,7 @@ import {
 import {
   archiveDocumentsCommand,
   archiveOneDocumentCommand,
+  FilenameCollision,
   ImportAbort,
   importDocumentAtPathCommand,
   renameDocumentCommand,
@@ -813,6 +814,9 @@ export class ProjectStore extends DurableObject<Env> {
     input: SaveDocumentInput,
   ): Promise<SaveResult> {
     if (err instanceof RollbackProbe) return { ok: false, rolledBack: true };
+    if (err instanceof FilenameCollision) {
+      return { ok: false, segmentCollision: true };
+    }
     if (err instanceof ConflictError) {
       return { ok: false, conflict: true, currentVersion: err.currentVersion };
     }
