@@ -38,6 +38,31 @@ describe("createDocumentInCollection (scoped create)", () => {
     expect((await store.getDocument(slug))?.markdown).toBe("# New\n\nbody");
   });
 
+  // An agent push must not grow the always-include payload: the curator
+  // opts a member into "core" delivery, never the create path itself.
+  it("attaches a created document with reference delivery", async () => {
+    const { store, collectionSlug } = await withCollection("cic-delivery");
+    const slug = docSlug("pushed-by-agent");
+    expect(
+      await store.createDocumentInCollection(
+        {
+          slug,
+          markdown: "# Pushed\n\nbody",
+          clientVersion: 0,
+          changedBy: "a",
+        },
+        collectionSlug,
+        0,
+      ),
+    ).toMatchObject({ ok: true, docVersion: 1 });
+    const outline = await store.collectionOutline(collectionSlug);
+    expect(outline.found).toBe(true);
+    if (!outline.found) return;
+    expect(outline.documents.map((d) => [d.slug, d.delivery])).toEqual([
+      [slug, "reference"],
+    ]);
+  });
+
   // The bug: two clients create the same new slug into the same collection.
   // The first wins (creates + attaches v1). The second is AUTHORIZED for
   // that doc (it is now in the bound collection), so it must get a
