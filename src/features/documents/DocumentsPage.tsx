@@ -4,6 +4,7 @@ import {
   FolderInput,
   FolderPlus,
   Plus,
+  Search,
   Upload,
 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -35,6 +36,7 @@ import {
   renameFolder,
   type FolderRow,
 } from "@/lib/server/folders";
+import { searchDocuments, type SearchHit } from "@/lib/server/search";
 import type { CreateProposalItem } from "@/lib/server/suggestions";
 
 import { DocumentUploader } from "./DocumentUploader";
@@ -105,6 +107,44 @@ export function DocumentsPage({
     useState<
       Readonly<{ kind: "docs" } | { kind: "folder"; slug: FolderSlug }>
     >();
+
+  // Content search. Event-driven (input -> debounce -> server fn), not an
+  // effect: the query is user input, not route data. The sequence counter
+  // drops out-of-order responses; bumping it on clear also invalidates any
+  // in-flight call so a stale result can't repopulate a cleared box.
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<readonly SearchHit[]>();
+  const [searchPending, setSearchPending] = useState(false);
+  const searchSeq = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const searchActive = query.trim().length >= 2;
+
+  function onQueryChange(next: string): void {
+    setQuery(next);
+    if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
+    const q = next.trim();
+    searchSeq.current += 1;
+    if (q.length < 2) {
+      setHits(undefined);
+      setSearchPending(false);
+      return;
+    }
+    setSearchPending(true);
+    const seq = searchSeq.current;
+    searchTimer.current = setTimeout(() => {
+      searchDocuments({ data: { projectId, query: q } })
+        .then((res) => {
+          if (seq !== searchSeq.current) return;
+          setHits(res);
+          setSearchPending(false);
+        })
+        .catch(() => {
+          if (seq !== searchSeq.current) return;
+          setHits([]);
+          setSearchPending(false);
+        });
+    }, 250);
+  }
 
   // Document slugs in visible top-to-bottom order (collapsed folders
   // contribute nothing) — the index space shift-click ranges over.
@@ -344,6 +384,31 @@ export function DocumentsPage({
         </div>
       )}
 
+      {!empty && (
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+          <Search className="size-4 shrink-0 text-slate-400" aria-hidden />
+          <input
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") onQueryChange("");
+            }}
+            placeholder="Search documents…"
+            aria-label="Search documents"
+            className="w-full bg-transparent text-base outline-none placeholder:text-slate-400"
+          />
+          {query !== "" && (
+            <button
+              type="button"
+              onClick={() => onQueryChange("")}
+              className="text-sm font-medium text-slate-500 hover:text-slate-900"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {error && <p className="mb-3 text-base text-red-600">{error}</p>}
       {/* Page-level (not inside the selection bar) so a per-row delete
           failure with nothing selected is still visible. */}
@@ -406,6 +471,13 @@ export function DocumentsPage({
           collections={collections}
           folders={folders}
           documents={documents}
+        />
+      ) : searchActive ? (
+        <SearchResults
+          projectId={projectId}
+          hits={hits}
+          pending={searchPending}
+          query={query.trim()}
         />
       ) : (
         <div
@@ -471,6 +543,78 @@ export function DocumentsPage({
         </div>
       )}
     </div>
+  );
+}
+
+// Flat hit list shown while a search query is active; clearing the box
+// (or Escape) restores the folder tree. Rows navigate like DocRow titles.
+function SearchResults({
+  projectId,
+  hits,
+  pending,
+  query,
+}: Readonly<{
+  projectId: ProjectId;
+  hits: readonly SearchHit[] | undefined;
+  pending: boolean;
+  query: string;
+}>): React.ReactElement {
+  if (hits === undefined) {
+    return (
+      <p className="px-3 py-6 text-sm text-slate-500" aria-live="polite">
+        {pending ? "Searching…" : ""}
+      </p>
+    );
+  }
+  if (hits.length === 0) {
+    return (
+      <p className="px-3 py-6 text-sm text-slate-500" aria-live="polite">
+        No documents match “{query}”.
+      </p>
+    );
+  }
+  return (
+    <div className={listSurface(cn("divide-y divide-slate-200"))}>
+      {hits.map((h) => (
+        <Link
+          key={h.slug}
+          to="/p/$projectId/documents/$slug"
+          params={{ projectId, slug: h.slug }}
+          className="block px-3 py-2.5 hover:bg-slate-50"
+        >
+          <span className="flex items-baseline gap-2">
+            <span className="min-w-0 truncate font-medium text-slate-900">
+              {h.title}
+            </span>
+            <span className="min-w-0 truncate text-sm text-slate-400">
+              {h.path}
+            </span>
+          </span>
+          <SearchSnippetLine hit={h} />
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+// The matched span is emphasized with a neutral slate wash + weight (no
+// new accent color); offsets come from the server so the highlighted
+// occurrence is exactly the one the snippet was cut around.
+function SearchSnippetLine({
+  hit,
+}: Readonly<{ hit: SearchHit }>): React.ReactElement {
+  const { snippet, matchStart, matchEnd } = hit;
+  if (matchStart === undefined || matchEnd === undefined) {
+    return <p className="mt-0.5 truncate text-sm text-slate-500">{snippet}</p>;
+  }
+  return (
+    <p className="mt-0.5 truncate text-sm text-slate-500">
+      {snippet.slice(0, matchStart)}
+      <mark className="rounded-sm bg-slate-200 px-0.5 font-medium text-slate-900">
+        {snippet.slice(matchStart, matchEnd)}
+      </mark>
+      {snippet.slice(matchEnd)}
+    </p>
   );
 }
 

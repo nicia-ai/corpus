@@ -17,6 +17,7 @@ import {
   resolveRelativePath,
   resolveWikiPath,
 } from "../store/domain/paths";
+import { headSnippet, searchSnippet } from "../store/domain/search";
 import {
   type DocumentChain,
   verifyChain,
@@ -31,6 +32,7 @@ import { compact, estimateTokens, pluralize } from "../util";
 import type {
   CollectionOutline,
   DocumentHistoryEntry,
+  DocumentSearchHit,
   DocumentSnapshot,
   OutlineDoc,
   OutlineLink,
@@ -91,6 +93,61 @@ export async function listDocumentsProjection(u: ProjectUnit): Promise<
     folderSlug: folders[i]?.slug ?? null,
     updatedAt: d.updatedAt,
   }));
+}
+
+const SEARCH_RESULT_LIMIT = 20;
+const SEARCH_MIN_QUERY = 2;
+
+// Case-insensitive substring search over live document HEADS (title +
+// body). A bounded in-memory scan, deliberately: a project DO holds at
+// most hundreds of documents, drizzle-kit owns all DDL (no hand-rolled
+// FTS table), and the blobs are one batched read. Title hits rank ahead
+// of body-only hits; each rank orders by path for determinism.
+export async function searchDocumentsProjection(
+  u: ProjectUnit,
+  query: string,
+  limit: number = SEARCH_RESULT_LIMIT,
+): Promise<readonly DocumentSearchHit[]> {
+  const needle = query.trim().toLowerCase();
+  if (needle.length < SEARCH_MIN_QUERY) return [];
+  const max = Math.max(1, Math.min(limit, SEARCH_RESULT_LIMIT));
+  const docs = (await u.docs.listAll()).filter(
+    (d) => d.archivedAt === undefined,
+  );
+  const [bytes, { slugToPath }] = await Promise.all([
+    u.blobs.getMany(docs.map((d) => d.contentHash)),
+    pathIndex(u),
+  ]);
+  const titleHits: DocumentSearchHit[] = [];
+  const bodyHits: DocumentSearchHit[] = [];
+  for (const d of docs) {
+    const body = bytes.get(d.contentHash) ?? "";
+    const bodyIndex = body.toLowerCase().indexOf(needle);
+    const inTitle = d.title.toLowerCase().includes(needle);
+    if (!inTitle && bodyIndex === -1) continue;
+    // Point the preview at the body match when there is one; a
+    // title-only hit previews the body head instead.
+    const cut =
+      bodyIndex === -1
+        ? headSnippet(body)
+        : searchSnippet(body, bodyIndex, needle.length);
+    const hit: DocumentSearchHit = compact({
+      slug: d.slug,
+      title: d.title,
+      path: slugToPath.get(d.slug) ?? d.filename,
+      docVersion: d.docVersion,
+      field: inTitle ? ("title" as const) : ("body" as const),
+      snippet: cut.snippet,
+      matchStart: cut.matchStart,
+      matchEnd: cut.matchEnd,
+    });
+    (inTitle ? titleHits : bodyHits).push(hit);
+  }
+  const byPath = (a: DocumentSearchHit, b: DocumentSearchHit): number =>
+    a.path.localeCompare(b.path);
+  titleHits.sort(byPath);
+  bodyHits.sort(byPath);
+  return [...titleHits, ...bodyHits].slice(0, max);
 }
 
 // Every LIVE document as a link-resolution ref (slug + derived path).

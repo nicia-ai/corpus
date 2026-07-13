@@ -103,6 +103,7 @@ import type {
   CollectionOutline,
   CreateInCollectionResult,
   DocumentHistoryEntry,
+  DocumentSearchHit,
   ImportAndLinkInput,
   ImportAndLinkResult,
   DocumentSnapshot,
@@ -140,6 +141,7 @@ import {
   listDocumentRefsProjection,
   readCollectionProjection,
   resolvedViews,
+  searchDocumentsProjection,
   usageSnapshotProjection,
   verifyHistoryProjection,
 } from "./project-store/queries";
@@ -646,6 +648,13 @@ export class ProjectStore extends DurableObject<Env> {
 
   async listDocumentRefs(): Promise<{ slug: string; path: string }[]> {
     return listDocumentRefsProjection(await this.read());
+  }
+
+  async searchDocuments(
+    query: string,
+    limit?: number,
+  ): Promise<readonly DocumentSearchHit[]> {
+    return searchDocumentsProjection(await this.read(), query, limit);
   }
 
   async listCollections(): Promise<readonly CollectionMeta[]> {

@@ -142,6 +142,21 @@ export type ProjectUsageSnapshot = Readonly<{
   storedMarkdownBytes: number;
 }>;
 
+// One full-text search hit over live document heads. `field` says where
+// the needle first matched (title hits rank ahead of body-only hits);
+// `matchStart`/`matchEnd` are offsets INTO `snippet` (absent when the
+// snippet is a plain body-head preview for a title-only match).
+export type DocumentSearchHit = Readonly<{
+  slug: string;
+  title: string;
+  path: string;
+  docVersion: number;
+  field: "title" | "body";
+  snippet: string;
+  matchStart?: number;
+  matchEnd?: number;
+}>;
+
 // The agent-facing folder projection — one resolved link. `kind` is
 // how the link was written (`path` = CommonMark relative destination,
 // `wiki` = Obsidian-style `[[target]]`). `documentSlug` is null when it
