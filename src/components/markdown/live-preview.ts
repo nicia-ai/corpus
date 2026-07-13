@@ -348,22 +348,23 @@ function decorateListMark(
   );
 }
 
-// GFM tables: render as a read-only <table> off-cursor; the caret on any table
-// line shows the raw source, mono-tagged so `|` columns align. Falls back to
-// mono-styled raw source when the table doesn't parse.
+// GFM tables: render as a read-only <table> off-cursor (cell content is
+// walked from this same syntax tree, so inline markdown renders inside
+// cells); the caret on any table line shows the raw source, mono-tagged so
+// `|` columns align. Falls back to mono-styled raw source when the table
+// node lacks a header.
 function decorateTable(
   decos: CmRange<Decoration>[],
   state: EditorState,
-  from: number,
-  to: number,
+  node: MdNode,
 ): void {
-  if (touchesLine(state, from, to)) {
-    pushLineClass(decos, state, from, to, "cm-md-table");
+  if (touchesLine(state, node.from, node.to)) {
+    pushLineClass(decos, state, node.from, node.to, "cm-md-table");
     return;
   }
-  const deco = tableReplace(state, from, to);
+  const deco = tableReplace(state, node);
   if (deco) decos.push(deco);
-  else pushLineClass(decos, state, from, to, "cm-md-table");
+  else pushLineClass(decos, state, node.from, node.to, "cm-md-table");
 }
 
 function decorateHorizontalRule(
@@ -518,7 +519,7 @@ function computeDecorationsInRange(
           return;
 
         case "Table":
-          decorateTable(decos, state, nodeFrom, nodeTo);
+          decorateTable(decos, state, ref.node);
           return;
 
         case "HorizontalRule":
