@@ -467,6 +467,17 @@ function ApiKeyManager({
     );
   }
 
+  // Members can't see keys at all (the listing is owner-scoped), so
+  // "No API keys yet" would be a false claim for them — owner keys may
+  // exist. Non-owners get only the ownership notice.
+  if (!isOwner) {
+    return (
+      <p className="text-sm text-slate-500">
+        API keys are managed by organization owners.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {keys.length === 0 ? (
@@ -486,7 +497,7 @@ function ApiKeyManager({
             setCreated(k);
           }}
         />
-      ) : isOwner ? (
+      ) : (
         <Button
           onClick={() => setCreating(true)}
           className="inline-flex items-center gap-1.5"
@@ -494,10 +505,6 @@ function ApiKeyManager({
           <Plus className="size-4" />
           New API Key
         </Button>
-      ) : (
-        <p className="text-sm text-slate-500">
-          Only organization owners can generate new API keys.
-        </p>
       )}
     </div>
   );

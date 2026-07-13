@@ -1,7 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import { connectControlDb } from "@/control/db";
 import { eventLogFor } from "@/control/event-log-for";
+import { resolveUserNames } from "@/control/users";
 import { asCollectionSlug, asProjectId } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import {
@@ -40,5 +42,6 @@ export const getCollectionActivity = createServerFn({ method: "GET" })
       mcpUrl: `${cx.env.BETTER_AUTH_URL}/mcp`,
       store: storeOf(cx),
       log: eventLogOf(cx),
+      resolveNames: (ids) => resolveUserNames(connectControlDb(cx.env.DB), ids),
     });
   });
