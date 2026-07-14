@@ -2,6 +2,7 @@ import {
   defineEdge,
   defineGraph,
   defineNode,
+  defineNodeIndex,
   searchable,
 } from "@nicia-ai/typegraph";
 import { z } from "zod";
@@ -189,6 +190,33 @@ export const includesFolder = defineEdge("includes_folder", {
   to: [Folder],
 });
 
+// Corpus resolves these identities on nearly every command. TypeGraph's
+// unique constraints enforce the invariants through its uniqueness ledger;
+// these separate, non-unique relational indexes accelerate the ordinary
+// `find({ where })` reads over node props. The version indexes keep the
+// sequence field after the slug so a slug-only history scan uses the same
+// key prefix.
+const documentSlugIndex = defineNodeIndex(Document, {
+  name: "corpus_document_slug_idx",
+  fields: ["slug"],
+});
+const documentVersionIndex = defineNodeIndex(DocumentVersion, {
+  name: "corpus_document_version_idx",
+  fields: ["slug", "docVersion"],
+});
+const collectionSlugIndex = defineNodeIndex(Collection, {
+  name: "corpus_collection_slug_idx",
+  fields: ["slug"],
+});
+const collectionVersionIndex = defineNodeIndex(CollectionVersion, {
+  name: "corpus_collection_version_idx",
+  fields: ["collectionSlug", "collectionVersion"],
+});
+const folderSlugIndex = defineNodeIndex(Folder, {
+  name: "corpus_folder_slug_idx",
+  fields: ["slug"],
+});
+
 // Inferred user-defined fields for each node, suitable for downstream
 // DTO derivation (Pick / Omit) so a node's editable surface lives in
 // exactly one place — the Zod schema above. These DO NOT include
@@ -284,6 +312,13 @@ export const canonicalGraph = defineGraph({
       to: [CollectionVersion],
     },
   },
+  indexes: [
+    documentSlugIndex,
+    documentVersionIndex,
+    collectionSlugIndex,
+    collectionVersionIndex,
+    folderSlugIndex,
+  ],
 });
 
 export type CanonicalGraph = typeof canonicalGraph;

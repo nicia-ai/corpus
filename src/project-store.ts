@@ -217,6 +217,24 @@ const SEARCH_BACKFILL_KEY = "search:backfilled:v1";
 // + node updates) in any single transaction for an unbounded legacy project.
 const SEARCH_BACKFILL_BATCH = 100;
 
+// TypeGraph 0.35 widened its built-in traversal indexes so the actual
+// traversal SQL is index-only. Its idempotent bootstrap cannot replace an
+// existing same-name index with a different column list, so every pre-0.35
+// ProjectStore needs this one-time physical migration. Keep the marker in DO
+// storage rather than the TypeGraph schema document: this is a database-level
+// migration, not a graph-model evolution.
+export const TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY =
+  "typegraph-physical-schema:0.35-edge-covering-indexes";
+
+const TYPEGRAPH_035_EDGE_INDEX_STATEMENTS = [
+  "DROP INDEX IF EXISTS typegraph_edges_from_idx",
+  `CREATE INDEX typegraph_edges_from_idx ON typegraph_edges
+    (graph_id, from_kind, from_id, kind, to_kind, deleted_at, valid_from, valid_to, to_id)`,
+  "DROP INDEX IF EXISTS typegraph_edges_to_idx",
+  `CREATE INDEX typegraph_edges_to_idx ON typegraph_edges
+    (graph_id, to_kind, to_id, kind, from_kind, deleted_at, valid_from, valid_to, from_id)`,
+] as const;
+
 // Maps a committed command's outcome to the real-time change to broadcast,
 // or undefined to fall back to the domain-derived change. Always a function
 // so the broadcast can be conditioned on whether the command actually
@@ -563,10 +581,50 @@ export class ProjectStore extends DurableObject<Env> {
       await migrate(this.ledgerDb(), ledgerMigrations);
       const backend = createSqliteBackend(drizzle(this.ctx.storage));
       const [store] = await createStoreWithSchema(canonicalGraph, backend);
+      await this.migrateTypeGraph035PhysicalSchema();
+      const materialized = await store.materializeIndexes({
+        stopOnError: true,
+        // Cloudflare Durable Object SQLite rejects TypeGraph's
+        // `PRAGMA analysis_limit` statistics-refresh prelude with
+        // SQLITE_AUTH. These equality-prefix indexes do not depend on
+        // skip-scan statistics, so materialize them without the unsupported
+        // maintenance verb.
+        refreshStatistics: false,
+      });
+      const incomplete = materialized.results.find(
+        (result) =>
+          result.status !== "created" &&
+          result.status !== "alreadyMaterialized",
+      );
+      if (incomplete !== undefined) {
+        throw (
+          incomplete.error ??
+          new Error(
+            `TypeGraph index ${incomplete.indexName} was not materialized: ${incomplete.reason ?? incomplete.status}`,
+          )
+        );
+      }
       this.store = store;
       return store;
     })();
     return this.initPromise;
+  }
+
+  private async migrateTypeGraph035PhysicalSchema(): Promise<void> {
+    if (
+      await this.ctx.storage.get<boolean>(
+        TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY,
+      )
+    ) {
+      return;
+    }
+    // `sql.exec` is synchronous inside one DO turn. The marker is written only
+    // after both indexes exist; an interrupted migration safely retries the
+    // idempotent drop/create sequence on the next activation.
+    for (const statement of TYPEGRAPH_035_EDGE_INDEX_STATEMENTS) {
+      this.ctx.storage.sql.exec(statement);
+    }
+    await this.ctx.storage.put(TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY, true);
   }
 
   private unit(graph: GraphHandle, ledger: LedgerDb): Unit {

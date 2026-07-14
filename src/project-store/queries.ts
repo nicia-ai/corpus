@@ -122,6 +122,7 @@ export async function searchDocumentsProjection(
     limit: SEARCH_RESULT_LIMIT,
     mode: "plain",
     includeSnippets: true,
+    where: (d) => d.archivedAt.isNull(),
   });
   const out: DocumentSearchHit[] = [];
   for (const { node, snippet } of hits) {
