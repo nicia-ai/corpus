@@ -69,6 +69,28 @@ describe("create-proposals (DO + D1 integration)", () => {
     expect(await store.listCreateProposals()).toHaveLength(0);
   });
 
+  it("apply succeeds for a folder-placed path when a root document shares the filename", async () => {
+    const store = freshStore("cprop");
+    await seedCollection(store);
+    // Root document holding readme.md — a folder-placed readme.md is NOT
+    // a collision (filename uniqueness is per-folder; regression for the
+    // folder-scoped save-path check).
+    await store.importDocumentAtPath({
+      path: "readme.md",
+      markdown: "# root readme",
+      changedBy: "alice",
+    });
+    const id = await propose(store, { path: "wiki/readme.md" });
+
+    const applied = await store.applyCreateProposal({
+      suggestionId: id,
+      appliedBy: "paul",
+    });
+    expect(applied).toMatchObject({ ok: true, docVersion: 1 });
+    const doc = await store.getDocument(docSlug("wiki-readme"));
+    expect(doc?.markdown).toBe(BODY);
+  });
+
   it("apply survives a vanished origin Collection — document still created, no attach", async () => {
     const store = freshStore("cprop");
     await seedCollection(store);

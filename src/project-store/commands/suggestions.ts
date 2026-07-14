@@ -318,6 +318,10 @@ export async function applyCreateProposalCommand(
     slug,
     markdown: s.proposedMarkdown,
     ...(filename !== undefined ? { filename } : {}),
+    // Scope the save path's own filename-collision check to the folder
+    // this document is about to be placed in — a root document sharing
+    // the filename is not a collision (paths.ts: per-folder namespace).
+    folderSlug: ensured.folderSlug,
     clientVersion: 0,
     changedBy: input.appliedBy,
     appliedFrom: { suggestionId: s.id, by: s.createdBy, channel: s.channel },

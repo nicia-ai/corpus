@@ -169,7 +169,7 @@ describe("bulk folder upload — filename collision is folder-scoped", () => {
       folderSlug: "wiki",
     });
 
-    expect([...(await store.listDocumentSlugs())].sort()).toEqual([
+    expect((await store.listDocumentRefs()).map((r) => r.slug).sort()).toEqual([
       "index",
       "wiki-index",
     ]);
@@ -195,7 +195,7 @@ describe("bulk folder upload — filename collision is folder-scoped", () => {
     });
     expect(a).toMatchObject({ ok: true, slug: "a-readme", folderSlug: "a" });
     expect(b).toMatchObject({ ok: true, slug: "b-readme", folderSlug: "b" });
-    expect([...(await store.listDocumentSlugs())].sort()).toEqual([
+    expect((await store.listDocumentRefs()).map((r) => r.slug).sort()).toEqual([
       "a-readme",
       "b-readme",
     ]);
