@@ -200,6 +200,7 @@ export function scopedExecutor(
             l.documentSlug !== null && !memberSet.has(l.documentSlug)
               ? {
                   target: l.target,
+                  kind: l.kind,
                   resolvedPath: null,
                   documentSlug: null,
                   inCollection: false,

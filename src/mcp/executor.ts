@@ -61,6 +61,7 @@ export type McpExecutor = Readonly<{
           delivery?: CollectionDelivery;
           links: readonly {
             target: string;
+            kind: "path" | "wiki";
             resolvedPath: string | null;
             documentSlug: string | null;
             inCollection: boolean;

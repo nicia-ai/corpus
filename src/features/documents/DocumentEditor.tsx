@@ -10,7 +10,10 @@ import type {
   ReviewMark,
   SourceRange,
 } from "@/components/markdown/live-review";
-import { MarkdownEditor } from "@/components/markdown/MarkdownEditor";
+import {
+  type DocRef,
+  MarkdownEditor,
+} from "@/components/markdown/MarkdownEditor";
 import { ReviewComposer } from "@/components/review/Composer";
 import { ReviewMobileDialog } from "@/components/review/ReviewPanel";
 import {
@@ -87,7 +90,7 @@ export function DocumentEditor({
   comments,
   suggestions,
   viewerId,
-  slugs,
+  docRefs,
   changeFlash,
   onRemoteContentChange,
   onRemoteSuggestionChange,
@@ -98,7 +101,7 @@ export function DocumentEditor({
   comments: CommentsResult;
   suggestions: SuggestionsResult;
   viewerId: string;
-  slugs: readonly string[];
+  docRefs: readonly DocRef[];
   changeFlash?: ChangeFlash | undefined;
   onRemoteContentChange: (snapshot: VisibleDocSnapshot) => void;
   onRemoteSuggestionChange: (
@@ -782,7 +785,7 @@ export function DocumentEditor({
             review
             value={draft}
             onChange={setDraft}
-            docSlugs={slugs}
+            docRefs={docRefs}
             selfSlug={head.slug}
             onBrokenChange={setBroken}
             ariaLabel={`Edit document body: ${head.title}`}

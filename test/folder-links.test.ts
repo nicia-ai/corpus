@@ -14,7 +14,8 @@ async function folderSlug(
   return f.slug;
 }
 
-// setup.md (in a/guide) links every flavour of relative target.
+// setup.md (in a/guide) links every flavour of relative target, plus
+// Obsidian-style wikilinks (bare-name, piped, and dangling).
 const SETUP = [
   "[auth](../api/auth.md)",
   "[self](./intro.md)",
@@ -23,6 +24,9 @@ const SETUP = [
   "[ext](https://example.com)",
   "[anchor](#section)",
   "[missing](./ghost.md)",
+  "[[auth|the auth doc]]",
+  "[[top]]",
+  "[[nowhere]]",
 ].join("\n\n");
 
 async function build(store: ReturnType<typeof ws>) {
@@ -100,10 +104,14 @@ describe("collectionOutline — derived paths + resolved link graph", () => {
       "../../top.md",
       "../api/v2/spec.md",
       "./ghost.md",
+      "auth",
+      "top",
+      "nowhere",
     ]);
 
     expect(byTarget.get("../api/auth.md")).toEqual({
       target: "../api/auth.md",
+      kind: "path",
       resolvedPath: "a/api/auth.md",
       documentSlug: "a-api-auth",
       inCollection: true,
@@ -116,6 +124,7 @@ describe("collectionOutline — derived paths + resolved link graph", () => {
     // Resolves to a real document that is OUTSIDE this collection.
     expect(byTarget.get("../../top.md")).toEqual({
       target: "../../top.md",
+      kind: "path",
       resolvedPath: "top.md",
       documentSlug: "top",
       inCollection: false,
@@ -124,7 +133,33 @@ describe("collectionOutline — derived paths + resolved link graph", () => {
     // Dangling: resolves to a path with no document.
     expect(byTarget.get("./ghost.md")).toEqual({
       target: "./ghost.md",
+      kind: "path",
       resolvedPath: "a/guide/ghost.md",
+      documentSlug: null,
+      inCollection: false,
+    });
+
+    // Wikilinks resolve by basename anywhere in the project…
+    expect(byTarget.get("auth")).toEqual({
+      target: "auth",
+      kind: "wiki",
+      resolvedPath: "a/api/auth.md",
+      documentSlug: "a-api-auth",
+      inCollection: true,
+    });
+    // …including targets outside this collection…
+    expect(byTarget.get("top")).toEqual({
+      target: "top",
+      kind: "wiki",
+      resolvedPath: "top.md",
+      documentSlug: "top",
+      inCollection: false,
+    });
+    // …and dangle with no resolved path when nothing matches.
+    expect(byTarget.get("nowhere")).toEqual({
+      target: "nowhere",
+      kind: "wiki",
+      resolvedPath: null,
       documentSlug: null,
       inCollection: false,
     });
@@ -142,6 +177,7 @@ describe("collectionOutline — derived paths + resolved link graph", () => {
     const { byTarget } = linksOf(o, "a-guide-setup");
     expect(byTarget.get("../api/auth.md")).toEqual({
       target: "../api/auth.md",
+      kind: "path",
       resolvedPath: "a/api/auth.md",
       documentSlug: "a-api-auth",
       inCollection: true,
@@ -165,6 +201,7 @@ describe("collectionOutline — derived paths + resolved link graph", () => {
     // empty (intro lives at a/intro.md) → the link dangles.
     expect(byTarget.get("./intro.md")).toEqual({
       target: "./intro.md",
+      kind: "path",
       resolvedPath: "a/guide/intro.md",
       documentSlug: null,
       inCollection: false,

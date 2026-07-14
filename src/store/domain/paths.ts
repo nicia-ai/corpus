@@ -103,3 +103,40 @@ export function resolveRelativePath(
   const resolved = stack.join("/");
   return resolved === "" ? undefined : resolved;
 }
+
+// Resolve an Obsidian-style wikilink target against the project's
+// current path set. A target containing `/` names a project-root path
+// (extension optional — `wiki/setup` finds `wiki/setup.md`); a bare name
+// matches by basename sans extension anywhere in the project. Multiple
+// basename matches rank deterministically: the source document's own
+// folder first, then the shallowest path, then the lexicographically
+// smallest. Matching is case-sensitive (paths are identity here, and
+// two documents differing only in case must not resolve
+// interchangeably). Returns the resolved project path, or undefined
+// when nothing matches — the caller maps it through the path→slug map,
+// exactly like resolveRelativePath.
+export function resolveWikiPath(
+  sourcePath: string,
+  target: string,
+  paths: readonly string[],
+): string | undefined {
+  if (target === "") return undefined;
+  if (target.includes("/")) {
+    const normalized = pathSegments(target).join("/");
+    if (paths.includes(normalized)) return normalized;
+    const withExtension = `${normalized}.md`;
+    return paths.includes(withExtension) ? withExtension : undefined;
+  }
+  const matches = paths.filter((p) => stripExtension(basename(p)) === target);
+  if (matches.length <= 1) return matches[0];
+  const dirOf = (p: string): string => pathSegments(p).slice(0, -1).join("/");
+  const sourceDir = dirOf(sourcePath);
+  return [...matches].sort((a, b) => {
+    const aSame = dirOf(a) === sourceDir ? 0 : 1;
+    const bSame = dirOf(b) === sourceDir ? 0 : 1;
+    if (aSame !== bSame) return aSame - bSame;
+    const depth = pathSegments(a).length - pathSegments(b).length;
+    if (depth !== 0) return depth;
+    return a < b ? -1 : a > b ? 1 : 0;
+  })[0];
+}

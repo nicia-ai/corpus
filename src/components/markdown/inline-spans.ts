@@ -13,6 +13,8 @@
 // live-preview.ts), and a structural type also lets tests feed nodes
 // from `markdownLanguage.parser.parse(...)` without caring which module
 // instance produced them. `null` mirrors the library's API shape.
+import { splitWikiTarget } from "@/store/domain/links";
+
 export type InlineNode = Readonly<{
   name: string;
   from: number;
@@ -26,6 +28,10 @@ export type InlineNode = Readonly<{
 // Text access by absolute offsets — a CodeMirror `Text` slice in the
 // editor, a plain `String.slice` in tests.
 export type SliceText = (from: number, to: number) => string;
+
+// Wikilink target → document slug (undefined = unresolved). Optional:
+// without it, `[[target]]` stays literal text — matching remark-gfm.
+export type WikiResolve = (target: string) => string | undefined;
 
 export type InlineSpan =
   | Readonly<{ kind: "text"; text: string }>
@@ -115,13 +121,14 @@ export function imageParts(
 function spanFor(
   slice: SliceText,
   node: InlineNode,
+  wiki: WikiResolve | undefined,
 ): readonly InlineSpan[] | undefined {
   const container = CONTAINER_KIND[node.name];
   if (container !== undefined) {
     return [
       {
         kind: container,
-        children: inlineSpans(slice, node, node.from, node.to),
+        children: inlineSpans(slice, node, node.from, node.to, wiki),
       },
     ];
   }
@@ -141,7 +148,7 @@ function spanFor(
       // LinkMark is not skipped, so the recursion emits them as text while
       // still rendering any emphasis inside the label.
       if (node.getChild("URL") === null) {
-        return inlineSpans(slice, node, node.from, node.to);
+        return inlineSpans(slice, node, node.from, node.to, wiki);
       }
       const parts = linkParts(slice, node);
       if (parts === undefined) {
@@ -151,7 +158,13 @@ function spanFor(
         {
           kind: "link",
           href: parts.href,
-          children: inlineSpans(slice, node, parts.labelFrom, parts.labelTo),
+          children: inlineSpans(
+            slice,
+            node,
+            parts.labelFrom,
+            parts.labelTo,
+            wiki,
+          ),
         },
       ];
     }
@@ -194,6 +207,7 @@ export function inlineSpans(
   parent: InlineNode,
   from: number,
   to: number,
+  wiki?: WikiResolve,
 ): readonly InlineSpan[] {
   const out: InlineSpan[] = [];
   let pos = from;
@@ -216,13 +230,56 @@ export function inlineSpans(
       pos = Math.max(pos, child.to);
       continue;
     }
-    const spans = spanFor(slice, child);
+    // A resolved wikilink: Lezer parses the inner `[target]` of
+    // `[[target]]` as a destination-less Link whose outer brackets are
+    // plain text on either side. Consume brackets + node as one link
+    // span; unresolved targets fall through to the literal rendering.
+    if (
+      wiki !== undefined &&
+      child.name === "Link" &&
+      child.getChild("URL") === null &&
+      child.from - 1 >= from &&
+      child.to + 1 <= to &&
+      slice(child.from - 1, child.from) === "[" &&
+      slice(child.to, child.to + 1) === "]"
+    ) {
+      const { target, label } = splitWikiTarget(
+        slice(child.from + 1, child.to - 1),
+      );
+      const slug = target === "" ? undefined : wiki(target);
+      if (slug !== undefined) {
+        flushText(child.from - 1);
+        out.push({
+          kind: "link",
+          href: slug,
+          children: [{ kind: "text", text: label }],
+        });
+        pos = Math.max(pos, child.to + 1);
+        continue;
+      }
+    }
+    const spans = spanFor(slice, child, wiki);
     if (spans === undefined) continue; // unhandled: text flows through
     flushText(child.from);
     out.push(...spans);
     pos = Math.max(pos, child.to);
   }
   flushText(to);
+  return mergeText(out);
+}
+
+// Collapse adjacent text spans (bracket-literal splices produce runs of
+// them) so consumers render one node per contiguous text run.
+function mergeText(spans: readonly InlineSpan[]): readonly InlineSpan[] {
+  const out: InlineSpan[] = [];
+  for (const s of spans) {
+    const last = out[out.length - 1];
+    if (s.kind === "text" && last?.kind === "text") {
+      out[out.length - 1] = { kind: "text", text: last.text + s.text };
+    } else {
+      out.push(s);
+    }
+  }
   return out;
 }
 

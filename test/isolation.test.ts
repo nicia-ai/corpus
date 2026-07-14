@@ -58,7 +58,9 @@ describe("cross-tenant isolation (security gate)", () => {
       env.PROJECT_STORE.idFromName(refA?.projectId ?? "x"),
     );
     expect(await doA.getDocument(docSlug("b-secret"))).toBeUndefined();
-    expect(await doA.listDocumentSlugs()).not.toContain("b-secret");
+    expect((await doA.listDocumentRefs()).map((r) => r.slug)).not.toContain(
+      "b-secret",
+    );
 
     // Sanity: B still sees its own data.
     const refB = await resolveProject(

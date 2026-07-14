@@ -9,6 +9,9 @@ import {
   formatFrontmatterValue,
   parseFrontmatter,
 } from "@/store/domain/frontmatter";
+import { scanWikilinks, splitWikiTarget } from "@/store/domain/links";
+
+import type { WikiResolve } from "./inline-spans";
 
 // The reader-first surface: canonical documents are authored by non-engineers
 // and read far more than edited, so the rendered view is the default. GFM
@@ -67,12 +70,14 @@ export const Markdown = memo(function Markdown({
   source,
   bodyClassName,
   bare,
+  wikiResolve,
 }: Readonly<{
   source: string;
   bodyClassName?: string;
   // Borderless body (no surrounding Card) for the full-page editor's
   // first-paint fallback, so it matches the borderless live-preview surface.
   bare?: boolean;
+  wikiResolve?: WikiResolve | undefined;
 }>): React.ReactElement {
   const fm = parseFrontmatter(source);
   const body = fm.ok ? fm.body : source;
@@ -90,11 +95,11 @@ export const Markdown = memo(function Markdown({
     // min-h matches the editor host so the first-paint → editor swap doesn't
     // jump vertically.
     <div className={cn("md min-h-112 py-2", bodyClassName)}>
-      <MarkdownContent source={body} />
+      <MarkdownContent source={body} wikiResolve={wikiResolve} />
     </div>
   ) : (
     <div className={cardClass(cn(DOCUMENT_BODY_CLASS, bodyClassName))}>
-      <MarkdownContent source={body} />
+      <MarkdownContent source={body} wikiResolve={wikiResolve} />
     </div>
   );
 
@@ -108,13 +113,85 @@ export const Markdown = memo(function Markdown({
   );
 });
 
+// Re-exported for callers wiring a resolver into a rendered surface;
+// optional everywhere: without it (history, diffs) wikilinks stay
+// literal text, exactly as remark parses them.
+export type { WikiResolve } from "./inline-spans";
+
+// Minimal structural mdast view — enough for the text-node walk below
+// without depending on @types/mdast (a transitive dep of react-markdown).
+type MdastNode = Readonly<{
+  type: string;
+  value?: string;
+  url?: string;
+  children?: readonly MdastNode[];
+}>;
+
+// Split one text node around its RESOLVED wikilinks: `[[target|label]]`
+// becomes a link to the resolved slug with the label (or target) as its
+// text; unresolved matches stay literal (the editor's linter is the
+// surface that flags those). remark leaves `[[…]]` as plain text — a
+// shortcut reference without a definition never becomes a node — so the
+// text-node scan sees every wikilink intact.
+function splitWikiText(
+  value: string,
+  resolve: WikiResolve,
+): readonly MdastNode[] {
+  const out: MdastNode[] = [];
+  let pos = 0;
+  for (const m of scanWikilinks(value)) {
+    const { target, label } = splitWikiTarget(m.inner);
+    const slug = target === "" ? undefined : resolve(target);
+    if (slug === undefined) continue;
+    if (m.from > pos)
+      out.push({ type: "text", value: value.slice(pos, m.from) });
+    out.push({
+      type: "link",
+      url: slug,
+      children: [{ type: "text", value: label }],
+    });
+    pos = m.to;
+  }
+  if (out.length === 0) return [{ type: "text", value }];
+  if (pos < value.length) out.push({ type: "text", value: value.slice(pos) });
+  return out;
+}
+
+const WIKI_SKIP = new Set(["code", "inlineCode"]);
+
+// Pure rebuild — remark accepts a transformer that RETURNS the new tree,
+// so no mdast node is ever mutated in place.
+function remarkWikilinks(resolve: WikiResolve): (tree: MdastNode) => MdastNode {
+  const transform = (node: MdastNode): MdastNode => {
+    if (node.children === undefined) return node;
+    const children = node.children.flatMap((child): readonly MdastNode[] => {
+      if (child.type === "text" && typeof child.value === "string") {
+        return splitWikiText(child.value, resolve);
+      }
+      return [WIKI_SKIP.has(child.type) ? child : transform(child)];
+    });
+    return { ...node, children };
+  };
+  return transform;
+}
+
 export function MarkdownContent({
   source,
+  wikiResolve,
 }: Readonly<{
   source: string;
+  wikiResolve?: WikiResolve | undefined;
 }>): React.ReactElement {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+    <ReactMarkdown
+      remarkPlugins={[
+        remarkGfm,
+        ...(wikiResolve === undefined
+          ? []
+          : [() => remarkWikilinks(wikiResolve)]),
+      ]}
+      rehypePlugins={[rehypeSanitize]}
+    >
       {source}
     </ReactMarkdown>
   );

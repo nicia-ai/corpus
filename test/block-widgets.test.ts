@@ -86,9 +86,28 @@ describe("tableModelFromTree", () => {
     expect(spanText(m?.rows[0]?.[0] ?? [])).toBe("a [shortcut ref] stays");
   });
 
-  it("keeps a wikilink literal (no wikilink support yet)", () => {
-    const m = model("| a |\n| - |\n| see [[element-1-prospects]] |");
-    expect(spanText(m?.rows[0]?.[0] ?? [])).toBe("see [[element-1-prospects]]");
+  it("keeps a wikilink literal without a resolver", () => {
+    const m = model("| a |\n| - |\n| see [[brand-voice]] |");
+    expect(spanText(m?.rows[0]?.[0] ?? [])).toBe("see [[brand-voice]]");
+  });
+
+  it("renders a resolved wikilink as a link, consuming the brackets", () => {
+    const src = "| a |\n| - |\n| see [[brand-voice\\|Voice]] and [[gone]] |";
+    const table = markdownLanguage.parser.parse(src).topNode.getChild("Table");
+    const wiki = (target: string): string | undefined =>
+      target === "brand-voice" ? "guides-brand-voice" : undefined;
+    expect(table).not.toBeNull();
+    if (table === null) return;
+    const m = tableModelFromTree((f, t) => src.slice(f, t), table, wiki);
+    expect(m?.rows[0]?.[0]).toEqual([
+      { kind: "text", text: "see " },
+      {
+        kind: "link",
+        href: "guides-brand-voice",
+        children: [{ kind: "text", text: "Voice" }],
+      },
+      { kind: "text", text: " and [[gone]]" },
+    ]);
   });
 
   it("renders emphasis nested inside a link label", () => {

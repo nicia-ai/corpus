@@ -57,7 +57,9 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
       createdFolders: [],
     });
 
-    expect(await store.listDocumentSlugs()).toEqual(["a-b-note"]);
+    expect((await store.listDocumentRefs()).map((r) => r.slug)).toEqual([
+      "a-b-note",
+    ]);
     expect(await store.versionCount(docSlug("a-b-note"))).toBe(2);
     expect((await store.getDocument(docSlug("a-b-note")))?.markdown).toBe("v2");
     // Folders reused by name, not recreated.
@@ -78,7 +80,7 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
     });
     const folders = await store.listFolders();
     expect(folders.map((f) => f.name).sort()).toEqual(["api", "docs"]);
-    expect(await store.listDocumentSlugs()).toEqual(
+    expect((await store.listDocumentRefs()).map((r) => r.slug)).toEqual(
       expect.arrayContaining(["docs-api-auth", "docs-api-users"]),
     );
   });
@@ -114,7 +116,9 @@ describe("bulk folder upload — segment collisions roll back atomically", () =>
     expect(r).toEqual({ ok: false, reason: "segment-collision" });
     // No folder created, no inner doc — original doc untouched.
     expect(await store.listFolders()).toHaveLength(0);
-    expect(await store.listDocumentSlugs()).toEqual(["notes"]);
+    expect((await store.listDocumentRefs()).map((r) => r.slug)).toEqual([
+      "notes",
+    ]);
   });
 
   it("a file whose name collides with a sibling folder rolls back the half-written document", async () => {
@@ -131,7 +135,7 @@ describe("bulk folder upload — segment collisions roll back atomically", () =>
 
     // saveDocumentBody ran before placement failed; the throw must have
     // rolled the whole unit back — no document, no version, no blob.
-    expect(await store.listDocumentSlugs()).toEqual([]);
+    expect((await store.listDocumentRefs()).map((r) => r.slug)).toEqual([]);
     expect(await store.versionCount(docSlug("foo"))).toBe(0);
     expect(await store.getDocument(docSlug("foo"))).toBeUndefined();
     expect(await store.listFolders()).toHaveLength(1);

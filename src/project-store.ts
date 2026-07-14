@@ -128,7 +128,7 @@ import {
   resolvedMembersProjection,
   listCollectionsProjection,
   listDocumentsProjection,
-  listDocumentSlugsProjection,
+  listDocumentRefsProjection,
   readCollectionProjection,
   resolvedViews,
   usageSnapshotProjection,
@@ -147,6 +147,7 @@ import {
 } from "./store/domain/collection-expand";
 import { chooseImportLinkTarget } from "./store/domain/import-link";
 import { events as buildEvent } from "./store/domain/instrumentation-events";
+import type { ParsedLink } from "./store/domain/links";
 import type { RetentionPolicy } from "./store/domain/retention";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
@@ -298,7 +299,7 @@ export class ProjectStore extends DurableObject<Env> {
   // The content-keyed link lens: a document's relative-link set is a
   // pure function of its immutable bytes, so it is parsed once per
   // contentHash and never invalidated (content never mutates).
-  private readonly parsedLinksByHash = new Map<string, readonly string[]>();
+  private readonly parsedLinksByHash = new Map<string, readonly ParsedLink[]>();
   // Per-(callerRef, collectionSlug) version-fingerprint cache. A
   // routine repeat poll with no intervening edit produces the same
   // fingerprint as the prior cached read, so the cross-DO append is
@@ -633,8 +634,8 @@ export class ProjectStore extends DurableObject<Env> {
     return listDocumentsProjection(await this.read());
   }
 
-  async listDocumentSlugs(): Promise<string[]> {
-    return listDocumentSlugsProjection(await this.read());
+  async listDocumentRefs(): Promise<{ slug: string; path: string }[]> {
+    return listDocumentRefsProjection(await this.read());
   }
 
   async listCollections(): Promise<readonly CollectionMeta[]> {
