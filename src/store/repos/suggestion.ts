@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import {
   type HunkDecision,
@@ -41,16 +41,32 @@ export class SuggestionRepo {
 
   // Count of OPEN suggestions per document in one grouped query — the
   // documents-list badge needs every doc's count at once, and a per-row
-  // forDoc() fan-out would be N reads for one list render.
+  // forDoc() fan-out would be N reads for one list render. Create-proposals
+  // (baseDocVersion 0) are excluded: they are not edits to a document, and
+  // the review surface lists them separately (openCreates).
   async openCountsByDoc(): Promise<Record<string, number>> {
     const rows = await this.db
       .select({ slug: suggestion.documentSlug, n: sql<number>`count(*)` })
       .from(suggestion)
-      .where(eq(suggestion.status, "open"))
+      .where(
+        and(eq(suggestion.status, "open"), ne(suggestion.baseDocVersion, 0)),
+      )
       .groupBy(suggestion.documentSlug);
     const out: Record<string, number> = {};
     for (const r of rows) out[r.slug] = r.n;
     return out;
+  }
+
+  // Open create-proposals (baseDocVersion 0 — see db.ts discriminant),
+  // oldest first so the review list reads in proposal order.
+  openCreates(): Promise<readonly SuggestionRow[]> {
+    return this.db
+      .select()
+      .from(suggestion)
+      .where(
+        and(eq(suggestion.status, "open"), eq(suggestion.baseDocVersion, 0)),
+      )
+      .orderBy(suggestion.id);
   }
 
   async get(id: number): Promise<SuggestionRow | undefined> {

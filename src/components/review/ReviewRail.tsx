@@ -501,7 +501,9 @@ const VIA_LABEL: Partial<Record<CallerChannel, string>> = {
   cli: "via CLI",
 };
 
-function ViaBadge({
+// Exported for the proposed-documents review surface (DocumentsPage), so
+// "via MCP"/"via CLI" reads identically wherever an agent proposal shows.
+export function ViaBadge({
   channel,
 }: Readonly<{ channel: CallerChannel }>): React.ReactElement | null {
   const label = VIA_LABEL[channel];

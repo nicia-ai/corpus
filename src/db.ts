@@ -192,6 +192,14 @@ export const suggestion = sqliteTable(
     createdAt: text("created_at").notNull(),
     resolvedBy: text("resolved_by"),
     resolvedAt: text("resolved_at"),
+    // Create-proposals only (baseDocVersion === 0 — a real document's head
+    // is never below 1, so 0 is the airtight discriminant): the Corpus path
+    // the proposed document should be created at (null = project root with
+    // the slug-derived filename), and the proposing connection's bound
+    // Collection, so a human apply attaches the created document back into
+    // the collection the agent was working in.
+    proposedPath: text("proposed_path"),
+    originCollectionSlug: text("origin_collection_slug"),
   },
   (t) => [
     index("suggestion_doc").on(t.documentSlug),

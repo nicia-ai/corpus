@@ -78,9 +78,17 @@ import {
 } from "./project-store/commands/import-link";
 import { seedExampleCommand } from "./project-store/commands/seed";
 import {
+  applyCreateProposalCommand,
+  type ApplyCreateProposalInput,
+  type ApplyCreateProposalResult,
   applySuggestionCommand,
   type ApplySuggestionInput,
   type ApplySuggestionResult,
+  createDocProposalCommand,
+  type CreateDocProposalInput,
+  type CreateDocProposalResult,
+  createProposalView,
+  type CreateProposalView,
   createSuggestionCommand,
   type CreateSuggestionInput,
   type CreateSuggestionResult,
@@ -1133,6 +1141,83 @@ export class ProjectStore extends DurableObject<Env> {
     });
   }
 
+  // Generic create-proposal entry (channel supplied by the caller); the
+  // MCP transport goes through suggestCreate below, which labels itself.
+  async createDocProposal(
+    input: CreateDocProposalInput,
+  ): Promise<CreateDocProposalResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(
+      now,
+      (ctx) => createDocProposalCommand(ctx, input),
+      (out) =>
+        out.result.ok
+          ? {
+              area: "review",
+              action: "suggestion.created",
+              actorId: input.createdBy,
+              docSlug: asDocumentSlug(out.result.slug),
+              channel: input.channel ?? "web",
+            }
+          : undefined,
+    );
+    return outcome.result;
+  }
+
+  // The MCP create-proposal path (agent proposes a NEW document). Only the
+  // scoped executor reaches this method, and it overwrites
+  // `originCollectionSlug` with its bound Collection before the call — so a
+  // human apply attaches the created document back where the agent works.
+  // Same channel discipline as suggestEdit: this method IS the MCP entry.
+  async suggestCreate(
+    callerRef: CallerRef,
+    input: Readonly<{
+      slug?: DocumentSlug;
+      path?: string;
+      proposedMarkdown: string;
+      originCollectionSlug?: CollectionSlug;
+    }>,
+  ): Promise<CreateDocProposalResult> {
+    return this.createDocProposal({
+      ...(input.slug !== undefined ? { slug: input.slug } : {}),
+      ...(input.path !== undefined ? { path: input.path } : {}),
+      ...(input.originCollectionSlug !== undefined
+        ? { originCollectionSlug: input.originCollectionSlug }
+        : {}),
+      proposedMarkdown: input.proposedMarkdown,
+      createdBy: callerRef,
+      channel: "mcp",
+    });
+  }
+
+  // Open create-proposals for the review surface (humans only — never
+  // reachable through the McpExecutor port).
+  async listCreateProposals(): Promise<readonly CreateProposalView[]> {
+    const u = await this.read();
+    return (await u.suggestions.openCreates()).map(createProposalView);
+  }
+
+  async applyCreateProposal(
+    input: ApplyCreateProposalInput,
+  ): Promise<ApplyCreateProposalResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(
+      now,
+      (ctx) => applyCreateProposalCommand(ctx, input),
+      (out) =>
+        out.result.ok
+          ? {
+              area: "review",
+              action: "suggestion.applied",
+              actorId: input.appliedBy,
+              docSlug: out.result.documentSlug,
+              docVersion: out.result.docVersion,
+            }
+          : undefined,
+    );
+    return outcome.result;
+  }
+
   // Open-suggestion counts per document, for the documents-list badge that
   // tells a reviewer which docs have proposals waiting (the presence channel
   // only nudges open tabs). One aggregate read.
@@ -1151,7 +1236,13 @@ export class ProjectStore extends DurableObject<Env> {
     u: Unit,
     slug: DocumentSlug,
   ): Promise<readonly SuggestionView[]> {
-    const suggestions = await u.suggestions.forDoc(slug);
+    // The document review rail is strictly the EDIT surface; create-proposal
+    // rows (baseDocVersion 0) that share this slug's history — e.g. a stale
+    // proposal for a slug that later got created — list separately via
+    // listCreateProposals, and would render as a nonsense zero-hunk card here.
+    const suggestions = (await u.suggestions.forDoc(slug)).filter(
+      (s) => s.baseDocVersion !== 0,
+    );
     const hunks = await u.suggestions.hunksForSuggestions(
       suggestions.map((s) => s.id),
     );

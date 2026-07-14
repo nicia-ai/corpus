@@ -115,6 +115,15 @@ export async function saveDocumentCommand(
   const title =
     input.title ?? fmTitle ?? inferTitle(body, stripExtension(filename));
   const docVersion = nextVersion(head, input.clientVersion);
+  // A brand-new document claims its slug: any open create-proposal for the
+  // same slug is now off-base, exactly like an edit suggestion whose head
+  // moved. saveDocumentCommand is the single creation chokepoint (editor,
+  // REST create, import, apply-create), so the stale rule lives here once.
+  // The apply-create path stales itself here too, then records its own
+  // terminal `applied` status afterwards — deliberate ordering.
+  if (head === undefined) {
+    await ctx.u.suggestions.staleOpenForDoc(input.slug);
+  }
   await ctx.u.blobs.put(contentHash, input.markdown, ctx.now);
   const node = await ctx.u.docs.put(
     input.slug,

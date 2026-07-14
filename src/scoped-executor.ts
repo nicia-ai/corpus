@@ -129,7 +129,7 @@ export function scopedExecutor(
       return inner.recordRead(callerRef, collectionSlug, filtered);
     },
 
-    // The executor's only write. Same closure-bound caller identity as
+    // The executor's proposal writes. Same closure-bound caller identity as
     // recordRead, then the same membership gate as getDocument: a
     // non-member (or unknown) slug returns the `missing` result so the
     // handler 404s without revealing that the slug exists elsewhere, and
@@ -153,6 +153,23 @@ export function scopedExecutor(
         proposedMarkdown,
         baseDocVersion,
       );
+    },
+
+    // Create-proposals have no membership to gate (the document doesn't
+    // exist yet); scope is enforced by pinning the origin to the bound
+    // Collection — whatever the caller put in `originCollectionSlug` is
+    // overwritten, so an applied proposal can only ever attach here.
+    suggestCreate: (suppliedCallerRef, input) => {
+      if (suppliedCallerRef !== callerRef) {
+        return Promise.resolve({
+          ok: false as const,
+          reason: "invalid" as const,
+        });
+      }
+      return inner.suggestCreate(callerRef, {
+        ...input,
+        originCollectionSlug: boundSlug,
+      });
     },
 
     // Membership-gate. A non-member slug is indistinguishable from a
