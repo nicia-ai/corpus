@@ -4,6 +4,7 @@ import {
   FolderInput,
   FolderPlus,
   Plus,
+  Search,
   Upload,
 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -35,6 +36,7 @@ import {
   renameFolder,
   type FolderRow,
 } from "@/lib/server/folders";
+import { searchDocuments, type SearchHit } from "@/lib/server/search";
 import type { CreateProposalItem } from "@/lib/server/suggestions";
 
 import { DocumentUploader } from "./DocumentUploader";
@@ -56,6 +58,10 @@ const REASON_MESSAGE: Readonly<Record<FolderOpReason, string>> = {
   cycle: "Can’t move a folder into its own subtree.",
   "segment-collision": "A file or folder with that name already exists there.",
 };
+
+// Minimum trimmed query length before a content search fires. Mirrors the
+// DO-side floor (SEARCH_MIN_QUERY); the server re-enforces it authoritatively.
+const MIN_QUERY_CHARS = 2;
 
 export function DocumentsPage({
   projectId,
@@ -105,6 +111,56 @@ export function DocumentsPage({
     useState<
       Readonly<{ kind: "docs" } | { kind: "folder"; slug: FolderSlug }>
     >();
+
+  // Content search. Event-driven (input -> debounce -> server fn), not an
+  // effect: the query is user input, not route data. The sequence counter
+  // drops out-of-order responses; bumping it on clear also invalidates any
+  // in-flight call so a stale result can't repopulate a cleared box.
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<readonly SearchHit[]>();
+  const [searchError, setSearchError] = useState(false);
+  const searchSeq = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const searchActive = query.trim().length >= MIN_QUERY_CHARS;
+
+  function runSearch(q: string, seq: number): void {
+    searchDocuments({ data: { projectId, query: q } })
+      .then((res) => {
+        if (seq !== searchSeq.current) return;
+        setHits(res);
+      })
+      .catch(() => {
+        if (seq !== searchSeq.current) return;
+        // A failed request is distinct from an empty result — surface it so
+        // the user can retry rather than read an outage as "no matches".
+        setSearchError(true);
+      });
+  }
+
+  function onQueryChange(next: string): void {
+    setQuery(next);
+    if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
+    const q = next.trim();
+    searchSeq.current += 1;
+    setSearchError(false);
+    // Drop the previous query's hits immediately so stale (clickable) results
+    // never linger through the debounce + request window; the searching state
+    // shows until the new results land.
+    setHits(undefined);
+    if (q.length < MIN_QUERY_CHARS) return;
+    const seq = searchSeq.current;
+    searchTimer.current = setTimeout(() => runSearch(q, seq), 250);
+  }
+
+  function retrySearch(): void {
+    const q = query.trim();
+    if (q.length < MIN_QUERY_CHARS) return;
+    if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
+    searchSeq.current += 1;
+    setSearchError(false);
+    setHits(undefined);
+    runSearch(q, searchSeq.current);
+  }
 
   // Document slugs in visible top-to-bottom order (collapsed folders
   // contribute nothing) — the index space shift-click ranges over.
@@ -344,6 +400,31 @@ export function DocumentsPage({
         </div>
       )}
 
+      {!empty && (
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+          <Search className="size-4 shrink-0 text-slate-400" aria-hidden />
+          <input
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") onQueryChange("");
+            }}
+            placeholder="Search documents…"
+            aria-label="Search documents"
+            className="w-full bg-transparent text-base outline-none placeholder:text-slate-400"
+          />
+          {query !== "" && (
+            <button
+              type="button"
+              onClick={() => onQueryChange("")}
+              className="text-sm font-medium text-slate-500 hover:text-slate-900"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {error && <p className="mb-3 text-base text-red-600">{error}</p>}
       {/* Page-level (not inside the selection bar) so a per-row delete
           failure with nothing selected is still visible. */}
@@ -406,6 +487,14 @@ export function DocumentsPage({
           collections={collections}
           folders={folders}
           documents={documents}
+        />
+      ) : searchActive ? (
+        <SearchResults
+          projectId={projectId}
+          hits={hits}
+          error={searchError}
+          onRetry={retrySearch}
+          query={query.trim()}
         />
       ) : (
         <div
@@ -471,6 +560,104 @@ export function DocumentsPage({
         </div>
       )}
     </div>
+  );
+}
+
+// Flat hit list shown while a search query is active; clearing the box
+// (or Escape) restores the folder tree. Rows navigate like DocRow titles.
+function SearchResults({
+  projectId,
+  hits,
+  error,
+  onRetry,
+  query,
+}: Readonly<{
+  projectId: ProjectId;
+  hits: readonly SearchHit[] | undefined;
+  error: boolean;
+  onRetry: () => void;
+  query: string;
+}>): React.ReactElement {
+  if (error) {
+    return (
+      <p
+        className="flex items-center gap-3 px-3 py-6 text-sm text-slate-500"
+        aria-live="polite"
+      >
+        Search failed.
+        <button
+          type="button"
+          onClick={onRetry}
+          className="font-medium text-slate-900 hover:underline"
+        >
+          Retry
+        </button>
+      </p>
+    );
+  }
+  // hits === undefined only while a query >= MIN_QUERY_CHARS is in flight
+  // (a shorter query clears the box and hides this view entirely).
+  if (hits === undefined) {
+    return (
+      <p className="px-3 py-6 text-sm text-slate-500" aria-live="polite">
+        Searching…
+      </p>
+    );
+  }
+  if (hits.length === 0) {
+    return (
+      <p className="px-3 py-6 text-sm text-slate-500" aria-live="polite">
+        No documents match “{query}”.
+      </p>
+    );
+  }
+  return (
+    <div className={listSurface(cn("divide-y divide-slate-200"))}>
+      {hits.map((h) => (
+        <Link
+          key={h.slug}
+          to="/p/$projectId/documents/$slug"
+          params={{ projectId, slug: h.slug }}
+          className="block px-3 py-2.5 hover:bg-slate-50"
+        >
+          <span className="flex items-baseline gap-2">
+            <span className="min-w-0 truncate font-medium text-slate-900">
+              {h.title}
+            </span>
+            <span className="min-w-0 truncate text-sm text-slate-400">
+              {h.path}
+            </span>
+          </span>
+          <SearchSnippetLine snippet={h.snippet} />
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+// The FTS snippet arrives with `<mark>…</mark>` around the matched terms.
+// Split on those delimiters and emphasize the matched segments with a
+// neutral slate wash + weight (no new accent color). Every segment renders
+// as escaped text, never HTML, so document content cannot inject markup.
+function SearchSnippetLine({
+  snippet,
+}: Readonly<{ snippet: string }>): React.ReactElement {
+  const parts = snippet.split(/<\/?mark>/);
+  return (
+    <p className="mt-0.5 truncate text-sm text-slate-500">
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <mark
+            key={i}
+            className="rounded-sm bg-slate-200 px-0.5 font-medium text-slate-900"
+          >
+            {part}
+          </mark>
+        ) : (
+          part
+        ),
+      )}
+    </p>
   );
 }
 

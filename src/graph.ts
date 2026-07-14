@@ -1,4 +1,9 @@
-import { defineEdge, defineGraph, defineNode } from "@nicia-ai/typegraph";
+import {
+  defineEdge,
+  defineGraph,
+  defineNode,
+  searchable,
+} from "@nicia-ai/typegraph";
 import { z } from "zod";
 
 import {
@@ -45,6 +50,13 @@ export const Document = defineNode("Document", {
     // kept so immutable CollectionVersion snapshots and bundle round-trip
     // stay valid. Absent (the common case) = active.
     archivedAt: z.string().optional(),
+    // DERIVED full-text index content (title + current body), tokenized by
+    // FTS5 for `store.search.fulltext`. Recomputed on every head change
+    // (save / rename / bundle import) and cleared on archive so soft-deleted
+    // docs leave the index. Canonical content is the blob ledger, never this
+    // — it is deliberately excluded from the bundle (`exportBundle` enumerates
+    // meta fields explicitly) and recomputed on import.
+    searchText: searchable().optional(),
   }),
 });
 

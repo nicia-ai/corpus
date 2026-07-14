@@ -103,6 +103,7 @@ import type {
   CollectionOutline,
   CreateInCollectionResult,
   DocumentHistoryEntry,
+  DocumentSearchHit,
   ImportAndLinkInput,
   ImportAndLinkResult,
   DocumentSnapshot,
@@ -140,6 +141,7 @@ import {
   listDocumentRefsProjection,
   readCollectionProjection,
   resolvedViews,
+  searchDocumentsProjection,
   usageSnapshotProjection,
   verifyHistoryProjection,
 } from "./project-store/queries";
@@ -158,6 +160,7 @@ import { chooseImportLinkTarget } from "./store/domain/import-link";
 import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
 import type { RetentionPolicy } from "./store/domain/retention";
+import { deriveSearchText } from "./store/domain/search";
 import { isCreateProposal } from "./store/domain/suggestion";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
@@ -206,6 +209,13 @@ export type {
 } from "./project-store/contracts";
 
 type Unit = ProjectUnit;
+
+// Persistent marker: set once the one-time `searchText` backfill has run for
+// this DO, so a reindex never repeats across restarts.
+const SEARCH_BACKFILL_KEY = "search:backfilled:v1";
+// Documents reindexed per backfill transaction — bounds the work (blob reads
+// + node updates) in any single transaction for an unbounded legacy project.
+const SEARCH_BACKFILL_BATCH = 100;
 
 // Maps a committed command's outcome to the real-time change to broadcast,
 // or undefined to fall back to the domain-derived change. Always a function
@@ -319,6 +329,10 @@ export class ProjectStore extends DurableObject<Env> {
   // Bounded by the active set of callers × collections.
   private readonly readDedupCache = new Map<string, string>();
   private instrumentationOutbox: ProjectInstrumentation | undefined;
+  // Cleared until the one-time `searchText` backfill has run for this DO
+  // (see `ensureSearchBackfilled`); mirrors a persistent storage marker so
+  // the reindex happens at most once per DO, not once per instance.
+  private searchBackfilled = false;
 
   private ledgerDb(): LedgerDb {
     return (this.ledger ??= asLedgerDb(drizzle(this.ctx.storage)));
@@ -646,6 +660,53 @@ export class ProjectStore extends DurableObject<Env> {
 
   async listDocumentRefs(): Promise<{ slug: string; path: string }[]> {
     return listDocumentRefsProjection(await this.read());
+  }
+
+  async searchDocuments(query: string): Promise<readonly DocumentSearchHit[]> {
+    await this.ensureSearchBackfilled();
+    const store = await this.ensureStore();
+    return searchDocumentsProjection(
+      store,
+      this.unit(store, this.ledgerDb()),
+      query,
+    );
+  }
+
+  // Populate `searchText` for live documents written before the field
+  // existed (pre-FTS DOs); new and edited documents index on write. Runs in
+  // bounded batches, one write transaction each, so an unlimited legacy
+  // project can't blow a single transaction's CPU/subrequest budget. No
+  // cursor is needed: each `setSearchText` clears the row from the work
+  // queue, so a crashed or oversized run resumes from what's left rather
+  // than restarting. TypeGraph upserts each node's FTS row on the write, so
+  // no separate `rebuildFulltext` pass is required. Returns the number of
+  // documents (re)indexed.
+  async reindexSearchText(): Promise<number> {
+    let total = 0;
+    for (;;) {
+      const batch = await this.write(async (u) => {
+        const docs = await u.docs.unindexed(SEARCH_BACKFILL_BATCH);
+        for (const d of docs) {
+          const body = (await u.blobs.get(d.contentHash)) ?? "";
+          await u.docs.setSearchText(d, deriveSearchText(d.title, body));
+        }
+        return docs.length;
+      });
+      total += batch;
+      if (batch < SEARCH_BACKFILL_BATCH) break;
+    }
+    return total;
+  }
+
+  private async ensureSearchBackfilled(): Promise<void> {
+    if (this.searchBackfilled) return;
+    if (await this.ctx.storage.get<boolean>(SEARCH_BACKFILL_KEY)) {
+      this.searchBackfilled = true;
+      return;
+    }
+    await this.reindexSearchText();
+    await this.ctx.storage.put(SEARCH_BACKFILL_KEY, true);
+    this.searchBackfilled = true;
   }
 
   async listCollections(): Promise<readonly CollectionMeta[]> {

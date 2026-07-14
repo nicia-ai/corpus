@@ -1,4 +1,7 @@
+import type { Store } from "@nicia-ai/typegraph";
+
 import { assembleCollection, type AssembledCollection } from "../corpus";
+import type { CanonicalGraph } from "../graph";
 import {
   asCollectionSlug,
   asDocumentSlug,
@@ -17,6 +20,7 @@ import {
   resolveRelativePath,
   resolveWikiPath,
 } from "../store/domain/paths";
+import { toSafeFulltextQuery } from "../store/domain/search";
 import {
   type DocumentChain,
   verifyChain,
@@ -31,6 +35,7 @@ import { compact, estimateTokens, pluralize } from "../util";
 import type {
   CollectionOutline,
   DocumentHistoryEntry,
+  DocumentSearchHit,
   DocumentSnapshot,
   OutlineDoc,
   OutlineLink,
@@ -91,6 +96,56 @@ export async function listDocumentsProjection(u: ProjectUnit): Promise<
     folderSlug: folders[i]?.slug ?? null,
     updatedAt: d.updatedAt,
   }));
+}
+
+const SEARCH_RESULT_LIMIT = 20;
+const SEARCH_MIN_QUERY = 2;
+
+// Full-text search over live document heads, backed by TypeGraph's FTS5
+// index on the derived `searchText` field (title + body). Tokenized +
+// bm25-ranked, so multi-word queries match non-adjacent terms and results
+// come back by relevance, not path order. The query is reduced to safe word
+// tokens (`toSafeFulltextQuery`) and run in "plain" mode, so no FTS5 operator
+// syntax can inject or throw. Archived docs are excluded because their
+// `searchText` is cleared on archive; the `archivedAt` skip is defence in
+// depth. Path is derived per hit (≤ SEARCH_RESULT_LIMIT), never over the
+// whole corpus.
+export async function searchDocumentsProjection(
+  store: Store<CanonicalGraph>,
+  u: ProjectUnit,
+  query: string,
+): Promise<readonly DocumentSearchHit[]> {
+  const needle = toSafeFulltextQuery(query);
+  if (needle.length < SEARCH_MIN_QUERY) return [];
+  const hits = await store.search.fulltext("Document", {
+    query: needle,
+    limit: SEARCH_RESULT_LIMIT,
+    mode: "plain",
+    includeSnippets: true,
+  });
+  const out: DocumentSearchHit[] = [];
+  for (const { node, snippet } of hits) {
+    if (node.archivedAt !== undefined) continue;
+    out.push({
+      slug: node.slug,
+      title: node.title,
+      path: await hitPath(u, node.slug, node.filename),
+      snippet: snippet ?? "",
+    });
+  }
+  return out;
+}
+
+// Derive one hit's display path (folder ancestry + filename) without
+// scanning the whole document set — the search result is already bounded.
+async function hitPath(
+  u: ProjectUnit,
+  slug: string,
+  filename: string,
+): Promise<string> {
+  const folder = await u.folders.documentFolder(asDocumentSlug(slug));
+  const names = folder != null ? await u.folders.ancestorNames(folder) : [];
+  return derivePath(names, filename);
 }
 
 // Every LIVE document as a link-resolution ref (slug + derived path).

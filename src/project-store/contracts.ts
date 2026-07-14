@@ -142,6 +142,17 @@ export type ProjectUsageSnapshot = Readonly<{
   storedMarkdownBytes: number;
 }>;
 
+// One full-text search hit over live document heads, ranked by FTS5
+// relevance (bm25). `snippet` is a highlighted excerpt from the match,
+// carrying `<mark>…</mark>` delimiters around the matched terms; empty when
+// the backend produced no fragment.
+export type DocumentSearchHit = Readonly<{
+  slug: string;
+  title: string;
+  path: string;
+  snippet: string;
+}>;
+
 // The agent-facing folder projection — one resolved link. `kind` is
 // how the link was written (`path` = CommonMark relative destination,
 // `wiki` = Obsidian-style `[[target]]`). `documentSlug` is null when it
