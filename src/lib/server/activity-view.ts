@@ -278,11 +278,12 @@ export async function buildCollectionActivity(
     return b.lastReadAt.localeCompare(a.lastReadAt);
   });
 
-  // Two passes over the feed: collect the display window first, then
-  // resolve every author id in one bulk lookup before formatting — the
+  // Collect the display window and its author ids in the same pass, then
+  // resolve every id in one bulk lookup before formatting — the
   // descriptions are plain strings, so names must be applied at build
   // time, not render time.
   const display: { env: EventEnvelope; evt: InstrumentationEvent }[] = [];
+  const authorIds = new Set<string>();
   const distinctEditors = new Set<string>();
   let lastEditAt: string | undefined;
   let lastEditBy: string | undefined;
@@ -305,6 +306,8 @@ export async function buildCollectionActivity(
     if (!includesActivityContext(evt, slug)) continue;
     if (display.length < RECENT_LIMIT) {
       display.push({ env, evt });
+      if ("changedBy" in evt) authorIds.add(evt.changedBy);
+      if (evt.type === "prompt.answered") authorIds.add(evt.answeredBy);
     }
     if (
       evt.type === "document.created" ||
@@ -320,12 +323,6 @@ export async function buildCollectionActivity(
         hasPostInviteEdit = true;
       }
     }
-  }
-
-  const authorIds = new Set<string>();
-  for (const { evt } of display) {
-    if ("changedBy" in evt) authorIds.add(evt.changedBy);
-    if (evt.type === "prompt.answered") authorIds.add(evt.answeredBy);
   }
   if (lastEditBy !== undefined) authorIds.add(lastEditBy);
   const names = await resolveNames([...authorIds]);
