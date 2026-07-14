@@ -10,10 +10,7 @@ import {
   folderDetached,
   type CollectionChange,
 } from "../../store/domain/change-events";
-import {
-  DEFAULT_COLLECTION_DELIVERY,
-  type CollectionDelivery,
-} from "../../store/domain/collection-expand";
+import type { CollectionDelivery } from "../../store/domain/collection-expand";
 import { collectionVersionSnapshot } from "../../store/domain/versions";
 import { DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS } from "../../util";
 import type {
@@ -73,16 +70,15 @@ export async function attachDocumentCommand(
     collectionSlug: CollectionSlug;
     documentSlug: DocumentSlug;
     position: number;
-    delivery?: CollectionDelivery;
+    delivery: CollectionDelivery;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
-  const delivery = input.delivery ?? DEFAULT_COLLECTION_DELIVERY;
   const outcome = await ctx.u.cols.attach(
     input.collectionSlug,
     input.documentSlug,
     input.position,
-    delivery,
+    input.delivery,
   );
   if (!outcome.ok || outcome.change === "unchanged") {
     return { result: { ok: false }, changes: [] };
@@ -116,15 +112,14 @@ export async function attachDocumentsToCollectionCommand(
   input: Readonly<{
     collectionSlug: CollectionSlug;
     documentSlugs: readonly DocumentSlug[];
-    delivery?: CollectionDelivery;
+    delivery: CollectionDelivery;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ attached: number }>> {
-  const delivery = input.delivery ?? DEFAULT_COLLECTION_DELIVERY;
   const attached = await ctx.u.cols.attachMany(
     input.collectionSlug,
     input.documentSlugs,
-    delivery,
+    input.delivery,
   );
   if (attached.length === 0) return { result: { attached: 0 }, changes: [] };
 
@@ -339,11 +334,10 @@ export async function attachFolderToCollectionCommand(
     collectionSlug: CollectionSlug;
     folderSlug: FolderSlug;
     position: number;
-    delivery?: CollectionDelivery;
+    delivery: CollectionDelivery;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
-  const delivery = input.delivery ?? DEFAULT_COLLECTION_DELIVERY;
   return collectionMutationCommand(
     ctx,
     input.collectionSlug,
@@ -353,7 +347,7 @@ export async function attachFolderToCollectionCommand(
         input.collectionSlug,
         input.folderSlug,
         input.position,
-        delivery,
+        input.delivery,
       );
       if (!outcome.ok || outcome.change === "unchanged") return undefined;
       return folderAttached({

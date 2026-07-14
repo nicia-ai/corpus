@@ -890,10 +890,14 @@ export class ProjectStore extends DurableObject<Env> {
           };
         }
         const saved = await saveDocumentCommand(ctx, input);
+        // "reference", never the "core" default: only a curator opts a
+        // member into the always-include payload, matching the web UI's
+        // attach — an agent push must not grow every read_collection.
         const attached = await attachDocumentCommand(ctx, {
           collectionSlug,
           documentSlug: input.slug,
           position,
+          delivery: "reference",
           changedBy: input.changedBy,
         });
         if (!attached.result.ok) throw new CollectionUnavailable();
