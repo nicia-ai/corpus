@@ -107,6 +107,50 @@ describe("create-proposals (DO + D1 integration)", () => {
     expect(fresh.ok).toBe(true);
   });
 
+  it("propose rejects a path whose slot an existing FOLDER occupies", async () => {
+    const store = freshStore("cprop");
+    await seedCollection(store);
+    // Importing wiki/notes.md/inner.md creates a folder NAMED "notes.md" —
+    // the cross-type namespace: a document may not share a sibling
+    // folder's name.
+    await store.importDocumentAtPath({
+      path: "wiki/notes.md/inner.md",
+      markdown: "# inner",
+      changedBy: "alice",
+    });
+    const taken = await store.suggestCreate(AGENT, {
+      path: "wiki/notes.md",
+      proposedMarkdown: BODY,
+      originCollectionSlug: colSlug("col-a"),
+    });
+    expect(taken).toEqual({ ok: false, reason: "taken" });
+  });
+
+  it("a folder claiming the slot after propose makes apply return taken with NO writes", async () => {
+    const store = freshStore("cprop");
+    await seedCollection(store);
+    const id = await propose(store, { path: "wiki/report.md" });
+    // The race: a folder named "report.md" lands under wiki/ before apply.
+    await store.importDocumentAtPath({
+      path: "wiki/report.md/inner.md",
+      markdown: "# inner",
+      changedBy: "alice",
+    });
+
+    const applied = await store.applyCreateProposal({
+      suggestionId: id,
+      appliedBy: "paul",
+    });
+    expect(applied).toEqual({ ok: false, reason: "taken" });
+    // Nothing was created: no document (hence no version and no blob
+    // reference), and the proposal left the open list as stale.
+    expect(await store.getDocument(docSlug("wiki-report"))).toBeUndefined();
+    expect((await store.listDocumentRefs()).map((r) => r.slug)).not.toContain(
+      "wiki-report",
+    );
+    expect(await store.listCreateProposals()).toHaveLength(0);
+  });
+
   it("apply succeeds for a folder-placed path when a root document shares the filename", async () => {
     const store = freshStore("cprop");
     await seedCollection(store);

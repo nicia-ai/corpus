@@ -386,6 +386,19 @@ export class FolderRepo {
     return parentSlug;
   }
 
+  // Would a NEW document named `filename` collide with any existing
+  // sibling segment — document OR folder — in the folder? The same
+  // cross-type namespace rule placeDocument enforces on placement,
+  // exposed as a read so a proposal can fail before any write. No
+  // `self` exclusion: the document does not exist yet.
+  async slotOccupied(
+    folderSlug: string | null,
+    filename: string,
+  ): Promise<boolean> {
+    const siblings = await this.siblingSegments(folderSlug);
+    return segmentCollides(siblings, filename);
+  }
+
   async documentAt(
     folderSlug: string | null,
     filename: string,

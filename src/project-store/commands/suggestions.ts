@@ -187,15 +187,16 @@ export async function createDocProposalCommand(
   if (input.slug === undefined && path === undefined) {
     return commandOutcome({ ok: false, reason: "invalid" });
   }
-  // A proposal must be appliable when accepted: reject a path whose slot
-  // an existing document already occupies (project-wide, not just the
-  // bound collection), instead of filing a proposal that can only ever
-  // go stale at apply. A missing folder chain means the slot is free.
+  // A proposal must be appliable when accepted: reject a path whose
+  // slot is already occupied project-wide — by a document OR a sibling
+  // folder of that name (the cross-type namespace rule) — instead of
+  // filing a proposal that can only ever go stale at apply. A missing
+  // folder chain means the slot is free.
   if (path !== undefined) {
     const dirFolder = await ctx.u.folders.folderAt(segments.slice(0, -1));
     if (
       dirFolder !== undefined &&
-      (await ctx.u.folders.documentAt(dirFolder, basename(path))) !== undefined
+      (await ctx.u.folders.slotOccupied(dirFolder, basename(path)))
     ) {
       return commandOutcome({ ok: false, reason: "taken" });
     }
@@ -322,8 +323,10 @@ export async function applyCreateProposalCommand(
   if (!ensured.ok) return taken();
   if (
     filename !== undefined &&
-    (await ctx.u.folders.documentAt(ensured.folderSlug, filename)) !== undefined
+    (await ctx.u.folders.slotOccupied(ensured.folderSlug, filename))
   ) {
+    // A document — or a folder claiming the name since the proposal was
+    // filed — occupies the slot: mark stale before any write.
     return taken();
   }
 
@@ -342,7 +345,15 @@ export async function applyCreateProposalCommand(
   const changes = [...saved.changes];
   if (ensured.folderSlug !== null) {
     const placed = await ctx.u.folders.placeDocument(slug, ensured.folderSlug);
-    if (!placed.ok) return taken();
+    // The slot pre-check above covers every known collision, so a
+    // placement failure here is a bug — throw so the whole transaction
+    // (document, version, blob, events) rolls back, never committing an
+    // unplaced orphan behind a soft "taken" result.
+    if (!placed.ok) {
+      throw new Error(
+        `create-proposal apply: placement failed (${placed.reason})`,
+      );
+    }
   }
   if (s.originCollectionSlug !== null) {
     // The proposing connection's Collection may have been deleted since; a
