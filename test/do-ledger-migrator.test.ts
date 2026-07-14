@@ -1,6 +1,8 @@
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 import { ledgerMigrations } from "../drizzle-do/migrations";
+import { TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY } from "../src/project-store";
 
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
@@ -66,5 +68,64 @@ describe("DO ledger Drizzle migrator", () => {
     // TypeGraph init ran fine after migrate() (no #135 collision) and
     // the whole chain re-derives intact.
     expect(await store.verifyHistory()).toEqual({ ok: true });
+  });
+
+  it("rebuilds pre-0.35 traversal indexes and materializes Corpus lookup indexes", async () => {
+    const store = project();
+    await store.listDocuments();
+
+    // Replace the current indexes with the pre-0.35 column lists, then clear
+    // Corpus's physical-migration marker to simulate an existing deployed DO.
+    await runInDurableObject(store, async (_instance, state) => {
+      state.storage.sql.exec("DROP INDEX typegraph_edges_from_idx");
+      state.storage.sql.exec(`CREATE INDEX typegraph_edges_from_idx
+        ON typegraph_edges
+        (graph_id, from_kind, from_id, kind, to_kind, deleted_at, valid_to)`);
+      state.storage.sql.exec("DROP INDEX typegraph_edges_to_idx");
+      state.storage.sql.exec(`CREATE INDEX typegraph_edges_to_idx
+        ON typegraph_edges
+        (graph_id, to_kind, to_id, kind, from_kind, deleted_at, valid_to)`);
+      await state.storage.delete(TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY);
+    });
+
+    await evictDurableObject(store);
+    await store.listDocuments();
+
+    await runInDurableObject(store, (_instance, state) => {
+      const columns = (indexName: string): readonly string[] =>
+        [
+          ...state.storage.sql.exec<{ name: string }>(
+            `PRAGMA index_info(${indexName})`,
+          ),
+        ].map((row) => row.name);
+
+      expect(columns("typegraph_edges_from_idx")).toEqual([
+        "graph_id",
+        "from_kind",
+        "from_id",
+        "kind",
+        "to_kind",
+        "deleted_at",
+        "valid_from",
+        "valid_to",
+        "to_id",
+      ]);
+      expect(columns("typegraph_edges_to_idx")).toEqual([
+        "graph_id",
+        "to_kind",
+        "to_id",
+        "kind",
+        "from_kind",
+        "deleted_at",
+        "valid_from",
+        "valid_to",
+        "from_id",
+      ]);
+      expect(columns("corpus_document_slug_idx")).not.toHaveLength(0);
+      expect(columns("corpus_document_version_idx")).not.toHaveLength(0);
+      expect(columns("corpus_collection_slug_idx")).not.toHaveLength(0);
+      expect(columns("corpus_collection_version_idx")).not.toHaveLength(0);
+      expect(columns("corpus_folder_slug_idx")).not.toHaveLength(0);
+    });
   });
 });

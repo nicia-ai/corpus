@@ -204,10 +204,14 @@ init from `drizzle-do/` and `drizzle-event-log/` (source: the
 `sqliteTable` defs in `src/db.ts` and `src/event-log-db.ts`).
 drizzle-kit owns this DDL; no hand-written DDL. Baselines are
 regenerated, not migrated forward — safe only because there is no
-production data. TypeGraph still bootstraps its own node / edge tables
-in `ensureStore`. `drizzle/`, `drizzle-do/`, `drizzle-event-log/` are
-prettier-ignored so `pnpm format` can't desync the byte-for-byte
-check.
+production data. TypeGraph bootstraps its own node / edge tables and
+materializes the indexes declared in `canonicalGraph` from `ensureStore`.
+Physical upgrades to TypeGraph-owned indexes that its idempotent bootstrap
+cannot replace also run there, guarded by a Durable Object storage marker;
+do not model them as a Drizzle or `wrangler.jsonc` migration. Regression
+coverage lives in `test/do-ledger-migrator.test.ts`. `drizzle/`,
+`drizzle-do/`, `drizzle-event-log/` are prettier-ignored so `pnpm format`
+can't desync the byte-for-byte check.
 
 ## Retention
 
