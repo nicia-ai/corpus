@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { asCollectionSlug, asDocumentSlug } from "../ids";
 import { parseFrontmatter } from "../store/domain/frontmatter";
+import { CREATE_PROPOSAL_BASE_VERSION } from "../store/domain/suggestion";
+import { compact } from "../util";
 
 import type { McpExecutor } from "./executor";
 import { boundCollectionSlug, documentSlugFromArgs, strField } from "./params";
@@ -47,11 +49,14 @@ async function proposeCreate(
       "not a valid new document slug (lowercase letters, digits, single dashes)",
     );
   }
-  const res = await exec.suggestCreate(exec.callerRef, {
-    ...(target.slug !== undefined ? { slug: asDocumentSlug(target.slug) } : {}),
-    ...(target.path !== undefined ? { path: target.path } : {}),
-    proposedMarkdown,
-  });
+  const res = await exec.suggestCreate(
+    exec.callerRef,
+    compact({
+      slug: target.slug !== undefined ? asDocumentSlug(target.slug) : undefined,
+      path: target.path,
+      proposedMarkdown,
+    }),
+  );
   if (res.ok) {
     return ok(
       id,
@@ -178,7 +183,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       // The path resolved to nothing. With baseDocVersion 0 that is a
       // NEW-document proposal; any other base version keeps the existing
       // NOT_FOUND contract.
-      if (fields.data.baseDocVersion === 0) {
+      if (fields.data.baseDocVersion === CREATE_PROPOSAL_BASE_VERSION) {
         return proposeCreate(
           id,
           exec,
@@ -231,7 +236,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
         // slug that exists elsewhere in the project comes back from the
         // create path as CONFLICT ("taken") — the grade of existence the
         // REST create path already exposes.
-        if (fields.data.baseDocVersion === 0) {
+        if (fields.data.baseDocVersion === CREATE_PROPOSAL_BASE_VERSION) {
           const rawPath = strField(params, "path");
           return proposeCreate(
             id,

@@ -11,6 +11,7 @@ import {
   type SuggestionRow,
   type SuggestionStatus,
 } from "../../db";
+import { CREATE_PROPOSAL_BASE_VERSION } from "../domain/suggestion";
 
 // Per-hunk suggestions, as a repository. Non-canonical review layer
 // (off-bundle, off-MCP). All row/status types inferred from the schema, so
@@ -49,7 +50,10 @@ export class SuggestionRepo {
       .select({ slug: suggestion.documentSlug, n: sql<number>`count(*)` })
       .from(suggestion)
       .where(
-        and(eq(suggestion.status, "open"), ne(suggestion.baseDocVersion, 0)),
+        and(
+          eq(suggestion.status, "open"),
+          ne(suggestion.baseDocVersion, CREATE_PROPOSAL_BASE_VERSION),
+        ),
       )
       .groupBy(suggestion.documentSlug);
     const out: Record<string, number> = {};
@@ -64,7 +68,10 @@ export class SuggestionRepo {
       .select()
       .from(suggestion)
       .where(
-        and(eq(suggestion.status, "open"), eq(suggestion.baseDocVersion, 0)),
+        and(
+          eq(suggestion.status, "open"),
+          eq(suggestion.baseDocVersion, CREATE_PROPOSAL_BASE_VERSION),
+        ),
       )
       .orderBy(suggestion.id);
   }

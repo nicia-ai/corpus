@@ -13,10 +13,7 @@ import {
   documentFilenameChanged,
   documentRenamed,
 } from "../../store/domain/change-events";
-import {
-  frontmatterTitle,
-  parseFrontmatter,
-} from "../../store/domain/frontmatter";
+import { resolveTitle } from "../../store/domain/frontmatter";
 import {
   basename,
   defaultFilename,
@@ -26,7 +23,6 @@ import {
 } from "../../store/domain/paths";
 import { nextVersion } from "../../store/domain/versioning";
 import { documentVersion } from "../../store/domain/versions";
-import { inferTitle } from "../../util";
 import type {
   CommandOutcome,
   DomainChange,
@@ -109,11 +105,11 @@ export async function saveDocumentCommand(
     );
     if (occupant !== undefined) throw new FilenameCollision();
   }
-  const parsed = parseFrontmatter(input.markdown);
-  const body = parsed.ok ? parsed.body : input.markdown;
-  const fmTitle = parsed.ok ? frontmatterTitle(parsed.frontmatter) : undefined;
-  const title =
-    input.title ?? fmTitle ?? inferTitle(body, stripExtension(filename));
+  const title = resolveTitle({
+    markdown: input.markdown,
+    fallback: stripExtension(filename),
+    override: input.title,
+  });
   const docVersion = nextVersion(head, input.clientVersion);
   // A brand-new document claims its slug: any open create-proposal for the
   // same slug is now off-base, exactly like an edit suggestion whose head

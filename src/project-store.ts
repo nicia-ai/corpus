@@ -96,6 +96,7 @@ import {
   type RejectSuggestionInput,
   setHunkDecisionCommand,
   type SetHunkDecisionInput,
+  type SuggestCreateInput,
   type SuggestionView,
 } from "./project-store/commands/suggestions";
 import type {
@@ -157,6 +158,7 @@ import { chooseImportLinkTarget } from "./store/domain/import-link";
 import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
 import type { RetentionPolicy } from "./store/domain/retention";
+import { isCreateProposal } from "./store/domain/suggestion";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
 import type { GraphHandle } from "./store/handle";
@@ -1171,23 +1173,18 @@ export class ProjectStore extends DurableObject<Env> {
   // Same channel discipline as suggestEdit: this method IS the MCP entry.
   async suggestCreate(
     callerRef: CallerRef,
-    input: Readonly<{
-      slug?: DocumentSlug;
-      path?: string;
-      proposedMarkdown: string;
-      originCollectionSlug?: CollectionSlug;
-    }>,
+    input: SuggestCreateInput,
   ): Promise<CreateDocProposalResult> {
-    return this.createDocProposal({
-      ...(input.slug !== undefined ? { slug: input.slug } : {}),
-      ...(input.path !== undefined ? { path: input.path } : {}),
-      ...(input.originCollectionSlug !== undefined
-        ? { originCollectionSlug: input.originCollectionSlug }
-        : {}),
-      proposedMarkdown: input.proposedMarkdown,
-      createdBy: callerRef,
-      channel: "mcp",
-    });
+    return this.createDocProposal(
+      compact({
+        slug: input.slug,
+        path: input.path,
+        originCollectionSlug: input.originCollectionSlug,
+        proposedMarkdown: input.proposedMarkdown,
+        createdBy: callerRef,
+        channel: "mcp" as const,
+      }),
+    );
   }
 
   // Open create-proposals for the review surface (humans only — never
@@ -1241,7 +1238,7 @@ export class ProjectStore extends DurableObject<Env> {
     // proposal for a slug that later got created — list separately via
     // listCreateProposals, and would render as a nonsense zero-hunk card here.
     const suggestions = (await u.suggestions.forDoc(slug)).filter(
-      (s) => s.baseDocVersion !== 0,
+      (s) => !isCreateProposal(s),
     );
     const hunks = await u.suggestions.hunksForSuggestions(
       suggestions.map((s) => s.id),

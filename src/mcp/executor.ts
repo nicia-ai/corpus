@@ -2,6 +2,7 @@ import type { CallerRef, CollectionSlug, DocumentSlug } from "../ids";
 import type {
   CreateDocProposalResult,
   CreateSuggestionResult,
+  SuggestCreateInput,
 } from "../project-store/commands/suggestions";
 import type { CollectionDelivery } from "../store/domain/collection-expand";
 import type { VerifyResult } from "../store/domain/verify";
@@ -98,11 +99,6 @@ export type McpExecutor = Readonly<{
   // optional here only so the port and the DO method share one shape.
   suggestCreate: (
     callerRef: CallerRef,
-    input: Readonly<{
-      slug?: DocumentSlug;
-      path?: string;
-      proposedMarkdown: string;
-      originCollectionSlug?: CollectionSlug;
-    }>,
+    input: SuggestCreateInput,
   ) => Promise<CreateDocProposalResult>;
 }>;

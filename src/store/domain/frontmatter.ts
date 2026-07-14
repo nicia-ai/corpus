@@ -1,5 +1,7 @@
 import { parse as parseYaml } from "yaml";
 
+import { inferTitle } from "../../util";
+
 // Pure, zero-IO split of a leading YAML frontmatter fence from a markdown
 // document. The fence is the on-disk convention these files arrive with
 // (Obsidian / Jekyll / static-site authoring): a `---` line at byte 0, a
@@ -86,6 +88,24 @@ export function frontmatterTitle(
 ): string | undefined {
   const t = fm?.title;
   return typeof t === "string" && t.trim() !== "" ? t.trim() : undefined;
+}
+
+// The resolved display title for a markdown document: an explicit override
+// wins, else the frontmatter `title`, else the first H1, else the caller's
+// fallback (typically the slug or filename stem). Single source for both the
+// save path and the create-proposal preview, so a proposal previews under the
+// exact title its applied document will get.
+export function resolveTitle(
+  input: Readonly<{
+    markdown: string;
+    fallback: string;
+    override?: string | undefined;
+  }>,
+): string {
+  const parsed = parseFrontmatter(input.markdown);
+  const body = parsed.ok ? parsed.body : input.markdown;
+  const fmTitle = parsed.ok ? frontmatterTitle(parsed.frontmatter) : undefined;
+  return input.override ?? fmTitle ?? inferTitle(body, input.fallback);
 }
 
 // Format a frontmatter value for display in the metadata panel. Shared by

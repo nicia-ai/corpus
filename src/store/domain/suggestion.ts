@@ -13,6 +13,18 @@ import { parseBlocksWithRanges } from "./block-parse";
 // (same content relocated) carries as unchanged and yields no hunk — moves
 // are not represented in a suggestion yet.
 
+// Create-proposals reuse the suggestion table with this base version as the
+// discriminant: a real document's head is never below 1 (see nextVersion), so
+// 0 can only mean "this document does not exist yet". A create-proposal
+// carries no hunks — the whole body is the proposal.
+export const CREATE_PROPOSAL_BASE_VERSION = 0;
+
+export function isCreateProposal(
+  row: Readonly<{ baseDocVersion: number }>,
+): boolean {
+  return row.baseDocVersion === CREATE_PROPOSAL_BASE_VERSION;
+}
+
 // Single source for the hunk-op vocabulary (the DO schema consumes this
 // tuple for its enum column + CHECK, the same way it consumes BLOCK_KINDS).
 export const HUNK_OPS = ["replace", "insert", "delete"] as const;

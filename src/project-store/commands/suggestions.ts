@@ -12,10 +12,7 @@ import {
   type CollectionSlug,
   type DocumentSlug,
 } from "../../ids";
-import {
-  frontmatterTitle,
-  parseFrontmatter,
-} from "../../store/domain/frontmatter";
+import { resolveTitle } from "../../store/domain/frontmatter";
 import {
   basename,
   normalizeSlug,
@@ -24,19 +21,19 @@ import {
 } from "../../store/domain/paths";
 import {
   applyHunks,
+  CREATE_PROPOSAL_BASE_VERSION,
   diffToHunks,
   type Hunk,
   type HunkOp,
+  isCreateProposal,
 } from "../../store/domain/suggestion";
-import { inferTitle } from "../../util";
 import {
   type CommandOutcome,
   commandOutcome,
   type ProjectCommandContext,
 } from "../command";
-import { collectionMembersProjection } from "../queries";
 
-import { attachDocumentCommand } from "./collections";
+import { attachDocumentsToCollectionCommand } from "./collections";
 import { saveDocumentCommand } from "./documents";
 
 export type { SuggestionStatus } from "../../db";
@@ -170,6 +167,17 @@ export type CreateDocProposalResult = Readonly<
   | { ok: false; reason: "invalid" }
 >;
 
+// The MCP-facing subset of a create-proposal: identity + body only. The DO
+// method injects createdBy/channel; the scoped executor pins
+// `originCollectionSlug` to the caller's bound Collection (never caller data —
+// optional here only so the port and the DO method share one shape).
+export type SuggestCreateInput = Readonly<{
+  slug?: DocumentSlug;
+  path?: string;
+  proposedMarkdown: string;
+  originCollectionSlug?: CollectionSlug;
+}>;
+
 export async function createDocProposalCommand(
   ctx: ProjectCommandContext,
   input: CreateDocProposalInput,
@@ -193,7 +201,7 @@ export async function createDocProposalCommand(
   }
   const suggestionId = await ctx.u.suggestions.create({
     documentSlug: slug,
-    baseDocVersion: 0,
+    baseDocVersion: CREATE_PROPOSAL_BASE_VERSION,
     proposedMarkdown: input.proposedMarkdown,
     status: "open",
     createdBy: input.createdBy,
@@ -234,14 +242,11 @@ export function createProposalView(
     row.proposedPath === null
       ? row.documentSlug
       : stripExtension(basename(row.proposedPath));
-  const parsed = parseFrontmatter(row.proposedMarkdown);
-  const body = parsed.ok ? parsed.body : row.proposedMarkdown;
-  const fmTitle = parsed.ok ? frontmatterTitle(parsed.frontmatter) : undefined;
   return {
     id: row.id,
     slug: row.documentSlug,
     path: row.proposedPath,
-    title: fmTitle ?? inferTitle(body, fallback),
+    title: resolveTitle({ markdown: row.proposedMarkdown, fallback }),
     proposedMarkdown: row.proposedMarkdown,
     createdBy: row.createdBy,
     channel: row.channel,
@@ -278,7 +283,7 @@ export async function applyCreateProposalCommand(
   if (s.status !== "open") {
     return commandOutcome({ ok: false, reason: "not-open" });
   }
-  if (s.baseDocVersion !== 0) {
+  if (!isCreateProposal(s)) {
     return commandOutcome({ ok: false, reason: "not-create" });
   }
   const slug = asDocumentSlug(s.documentSlug);
@@ -323,20 +328,18 @@ export async function applyCreateProposalCommand(
     if (!placed.ok) return taken();
   }
   if (s.originCollectionSlug !== null) {
-    const colSlug = asCollectionSlug(s.originCollectionSlug);
-    const members = await collectionMembersProjection(ctx.u, colSlug);
-    // The proposing connection's Collection may have been deleted since;
-    // the document is still created — only the attach is skipped.
-    if (members !== undefined) {
-      const attached = await attachDocumentCommand(ctx, {
-        collectionSlug: colSlug,
-        documentSlug: slug,
-        position: members.length,
-        delivery: "reference",
-        changedBy: input.appliedBy,
-      });
-      changes.push(...attached.changes);
-    }
+    // The proposing connection's Collection may have been deleted since; a
+    // vanished collection makes the attach a no-op (attachMany returns
+    // nothing), so the document is still created — only the attach is
+    // skipped. attachDocumentsToCollectionCommand computes the end position
+    // itself, so we don't project the members just to count them.
+    const attached = await attachDocumentsToCollectionCommand(ctx, {
+      collectionSlug: asCollectionSlug(s.originCollectionSlug),
+      documentSlugs: [slug],
+      delivery: "reference",
+      changedBy: input.appliedBy,
+    });
+    changes.push(...attached.changes);
   }
   // saveDocumentCommand staled every open proposal for this slug
   // (including this one); resolve() then records THIS one's true outcome.
