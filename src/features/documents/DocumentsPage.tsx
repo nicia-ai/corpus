@@ -59,6 +59,10 @@ const REASON_MESSAGE: Readonly<Record<FolderOpReason, string>> = {
   "segment-collision": "A file or folder with that name already exists there.",
 };
 
+// Minimum trimmed query length before a content search fires. Mirrors the
+// DO-side floor (SEARCH_MIN_QUERY); the server re-enforces it authoritatively.
+const MIN_QUERY_CHARS = 2;
+
 export function DocumentsPage({
   projectId,
   documents,
@@ -114,34 +118,29 @@ export function DocumentsPage({
   // in-flight call so a stale result can't repopulate a cleared box.
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<readonly SearchHit[]>();
-  const [searchPending, setSearchPending] = useState(false);
   const searchSeq = useRef(0);
   const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const searchActive = query.trim().length >= 2;
+  const searchActive = query.trim().length >= MIN_QUERY_CHARS;
 
   function onQueryChange(next: string): void {
     setQuery(next);
     if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
     const q = next.trim();
     searchSeq.current += 1;
-    if (q.length < 2) {
+    if (q.length < MIN_QUERY_CHARS) {
       setHits(undefined);
-      setSearchPending(false);
       return;
     }
-    setSearchPending(true);
     const seq = searchSeq.current;
     searchTimer.current = setTimeout(() => {
       searchDocuments({ data: { projectId, query: q } })
         .then((res) => {
           if (seq !== searchSeq.current) return;
           setHits(res);
-          setSearchPending(false);
         })
         .catch(() => {
           if (seq !== searchSeq.current) return;
           setHits([]);
-          setSearchPending(false);
         });
     }, 250);
   }
@@ -473,12 +472,7 @@ export function DocumentsPage({
           documents={documents}
         />
       ) : searchActive ? (
-        <SearchResults
-          projectId={projectId}
-          hits={hits}
-          pending={searchPending}
-          query={query.trim()}
-        />
+        <SearchResults projectId={projectId} hits={hits} query={query.trim()} />
       ) : (
         <div
           onDragOver={(e) => {
@@ -551,18 +545,18 @@ export function DocumentsPage({
 function SearchResults({
   projectId,
   hits,
-  pending,
   query,
 }: Readonly<{
   projectId: ProjectId;
   hits: readonly SearchHit[] | undefined;
-  pending: boolean;
   query: string;
 }>): React.ReactElement {
+  // hits === undefined only while a query >= MIN_QUERY_CHARS is in flight
+  // (a shorter query clears the box and hides this view entirely).
   if (hits === undefined) {
     return (
       <p className="px-3 py-6 text-sm text-slate-500" aria-live="polite">
-        {pending ? "Searching…" : ""}
+        Searching…
       </p>
     );
   }

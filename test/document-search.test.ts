@@ -57,22 +57,22 @@ describe("searchDocuments", () => {
 
   it("is case-insensitive in both directions", async () => {
     const store = freshProject();
-    await seed(store, "icp", "# ICP\nThe Primary ICP is the Team Lead.");
-    expect(await store.searchDocuments("primary icp")).toHaveLength(1);
-    expect(await store.searchDocuments("PRIMARY ICP")).toHaveLength(1);
+    await seed(store, "style", "# Style\nThe Primary Palette is slate.");
+    expect(await store.searchDocuments("primary palette")).toHaveLength(1);
+    expect(await store.searchDocuments("PRIMARY PALETTE")).toHaveLength(1);
   });
 
   it("returns the document's derived path", async () => {
     const store = freshProject();
     const folder = await store.createFolder("wiki", null);
     if (!folder.ok) throw new Error("folder create failed");
-    await seed(store, "concept", "# Concept\nfounder-led sales");
+    await seed(store, "concept", "# Concept\nself-serve onboarding");
     await store.placeDocumentInFolder(
       docSlug("concept"),
       asFolderSlug(folder.slug),
       "alice",
     );
-    const hits = await store.searchDocuments("founder-led");
+    const hits = await store.searchDocuments("self-serve");
     expect(hits[0]?.path).toBe("wiki/concept.md");
   });
 
@@ -96,5 +96,19 @@ describe("searchDocuments", () => {
       await seed(store, `match-${String(i)}`, "# M\ncommon needle text");
     }
     expect(await store.searchDocuments("common needle")).toHaveLength(20);
+  });
+
+  it("surfaces a body match after a case-expanding char without a wrong highlight", async () => {
+    // U+0130 (İ) lowercases to two code units, so a match index computed on
+    // the lowercased body no longer aligns with the original-cased body the
+    // snippet slices. The hit must still surface, but with no highlight
+    // offsets rather than an off-by-one (wrong) span.
+    const store = freshProject();
+    await seed(store, "istanbul", "İ then the pricing section.", "Istanbul");
+    const hits = await store.searchDocuments("pricing");
+    expect(hits.map((h) => h.slug)).toEqual(["istanbul"]);
+    expect(hits[0]?.field).toBe("body");
+    expect(hits[0]?.matchStart).toBeUndefined();
+    expect(hits[0]?.matchEnd).toBeUndefined();
   });
 });

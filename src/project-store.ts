@@ -650,11 +650,8 @@ export class ProjectStore extends DurableObject<Env> {
     return listDocumentRefsProjection(await this.read());
   }
 
-  async searchDocuments(
-    query: string,
-    limit?: number,
-  ): Promise<readonly DocumentSearchHit[]> {
-    return searchDocumentsProjection(await this.read(), query, limit);
+  async searchDocuments(query: string): Promise<readonly DocumentSearchHit[]> {
+    return searchDocumentsProjection(await this.read(), query);
   }
 
   async listCollections(): Promise<readonly CollectionMeta[]> {

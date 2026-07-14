@@ -27,6 +27,7 @@ import type {
   CollectionDocView,
   CollectionMeta,
 } from "../store/repos/collection-graph";
+import type { DocumentNode } from "../store/repos/document-repo";
 import { compact, estimateTokens, pluralize } from "../util";
 
 import type {
@@ -106,31 +107,37 @@ const SEARCH_MIN_QUERY = 2;
 export async function searchDocumentsProjection(
   u: ProjectUnit,
   query: string,
-  limit: number = SEARCH_RESULT_LIMIT,
 ): Promise<readonly DocumentSearchHit[]> {
   const needle = query.trim().toLowerCase();
   if (needle.length < SEARCH_MIN_QUERY) return [];
-  const max = Math.max(1, Math.min(limit, SEARCH_RESULT_LIMIT));
   const docs = (await u.docs.listAll()).filter(
     (d) => d.archivedAt === undefined,
   );
+  // Reuse the already-fetched, already-filtered doc set for path derivation
+  // so the live-document scan runs once, not twice.
   const [bytes, { slugToPath }] = await Promise.all([
     u.blobs.getMany(docs.map((d) => d.contentHash)),
-    pathIndex(u),
+    pathIndex(u, docs),
   ]);
   const titleHits: DocumentSearchHit[] = [];
   const bodyHits: DocumentSearchHit[] = [];
   for (const d of docs) {
     const body = bytes.get(d.contentHash) ?? "";
-    const bodyIndex = body.toLowerCase().indexOf(needle);
+    const lowerBody = body.toLowerCase();
+    const bodyIndex = lowerBody.indexOf(needle);
     const inTitle = d.title.toLowerCase().includes(needle);
     if (!inTitle && bodyIndex === -1) continue;
-    // Point the preview at the body match when there is one; a
-    // title-only hit previews the body head instead.
-    const cut =
-      bodyIndex === -1
-        ? headSnippet(body)
-        : searchSnippet(body, bodyIndex, needle.length);
+    // Point the preview at the body match when there is one; a title-only
+    // hit previews the body head instead. `bodyIndex` is an index into the
+    // lowercased body, but searchSnippet slices the original — and
+    // `toLowerCase()` is not always length-preserving (e.g. U+0130 İ),
+    // which would shift the highlight off the match. Only highlight when
+    // the body is 1:1 under lowercasing; otherwise fall back to an
+    // un-highlighted head preview rather than emit a wrong span.
+    const canHighlight = bodyIndex !== -1 && lowerBody.length === body.length;
+    const cut = canHighlight
+      ? searchSnippet(body, bodyIndex, needle.length)
+      : headSnippet(body);
     const hit: DocumentSearchHit = compact({
       slug: d.slug,
       title: d.title,
@@ -147,7 +154,7 @@ export async function searchDocumentsProjection(
     a.path.localeCompare(b.path);
   titleHits.sort(byPath);
   bodyHits.sort(byPath);
-  return [...titleHits, ...bodyHits].slice(0, max);
+  return [...titleHits, ...bodyHits].slice(0, SEARCH_RESULT_LIMIT);
 }
 
 // Every LIVE document as a link-resolution ref (slug + derived path).
@@ -494,7 +501,10 @@ export async function resolvedViews(
     }));
 }
 
-export async function pathIndex(u: ProjectUnit): Promise<
+export async function pathIndex(
+  u: ProjectUnit,
+  liveDocs?: readonly DocumentNode[],
+): Promise<
   Readonly<{
     pathToSlug: Map<string, string>;
     slugToPath: Map<string, string>;
@@ -503,7 +513,9 @@ export async function pathIndex(u: ProjectUnit): Promise<
   // Archived docs retain their in_folder edge but must not occupy a path —
   // otherwise a re-upload at the same path collides and relative-link
   // resolution becomes non-deterministic (can resolve to the hidden doc).
-  const docs = (await u.docs.listAll()).filter(
+  // A caller that already holds the live-doc set can pass it to avoid a
+  // second full scan; filter defensively either way.
+  const docs = (liveDocs ?? (await u.docs.listAll())).filter(
     (d) => d.archivedAt === undefined,
   );
   const folders = await Promise.all(
