@@ -84,32 +84,41 @@ function labelFor(callerRef: string): {
   return { callerLabel: callerRef, authPath: "apikey" };
 }
 
-function describeEvent(event: InstrumentationEvent): string {
+// Resolve an author id to its display name for the feed. The event log
+// stores opaque user ids; the control plane owns the id → name mapping
+// (resolveUserNames), injected into the builder as a plain lookup so
+// this stays port-driven. Unresolvable ids (deleted account, sentinel
+// "" / "import") fall back to the raw stored value.
+function describeEvent(
+  event: InstrumentationEvent,
+  names: ReadonlyMap<string, string>,
+): string {
+  const who = (id: string): string => names.get(id) ?? id;
   switch (event.type) {
     case "document.created":
-      return `${event.changedBy} created ${event.slug}`;
+      return `${who(event.changedBy)} created ${event.slug}`;
     case "document.updated":
-      return `${event.changedBy} edited ${event.slug} (v${String(event.docVersion)})`;
+      return `${who(event.changedBy)} edited ${event.slug} (v${String(event.docVersion)})`;
     case "document.renamed":
-      return `${event.changedBy} renamed ${event.slug}`;
+      return `${who(event.changedBy)} renamed ${event.slug}`;
     case "document.archived":
-      return `${event.changedBy} archived ${event.slug}`;
+      return `${who(event.changedBy)} archived ${event.slug}`;
     case "document.filename_changed":
-      return `${event.changedBy} changed filename of ${event.slug}`;
+      return `${who(event.changedBy)} changed filename of ${event.slug}`;
     case "collection.created":
-      return `${event.changedBy} created collection ${event.collectionSlug}`;
+      return `${who(event.changedBy)} created collection ${event.collectionSlug}`;
     case "collection.updated":
-      return `${event.changedBy} edited collection ${event.collectionSlug}`;
+      return `${who(event.changedBy)} edited collection ${event.collectionSlug}`;
     case "collection.attached": {
       const what = event.documentSlug ?? event.folderSlug ?? "a member";
-      return `${event.changedBy} attached ${what} to ${event.collectionSlug}`;
+      return `${who(event.changedBy)} attached ${what} to ${event.collectionSlug}`;
     }
     case "collection.detached": {
       const what = event.documentSlug ?? event.folderSlug ?? "a member";
-      return `${event.changedBy} detached ${what} from ${event.collectionSlug}`;
+      return `${who(event.changedBy)} detached ${what} from ${event.collectionSlug}`;
     }
     case "collection.reordered":
-      return `${event.changedBy} reordered ${event.collectionSlug}`;
+      return `${who(event.changedBy)} reordered ${event.collectionSlug}`;
     case "read":
       return event.kind === "first"
         ? `${labelFor(event.callerRef).callerLabel} first read of ${event.collectionSlug}`
@@ -117,7 +126,7 @@ function describeEvent(event: InstrumentationEvent): string {
     case "caller.connected":
       return `${labelFor(event.callerRef).callerLabel} connected`;
     case "prompt.answered":
-      return `${event.answeredBy} answered post-activation prompt: ${event.bet}`;
+      return `${who(event.answeredBy)} answered post-activation prompt: ${event.bet}`;
   }
 }
 
@@ -207,15 +216,22 @@ function includesActivityContext(
   );
 }
 
+// Bulk id → display-name lookup, injected by the transport (the server
+// fn wires resolveUserNames against the control DB; tests wire a map).
+export type NameResolver = (
+  ids: readonly string[],
+) => Promise<ReadonlyMap<string, string>>;
+
 export async function buildCollectionActivity(
   args: Readonly<{
     slug: CollectionSlug;
     mcpUrl: string;
     store: ActivityStore;
     log: EventLogPort;
+    resolveNames: NameResolver;
   }>,
 ): Promise<ActivityDTO> {
-  const { slug, mcpUrl, store, log } = args;
+  const { slug, mcpUrl, store, log, resolveNames } = args;
   const structure = await store.collectionStructure(slug);
   const currentVersions = new Map<string, number>();
   let contextName: string = slug;
@@ -262,7 +278,12 @@ export async function buildCollectionActivity(
     return b.lastReadAt.localeCompare(a.lastReadAt);
   });
 
-  const recentActivity: RecentEventRow[] = [];
+  // Collect the display window and its author ids in the same pass, then
+  // resolve every id in one bulk lookup before formatting — the
+  // descriptions are plain strings, so names must be applied at build
+  // time, not render time.
+  const display: { env: EventEnvelope; evt: InstrumentationEvent }[] = [];
+  const authorIds = new Set<string>();
   const distinctEditors = new Set<string>();
   let lastEditAt: string | undefined;
   let lastEditBy: string | undefined;
@@ -283,13 +304,10 @@ export async function buildCollectionActivity(
       continue;
     }
     if (!includesActivityContext(evt, slug)) continue;
-    if (recentActivity.length < RECENT_LIMIT) {
-      recentActivity.push({
-        monotonicId: env.monotonicId,
-        eventType: env.eventType,
-        timestamp: env.timestamp,
-        description: describeEvent(evt),
-      });
+    if (display.length < RECENT_LIMIT) {
+      display.push({ env, evt });
+      if ("changedBy" in evt) authorIds.add(evt.changedBy);
+      if (evt.type === "prompt.answered") authorIds.add(evt.answeredBy);
     }
     if (
       evt.type === "document.created" ||
@@ -306,6 +324,15 @@ export async function buildCollectionActivity(
       }
     }
   }
+  if (lastEditBy !== undefined) authorIds.add(lastEditBy);
+  const names = await resolveNames([...authorIds]);
+
+  const recentActivity: RecentEventRow[] = display.map(({ env, evt }) => ({
+    monotonicId: env.monotonicId,
+    eventType: env.eventType,
+    timestamp: env.timestamp,
+    description: describeEvent(evt, names),
+  }));
 
   const promptAnswered = projection.funnel.promptAnsweredAt !== undefined;
   const promptVisible =
@@ -317,7 +344,10 @@ export async function buildCollectionActivity(
     contextName,
     mcpUrl,
     lastEditAt,
-    lastEditBy,
+    lastEditBy:
+      lastEditBy === undefined
+        ? undefined
+        : (names.get(lastEditBy) ?? lastEditBy),
     hasAnyAgents: agents.length > 0 || distinctAgentCallers.size > 0,
     agents,
     recentActivity,
