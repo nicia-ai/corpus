@@ -213,6 +213,9 @@ type Unit = ProjectUnit;
 // Persistent marker: set once the one-time `searchText` backfill has run for
 // this DO, so a reindex never repeats across restarts.
 const SEARCH_BACKFILL_KEY = "search:backfilled:v1";
+// Documents reindexed per backfill transaction — bounds the work (blob reads
+// + node updates) in any single transaction for an unbounded legacy project.
+const SEARCH_BACKFILL_BATCH = 100;
 
 // Maps a committed command's outcome to the real-time change to broadcast,
 // or undefined to fall back to the domain-derived change. Always a function
@@ -670,31 +673,29 @@ export class ProjectStore extends DurableObject<Env> {
   }
 
   // Populate `searchText` for live documents written before the field
-  // existed (pre-FTS DOs); new and edited documents index on write.
-  // Idempotent — skips docs already carrying content. When any doc was
-  // backfilled, follow with a `rebuildFulltext` pass: a document written
-  // before the FTS table existed has no index row at all, and rebuild is
-  // the sanctioned way to index rows that predate a `searchable()` field.
-  // Returns the number of documents (re)indexed.
+  // existed (pre-FTS DOs); new and edited documents index on write. Runs in
+  // bounded batches, one write transaction each, so an unlimited legacy
+  // project can't blow a single transaction's CPU/subrequest budget. No
+  // cursor is needed: each `setSearchText` clears the row from the work
+  // queue, so a crashed or oversized run resumes from what's left rather
+  // than restarting. TypeGraph upserts each node's FTS row on the write, so
+  // no separate `rebuildFulltext` pass is required. Returns the number of
+  // documents (re)indexed.
   async reindexSearchText(): Promise<number> {
-    const reindexed = await this.write(async (u) => {
-      const docs = (await u.docs.listAll()).filter(
-        (d) => d.archivedAt === undefined,
-      );
-      let count = 0;
-      for (const d of docs) {
-        if (d.searchText !== undefined && d.searchText !== "") continue;
-        const body = (await u.blobs.get(d.contentHash)) ?? "";
-        await u.docs.setSearchText(d, deriveSearchText(d.title, body));
-        count += 1;
-      }
-      return count;
-    });
-    if (reindexed > 0) {
-      const store = await this.ensureStore();
-      await store.search.rebuildFulltext("Document");
+    let total = 0;
+    for (;;) {
+      const batch = await this.write(async (u) => {
+        const docs = await u.docs.unindexed(SEARCH_BACKFILL_BATCH);
+        for (const d of docs) {
+          const body = (await u.blobs.get(d.contentHash)) ?? "";
+          await u.docs.setSearchText(d, deriveSearchText(d.title, body));
+        }
+        return docs.length;
+      });
+      total += batch;
+      if (batch < SEARCH_BACKFILL_BATCH) break;
     }
-    return reindexed;
+    return total;
   }
 
   private async ensureSearchBackfilled(): Promise<void> {

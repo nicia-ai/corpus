@@ -147,31 +147,61 @@ describe("searchDocuments", () => {
     expect(await store.searchDocuments("common needle")).toHaveLength(20);
   });
 
-  it("backfills a document written before searchText existed", async () => {
+  it("backfills pre-existing docs across batches, then indexes them", async () => {
     const store = freshStore("search-backfill");
-    await seed(store, "legacy", "# Legacy\nzarquon appears here");
-    // Simulate a pre-migration row: clear searchText straight through the
-    // graph store (un-indexing it) and reset the one-time backfill marker,
-    // reaching past the public API into the DO instance.
-    await runInDurableObject(store, async (instance, state) => {
+    // Simulate pre-migration rows: Document nodes created straight through
+    // the graph store with NO searchText (as if written before the
+    // searchable() field existed). 101 > the 100-doc batch size, so a
+    // correct backfill must span more than one transaction.
+    await runInDurableObject(store, async (instance) => {
       const inst = instance as unknown as {
         ensureStore(): Promise<Store<CanonicalGraph>>;
       };
       const s = await inst.ensureStore();
       await s.transaction(async (tx) => {
-        const [node] = await tx.nodes.Document.find({
-          where: (d) => d.slug.eq("legacy"),
-          limit: 1,
-        });
-        if (node !== undefined) {
-          await tx.nodes.Document.update(node.id, { searchText: "" });
+        for (let i = 0; i < 101; i += 1) {
+          await tx.nodes.Document.create({
+            slug: `legacy-${String(i)}`,
+            title: `Legacydoc ${String(i)}`,
+            filename: `legacy-${String(i)}.md`,
+            contentHash: `hash-${String(i)}`,
+            docVersion: 1,
+            updatedAt: "2020-01-01T00:00:00.000Z",
+          });
         }
       });
-      await state.storage.delete("search:backfilled:v1");
     });
-    // The first search triggers the lazy backfill, which repopulates
-    // searchText from the blob and re-indexes the doc.
-    const hits = await store.searchDocuments("zarquon");
-    expect(hits.map((h) => h.slug)).toEqual(["legacy"]);
+    // The paginated backfill must process every row (101 = two batches).
+    expect(await store.reindexSearchText()).toBe(101);
+    // And they are now searchable (title backfilled; capped at 20).
+    expect(await store.searchDocuments("legacydoc")).toHaveLength(20);
+  });
+
+  it("keeps an archived document out of search after a rename", async () => {
+    const store = freshProject();
+    await seed(store, "gone", "# Gone\nsearchable phrase");
+    await store.archiveDocument(docSlug("gone"), "alice");
+    const r = await store.renameDocument({
+      slug: docSlug("gone"),
+      title: "Renamed Gone",
+      changedBy: "alice",
+    });
+    expect(r.ok).toBe(true);
+    expect(await store.searchDocuments("searchable phrase")).toHaveLength(0);
+    expect(await store.searchDocuments("renamed gone")).toHaveLength(0);
+  });
+
+  it("keeps an archived document out of search after a save", async () => {
+    const store = freshProject();
+    await seed(store, "gone", "# Gone\noriginal phrase");
+    await store.archiveDocument(docSlug("gone"), "alice");
+    const r = await store.saveDocument({
+      slug: docSlug("gone"),
+      markdown: "# Gone\nbrandnew phrase",
+      clientVersion: 1,
+      changedBy: "alice",
+    });
+    expect(r.ok).toBe(true);
+    expect(await store.searchDocuments("brandnew phrase")).toHaveLength(0);
   });
 });

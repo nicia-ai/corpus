@@ -130,7 +130,11 @@ export async function saveDocumentCommand(
       contentHash,
       docVersion,
       updatedAt: ctx.now,
-      searchText: deriveSearchText(title, input.markdown),
+      // A save doesn't unarchive; an archived head must stay out of the index.
+      searchText:
+        head?.archivedAt !== undefined
+          ? ""
+          : deriveSearchText(title, input.markdown),
     },
     head,
   );
@@ -186,14 +190,16 @@ export async function renameDocumentCommand(
     return { result: { status: "noop" }, changes: [] };
   }
   // Title is part of the fulltext content; recompute `searchText` against the
-  // unchanged body (the rename doesn't touch the blob).
-  const body = (await ctx.u.blobs.get(node.contentHash)) ?? "";
-  await ctx.u.docs.rename(
-    node,
-    input.title,
-    deriveSearchText(input.title, body),
-    ctx.now,
-  );
+  // unchanged body (the rename doesn't touch the blob). An archived doc stays
+  // out of the index — keep its `searchText` empty rather than resurrect it.
+  const searchText =
+    node.archivedAt !== undefined
+      ? ""
+      : deriveSearchText(
+          input.title,
+          (await ctx.u.blobs.get(node.contentHash)) ?? "",
+        );
+  await ctx.u.docs.rename(node, input.title, searchText, ctx.now);
   const change = documentRenamed({
     slug: input.slug,
     docVersion: node.docVersion,

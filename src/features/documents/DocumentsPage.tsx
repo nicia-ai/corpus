@@ -143,10 +143,11 @@ export function DocumentsPage({
     const q = next.trim();
     searchSeq.current += 1;
     setSearchError(false);
-    if (q.length < MIN_QUERY_CHARS) {
-      setHits(undefined);
-      return;
-    }
+    // Drop the previous query's hits immediately so stale (clickable) results
+    // never linger through the debounce + request window; the searching state
+    // shows until the new results land.
+    setHits(undefined);
+    if (q.length < MIN_QUERY_CHARS) return;
     const seq = searchSeq.current;
     searchTimer.current = setTimeout(() => runSearch(q, seq), 250);
   }

@@ -44,6 +44,19 @@ export class DocumentRepo {
     return findAll((w) => this.g.nodes.Document.find(w));
   }
 
+  // A bounded batch of LIVE documents that have no fulltext content yet —
+  // the search backfill's work queue. Live docs always carry non-empty
+  // `searchText` once written (title is non-empty), so a null value means
+  // the row predates the `searchable()` field; archived docs (cleared to
+  // "") are excluded. Setting `searchText` clears the match, so repeated
+  // calls drain the queue without a cursor.
+  unindexed(limit: number): Promise<readonly DocumentNode[]> {
+    return this.g.nodes.Document.find({
+      where: (d) => d.archivedAt.isNull().and(d.searchText.isNull()),
+      limit,
+    });
+  }
+
   async put(
     slug: DocumentSlug,
     fields: DocumentFields,
