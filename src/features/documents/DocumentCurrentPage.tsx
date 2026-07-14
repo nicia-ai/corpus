@@ -10,6 +10,7 @@ import {
 
 import { markdownEditorHostClass } from "@/components/markdown/host-class";
 import { CHANGE_FLASH_DURATION_MS } from "@/components/markdown/live-review";
+import type { DocRef } from "@/components/markdown/MarkdownEditor";
 import type {
   ChangeFlash,
   VisibleDocSnapshot,
@@ -63,7 +64,7 @@ export function DocumentCurrentPage({
   comments,
   suggestions,
   viewerId,
-  slugs,
+  docRefs,
 }: Readonly<{
   doc: DocSnapshot | undefined;
   projectId: ProjectId;
@@ -71,7 +72,7 @@ export function DocumentCurrentPage({
   comments: CommentsResult;
   suggestions: SuggestionsResult;
   viewerId: string;
-  slugs: readonly string[];
+  docRefs: readonly DocRef[];
 }>): React.ReactElement | null {
   const nextFlashId = useRef(0);
   const [remoteFlashRequest, setRemoteFlashRequest] =
@@ -142,7 +143,7 @@ export function DocumentCurrentPage({
         comments={comments}
         suggestions={suggestions}
         viewerId={viewerId}
-        slugs={slugs}
+        docRefs={docRefs}
         changeFlash={changeFlash}
         onRemoteContentChange={queueRemoteContentFlash}
         onRemoteSuggestionChange={queueRemoteSuggestionFlash}

@@ -11,8 +11,12 @@ import {
   type ExpandEntry,
   type FolderTreeNode,
 } from "../store/domain/collection-expand";
-import { parseRelativeLinks } from "../store/domain/links";
-import { derivePath, resolveRelativePath } from "../store/domain/paths";
+import { type ParsedLink, parseLinks } from "../store/domain/links";
+import {
+  derivePath,
+  resolveRelativePath,
+  resolveWikiPath,
+} from "../store/domain/paths";
 import {
   type DocumentChain,
   verifyChain,
@@ -89,15 +93,22 @@ export async function listDocumentsProjection(u: ProjectUnit): Promise<
   }));
 }
 
-// Every LIVE document slug. Feeds the editor's broken-link linter, which
-// needs the complete set — a partial/capped list would flag real links as
-// broken — and must exclude archived slugs (which the linter would otherwise
-// treat as valid targets that the documents list doesn't show).
-export async function listDocumentSlugsProjection(
+// Every LIVE document as a link-resolution ref (slug + derived path).
+// Feeds the editor's broken-link linter and wikilink resolution, which
+// need the complete set — a partial/capped list would flag real links as
+// broken — and must exclude archived docs (which would otherwise resolve
+// as valid targets the documents list doesn't show).
+export async function listDocumentRefsProjection(
   u: ProjectUnit,
-): Promise<string[]> {
+): Promise<{ slug: string; path: string }[]> {
   const docs = await u.docs.listAll();
-  return docs.filter((d) => d.archivedAt === undefined).map((d) => d.slug);
+  const { slugToPath } = await pathIndex(u);
+  return docs
+    .filter((d) => d.archivedAt === undefined)
+    .map((d) => ({
+      slug: d.slug,
+      path: slugToPath.get(d.slug) ?? d.filename,
+    }));
 }
 
 export function listCollectionsProjection(
@@ -465,12 +476,13 @@ export async function pathIndex(u: ProjectUnit): Promise<
 export async function collectionOutlineProjection(
   u: ProjectUnit,
   collectionSlug: CollectionSlug,
-  parsedLinksByHash: Map<string, readonly string[]>,
+  parsedLinksByHash: Map<string, readonly ParsedLink[]>,
 ): Promise<CollectionOutline> {
   const colNode = await u.cols.findCollection(collectionSlug);
   const views = await resolvedViews(u, collectionSlug);
   if (colNode === undefined || views === undefined) return { found: false };
   const { pathToSlug, slugToPath } = await pathIndex(u);
+  const allPaths = [...pathToSlug.keys()];
   const inCollection = new Set(views.map((v) => v.slug));
   const documents: OutlineDoc[] = [];
   for (const v of views) {
@@ -480,12 +492,16 @@ export async function collectionOutlineProjection(
       v.contentHash,
       async () => (await u.blobs.get(v.contentHash)) ?? "",
     );
-    const links: OutlineLink[] = targets.map((target) => {
-      const resolved = resolveRelativePath(path, target);
+    const links: OutlineLink[] = targets.map((link) => {
+      const resolved =
+        link.kind === "wiki"
+          ? resolveWikiPath(path, link.target, allPaths)
+          : resolveRelativePath(path, link.target);
       const documentSlug =
         resolved === undefined ? null : (pathToSlug.get(resolved) ?? null);
       return {
-        target,
+        target: link.target,
+        kind: link.kind,
         resolvedPath: resolved ?? null,
         documentSlug,
         inCollection: documentSlug !== null && inCollection.has(documentSlug),
@@ -509,13 +525,13 @@ export async function collectionOutlineProjection(
 }
 
 async function parsedLinks(
-  cache: Map<string, readonly string[]>,
+  cache: Map<string, readonly ParsedLink[]>,
   hash: string,
   loadMarkdown: () => Promise<string>,
-): Promise<readonly string[]> {
+): Promise<readonly ParsedLink[]> {
   let v = cache.get(hash);
   if (v === undefined) {
-    v = parseRelativeLinks(await loadMarkdown());
+    v = parseLinks(await loadMarkdown());
     cache.set(hash, v);
   }
   return v;

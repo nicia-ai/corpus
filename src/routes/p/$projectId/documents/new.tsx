@@ -10,7 +10,7 @@ import { textLinkClass } from "@/components/ui/text-link";
 import { asProjectId } from "@/ids";
 import { track } from "@/lib/analytics";
 import { useSubmit } from "@/lib/forms";
-import { getDocuments, saveDocument } from "@/lib/server/documents";
+import { getDocumentRefs, saveDocument } from "@/lib/server/documents";
 import { defaultFilename } from "@/store/domain/paths";
 import { compact, slugify } from "@/util";
 
@@ -23,10 +23,9 @@ export const Route = createFileRoute("/p/$projectId/documents/new")({
   // known slugs (every link then just lints as unknown until the page reloads).
   loader: async ({ params }) => {
     try {
-      const docs = await getDocuments({
+      return await getDocumentRefs({
         data: { projectId: params.projectId },
       });
-      return docs.map((d) => d.slug);
     } catch {
       return [];
     }
@@ -36,7 +35,7 @@ export const Route = createFileRoute("/p/$projectId/documents/new")({
 function NewDoc() {
   const nav = useNavigate();
   const projectId = asProjectId(Route.useParams().projectId);
-  const slugs = Route.useLoaderData();
+  const docRefs = Route.useLoaderData();
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
   const [broken, setBroken] = useState(0);
@@ -134,7 +133,7 @@ function NewDoc() {
         <MarkdownEditor
           value={markdown}
           onChange={setMarkdown}
-          docSlugs={slugs}
+          docRefs={docRefs}
           selfSlug={slug}
           onBrokenChange={setBroken}
           ariaLabel="Document body"

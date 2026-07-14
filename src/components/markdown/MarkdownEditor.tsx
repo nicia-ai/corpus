@@ -19,9 +19,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ReviewRailLayout } from "@/components/review/ReviewRail";
 import { hrefToDocSlug, isExternalHref } from "@/lib/doc-href";
+import { scanWikilinks, splitWikiTarget } from "@/store/domain/links";
+import { resolveWikiPath } from "@/store/domain/paths";
 
+import { frontmatter } from "./block-widgets";
 import { markdownEditorHostClass } from "./host-class";
-import { livePreview, setReviewPopoverOpen } from "./live-preview";
+import type { WikiResolve } from "./inline-spans";
+import {
+  inCodeContext,
+  livePreview,
+  setReviewPopoverOpen,
+} from "./live-preview";
 import {
   liveReview,
   type ReviewMark,
@@ -31,6 +39,7 @@ import {
   type SourceRange,
 } from "./live-review";
 import { Markdown } from "./Markdown";
+import { wikiLinkResolver } from "./wikilink-facet";
 
 // Source-of-truth markdown editor: CodeMirror with Obsidian-style live preview
 // (see ./live-preview), so the edit surface reads as the rendered document —
@@ -38,10 +47,11 @@ import { Markdown } from "./Markdown";
 // source stays the literal edit buffer (the canonical bytes versioning, block
 // anchors, and agent suggestion diffs all key off; a WYSIWYG that re-serialized
 // markdown on save would churn all three). It also carries inline diagnostics.
-// The one diagnostic today: a schemeless markdown link whose target is not an
-// existing document slug in this project. It warns (wavy underline + bubbled
-// count) — it never blocks Save, because authoring a reference before its
-// target is normal order, not an error.
+// Two diagnostics today, both warn-only (wavy underline + bubbled count) and
+// never block Save, because authoring a reference before its target is normal
+// order, not an error: a schemeless markdown link whose target is not an
+// existing document slug in this project, and a `[[wikilink]]` whose target
+// matches no document by name or path.
 
 // A schemeless link target resolved against the project's slugs. Returns the
 // warning message when it points nowhere, otherwise undefined. External URLs
@@ -60,6 +70,35 @@ function classifyInternalRef(
   const slug = hrefToDocSlug(ref);
   if (slug === "" || slug === self || known.has(slug)) return undefined;
   return `No document “${slug}” in this project`;
+}
+
+// One project document as the link-resolution surface sees it: stable
+// slug + current derived path. The editor derives everything it needs
+// (the linter's known-slug set, wikilink basename resolution) from this
+// one list, so route loaders ship a single shape.
+export type DocRef = Readonly<{ slug: string; path: string }>;
+
+// Wikilink target → slug over the project's current doc list, memoized
+// per target (the linter and the live-preview decorator both resolve on
+// every recompute). Same-folder-first ranking keys off the editing
+// document's own path.
+function wikiResolverFor(
+  docRefs: readonly DocRef[],
+  selfSlug: string,
+): WikiResolve | undefined {
+  if (docRefs.length === 0) return undefined;
+  const paths = docRefs.map((d) => d.path);
+  const pathBySlug = new Map(docRefs.map((d) => [d.slug, d.path]));
+  const slugByPath = new Map(docRefs.map((d) => [d.path, d.slug]));
+  const sourcePath = pathBySlug.get(selfSlug) ?? "";
+  const memo = new Map<string, string | undefined>();
+  return (target: string): string | undefined => {
+    if (memo.has(target)) return memo.get(target);
+    const resolved = resolveWikiPath(sourcePath, target, paths);
+    const slug = resolved === undefined ? undefined : slugByPath.get(resolved);
+    memo.set(target, slug);
+    return slug;
+  };
 }
 
 // CodeMirror contenteditable attributes (aria-label / aria-describedby) ride a
@@ -320,14 +359,22 @@ const designTheme = EditorView.theme({
   },
 });
 
-const NO_SLUGS: readonly string[] = [];
+function wikiFacetExtension(
+  docRefs: readonly DocRef[],
+  selfSlug: string,
+): Extension {
+  const resolver = wikiResolverFor(docRefs, selfSlug);
+  return resolver === undefined ? [] : wikiLinkResolver.of(resolver);
+}
+
+const NO_DOCS: readonly DocRef[] = [];
 
 type Props = Readonly<{
   value: string;
   // Editing props (omit for a read-only view): onChange fires on edits;
-  // docSlugs/selfSlug feed the broken-link linter.
+  // docRefs/selfSlug feed the broken-link linter and wikilink resolution.
   onChange?: (next: string) => void;
-  docSlugs?: readonly string[];
+  docRefs?: readonly DocRef[];
   selfSlug?: string;
   // Render the document but disable editing (history / read views). Skips the
   // linter, save keymap, active-line cue, and (when set) the review layer — the
@@ -360,7 +407,7 @@ type Props = Readonly<{
 export function MarkdownEditor({
   value,
   onChange,
-  docSlugs = NO_SLUGS,
+  docRefs = NO_DOCS,
   selfSlug = "",
   readOnly,
   onBrokenChange,
@@ -386,6 +433,7 @@ export function MarkdownEditor({
   // lets us reconfigure the rule without tearing down the editor. The latest
   // callbacks live in refs so the one-time extension closures never go stale.
   const linterC = useRef(new Compartment());
+  const wikiC = useRef(new Compartment());
   const contentAttrsC = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onBrokenRef = useRef(onBrokenChange);
@@ -406,8 +454,12 @@ export function MarkdownEditor({
     setReviewSelection(undefined);
   }, []);
 
-  function refLinter(slugs: readonly string[], self: string) {
-    const known = new Set(slugs);
+  function refLinter(
+    refs: readonly DocRef[],
+    self: string,
+    wiki: WikiResolve | undefined,
+  ) {
+    const known = new Set(refs.map((d) => d.slug));
     return linter(
       (v) => {
         const diags: Diagnostic[] = [];
@@ -431,6 +483,22 @@ export function MarkdownEditor({
             }
           },
         });
+        if (wiki !== undefined) {
+          const fm = frontmatter(v.state);
+          for (const m of scanWikilinks(v.state.doc.toString())) {
+            if (fm && m.from < fm.to) continue;
+            if (inCodeContext(v.state, m.from + 2)) continue;
+            const { target } = splitWikiTarget(m.inner);
+            if (target !== "" && wiki(target) === undefined) {
+              diags.push({
+                from: m.from,
+                to: m.to,
+                severity: "warning",
+                message: `No document matches [[${target}]] in this project`,
+              });
+            }
+          }
+        }
         onBrokenRef.current?.(diags.length);
         return diags;
       },
@@ -489,10 +557,19 @@ export function MarkdownEditor({
             ? [
                 highlightActiveLine(),
                 placeholder("Start writing… markdown renders as you type"),
-                linterC.current.of(refLinter(docSlugs, selfSlug)),
+                linterC.current.of(
+                  refLinter(
+                    docRefs,
+                    selfSlug,
+                    wikiResolverFor(docRefs, selfSlug),
+                  ),
+                ),
                 syntaxHighlighting(codeHighlight),
               ]
             : []),
+          // Wikilink resolution rides its own compartment (read views
+          // render wikilinks too, so it mounts regardless of `editing`).
+          wikiC.current.of(wikiFacetExtension(docRefs, selfSlug)),
           // Read-only: a plain click follows a rendered link (nothing to edit).
           // Editing: require Cmd/Ctrl so a plain click can place the caret.
           EditorView.domEventHandlers({
@@ -559,11 +636,18 @@ export function MarkdownEditor({
   }, [value]);
 
   useEffect(() => {
-    if (readOnly === true) return;
-    view.current?.dispatch({
-      effects: linterC.current.reconfigure(refLinter(docSlugs, selfSlug)),
-    });
-  }, [readOnly, docSlugs, selfSlug]);
+    const effects = [
+      wikiC.current.reconfigure(wikiFacetExtension(docRefs, selfSlug)),
+      ...(readOnly === true
+        ? []
+        : [
+            linterC.current.reconfigure(
+              refLinter(docRefs, selfSlug, wikiResolverFor(docRefs, selfSlug)),
+            ),
+          ]),
+    ];
+    view.current?.dispatch({ effects });
+  }, [readOnly, docRefs, selfSlug]);
 
   // Post-mount re-apply (e.g. a validation error id appears after a failed
   // submit). No-op until the view exists; the mount effect seeds the initial
@@ -617,7 +701,11 @@ export function MarkdownEditor({
           host-class.ts) so that placeholder can't drift out of sync either. */}
       {!mounted && (
         <div className={markdownEditorHostClass}>
-          <Markdown source={value} bare />
+          <Markdown
+            source={value}
+            bare
+            wikiResolve={wikiResolverFor(docRefs, selfSlug)}
+          />
         </div>
       )}
       {review === true &&

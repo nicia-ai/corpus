@@ -15,8 +15,11 @@ import {
   WidgetType,
 } from "@codemirror/view";
 
+import { scanWikilinks, splitWikiTarget } from "@/store/domain/links";
+
 import { frontmatter, imageReplace, tableReplace } from "./block-widgets";
 import { imageParts, linkParts, type SliceText } from "./inline-spans";
+import { wikiLinkResolver } from "./wikilink-facet";
 
 // The Lezer syntax-node type, derived from CodeMirror's public API rather than
 // importing @lezer/common directly (it is a transitive dep, not hoisted under
@@ -141,6 +144,22 @@ export function toggleTaskMarker(
 
 function hide(from: number, to: number): CmRange<Decoration> {
   return HIDE.range(from, to);
+}
+
+// Is `pos` inside any code or raw-HTML construct? Wikilinks are scanned
+// from the text (Lezer has no node for them), so tree context decides
+// whether a match is prose (decorate) or code documentation ABOUT
+// wikilinks (leave alone). Shared with the editor's wikilink linter.
+const CODE_CONTEXT = /Code|HTML/;
+export function inCodeContext(state: EditorState, pos: number): boolean {
+  for (
+    let node: MdNode | null = syntaxTree(state).resolveInner(pos, 1);
+    node !== null;
+    node = node.parent
+  ) {
+    if (CODE_CONTEXT.test(node.name)) return true;
+  }
+  return false;
 }
 
 // Hide a marker token [from, markerEnd) plus ALL whitespace that follows it on
@@ -438,6 +457,49 @@ function frontmatterDecoration(
     : fm.deco;
 }
 
+// Obsidian-style wikilinks, scanned from the window's text (no syntax
+// node exists for them). Only RESOLVED targets decorate — the brackets
+// hide and the target (or `|label`) renders as an internal link whose
+// data-href is the resolved slug, so the shared link-follower works
+// unchanged. An unresolved target stays raw text (the linter warns on
+// it); the caret on the match reveals the raw source for editing, like
+// every other construct here. Matches can't straddle the incremental
+// window: they contain no newline and windows are block-aligned.
+function decorateWikilinks(
+  decos: CmRange<Decoration>[],
+  state: EditorState,
+  from: number,
+  to: number,
+  fm: ReturnType<typeof frontmatter>,
+): void {
+  const resolve = state.facet(wikiLinkResolver);
+  if (resolve === undefined) return;
+  const text = state.doc.sliceString(from, to);
+  for (const m of scanWikilinks(text)) {
+    const mFrom = from + m.from;
+    const mTo = from + m.to;
+    if (fm && mFrom < fm.to) continue;
+    if (touchesSelection(state, mFrom, mTo)) continue;
+    if (inCodeContext(state, mFrom + 2)) continue;
+    const { target, labelStart } = splitWikiTarget(m.inner);
+    const slug = target === "" ? undefined : resolve(target);
+    if (slug === undefined) continue;
+    const innerFrom = mFrom + 2;
+    const labelFrom =
+      labelStart === undefined ? innerFrom : innerFrom + labelStart;
+    const labelTo = mTo - 2;
+    if (labelTo <= labelFrom) continue;
+    decos.push(hide(mFrom, labelFrom));
+    decos.push(
+      Decoration.mark({
+        class: "cm-md-link",
+        attributes: { title: `[[${m.inner}]]`, "data-href": slug },
+      }).range(labelFrom, labelTo),
+    );
+    decos.push(hide(labelTo, mTo));
+  }
+}
+
 // Build the tree-based decorations for every node OVERLAPPING [from, to).
 // Lezer's bounded iterate visits an overlapping node with its own FULL
 // from/to (never clipped to the window), and each handler below decides
@@ -520,6 +582,8 @@ function computeDecorationsInRange(
       }
     },
   });
+
+  decorateWikilinks(decos, state, from, to, fm);
 
   // A single node's own pushes aren't necessarily in ascending `from` order
   // (e.g. decorateLink pushes the open-bracket hide, then the close-paren

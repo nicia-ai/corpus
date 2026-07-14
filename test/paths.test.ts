@@ -7,6 +7,7 @@ import {
   normalizeSlug,
   pathSegments,
   resolveRelativePath,
+  resolveWikiPath,
 } from "../src/store/domain/paths";
 
 const NONE: ReadonlySet<string> = new Set();
@@ -110,5 +111,52 @@ describe("resolveRelativePath", () => {
     expect(resolveRelativePath(src, "#section")).toBeUndefined();
     expect(resolveRelativePath("readme.md", "../x.md")).toBeUndefined();
     expect(resolveRelativePath(src, "")).toBeUndefined();
+  });
+});
+
+describe("resolveWikiPath", () => {
+  const paths = [
+    "wiki/index.md",
+    "wiki/brand-voice.md",
+    "raw/nicia-spec.md",
+    "notes/nicia-spec.md",
+    "top.md",
+  ];
+
+  it("matches a bare name by basename sans extension", () => {
+    expect(resolveWikiPath("wiki/index.md", "brand-voice", paths)).toBe(
+      "wiki/brand-voice.md",
+    );
+    expect(resolveWikiPath("top.md", "top", paths)).toBe("top.md");
+  });
+
+  it("prefers the source document's own folder on ambiguity", () => {
+    expect(resolveWikiPath("raw/other.md", "nicia-spec", paths)).toBe(
+      "raw/nicia-spec.md",
+    );
+    expect(resolveWikiPath("notes/other.md", "nicia-spec", paths)).toBe(
+      "notes/nicia-spec.md",
+    );
+  });
+
+  it("breaks remaining ties by depth then lexicographic path", () => {
+    expect(resolveWikiPath("top.md", "nicia-spec", paths)).toBe(
+      "notes/nicia-spec.md",
+    );
+  });
+
+  it("a target containing / is a project-root path, extension optional", () => {
+    expect(resolveWikiPath("top.md", "wiki/index", paths)).toBe(
+      "wiki/index.md",
+    );
+    expect(resolveWikiPath("top.md", "wiki/index.md", paths)).toBe(
+      "wiki/index.md",
+    );
+  });
+
+  it("returns undefined when nothing matches (case-sensitive)", () => {
+    expect(resolveWikiPath("top.md", "missing", paths)).toBeUndefined();
+    expect(resolveWikiPath("top.md", "Index", paths)).toBeUndefined();
+    expect(resolveWikiPath("top.md", "", paths)).toBeUndefined();
   });
 });

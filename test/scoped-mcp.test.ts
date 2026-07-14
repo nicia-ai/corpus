@@ -107,6 +107,7 @@ function stubExec(): Omit<McpExecutor, "callerRef"> {
                   // member-link → preserved
                   {
                     target: "brand-voice.md",
+                    kind: "path",
                     resolvedPath: "brand-voice.md",
                     documentSlug: "brand-voice",
                     inCollection: true,
@@ -114,6 +115,7 @@ function stubExec(): Omit<McpExecutor, "callerRef"> {
                   // out-of-scope target → must collapse
                   {
                     target: "../hr/handbook.md",
+                    kind: "path",
                     resolvedPath: "hr/handbook.md",
                     documentSlug: "handbook",
                     inCollection: false,
@@ -192,6 +194,7 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
     const outOfScope = links.find((l) => l.target === "../hr/handbook.md");
     expect(outOfScope).toEqual({
       target: "../hr/handbook.md",
+      kind: "path",
       resolvedPath: null,
       documentSlug: null,
       inCollection: false,

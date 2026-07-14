@@ -88,6 +88,18 @@ export const getDocuments = createServerFn({ method: "GET" })
     return docMetas(await storeOf(srv(context)).listDocuments());
   });
 
+// The complete live slug + derived-path set — the editor's broken-link
+// linter and wikilink resolution need every document (the documents list
+// projection is capped; a partial set would flag real links as broken).
+export type DocLinkRef = Readonly<{ slug: string; path: string }>;
+
+export const getDocumentRefs = createServerFn({ method: "GET" })
+  .middleware([projectMiddleware])
+  .handler(async ({ context }): Promise<DocLinkRef[]> => {
+    const refs = await storeOf(srv(context)).listDocumentRefs();
+    return refs.map((r) => ({ slug: r.slug, path: r.path }));
+  });
+
 // One round trip for the documents list: heads + the flat attachment
 // edge list, joined to a distinct-collection count per document.
 // Collapsed into a single server fn (not getDocuments + a counts call)

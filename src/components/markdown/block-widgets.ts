@@ -12,7 +12,9 @@ import {
   type InlineSpan,
   inlineSpans,
   type SliceText,
+  type WikiResolve,
 } from "./inline-spans";
+import { wikiLinkResolver } from "./wikilink-facet";
 
 // Block-level live-preview widgets — the rich renderers that make the editor a
 // faithful read surface: images, GFM tables (read-only render; edit the
@@ -142,6 +144,7 @@ function trimSpans(spans: readonly InlineSpan[]): readonly InlineSpan[] {
 function rowCells(
   slice: SliceText,
   row: InlineNode,
+  wiki: WikiResolve | undefined,
 ): readonly (readonly InlineSpan[])[] {
   const cells: (readonly InlineSpan[])[] = [];
   const leadingDelim = row.firstChild?.name === "TableDelimiter";
@@ -151,7 +154,9 @@ function rowCells(
       delims += 1;
     } else if (child.name === "TableCell") {
       const col = delims - (leadingDelim ? 1 : 0);
-      cells[col] = trimSpans(inlineSpans(slice, child, child.from, child.to));
+      cells[col] = trimSpans(
+        inlineSpans(slice, child, child.from, child.to, wiki),
+      );
     }
   }
   for (let i = 0; i < cells.length; i += 1) cells[i] ??= [];
@@ -166,6 +171,7 @@ function rowCells(
 export function tableModelFromTree(
   slice: SliceText,
   table: InlineNode,
+  wiki?: WikiResolve,
 ): TableModel | undefined {
   const headerNode = table.getChild("TableHeader");
   if (headerNode === null) return undefined;
@@ -174,8 +180,8 @@ export function tableModelFromTree(
   const delim = table.getChild("TableDelimiter");
   return {
     aligns: delim === null ? [] : parseAligns(slice(delim.from, delim.to)),
-    header: rowCells(slice, headerNode),
-    rows: table.getChildren("TableRow").map((r) => rowCells(slice, r)),
+    header: rowCells(slice, headerNode, wiki),
+    rows: table.getChildren("TableRow").map((r) => rowCells(slice, r, wiki)),
   };
 }
 
@@ -295,7 +301,7 @@ export function tableReplace(
   const from = state.doc.lineAt(table.from).from;
   const to = state.doc.lineAt(Math.min(table.to, state.doc.length)).to;
   const slice: SliceText = (f, t) => state.doc.sliceString(f, t);
-  const model = tableModelFromTree(slice, table);
+  const model = tableModelFromTree(slice, table, state.facet(wikiLinkResolver));
   if (model === undefined) return undefined;
   const src = state.doc.sliceString(from, to);
   return Decoration.replace({

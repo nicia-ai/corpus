@@ -1,5 +1,6 @@
 import type { CollectionSlug, DocumentSlug } from "../ids";
 import type { CollectionDelivery } from "../store/domain/collection-expand";
+import type { LinkKind } from "../store/domain/links";
 
 export type SaveDocumentInput = Readonly<{
   slug: DocumentSlug;
@@ -141,12 +142,15 @@ export type ProjectUsageSnapshot = Readonly<{
   storedMarkdownBytes: number;
 }>;
 
-// The agent-facing folder projection — one resolved relative link.
-// `documentSlug` is null when it dangles (escapes the project, or no
-// document lives at the resolved path); `inCollection` is true when
-// that target is itself in this collection's resolved expansion.
+// The agent-facing folder projection — one resolved link. `kind` is
+// how the link was written (`path` = CommonMark relative destination,
+// `wiki` = Obsidian-style `[[target]]`). `documentSlug` is null when it
+// dangles (escapes the project, or nothing matches the target);
+// `inCollection` is true when that target is itself in this
+// collection's resolved expansion.
 export type OutlineLink = Readonly<{
   target: string;
+  kind: LinkKind;
   resolvedPath: string | null;
   documentSlug: string | null;
   inCollection: boolean;
