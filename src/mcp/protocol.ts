@@ -55,18 +55,19 @@ export const TOOLS = [
   {
     name: "suggest_edit",
     description:
-      "Propose an edit to a document in the bound Collection as a reviewable suggestion. The edit is NEVER auto-applied — a human accepts or rejects it per hunk. Read the document first, then pass its `slug` (or Corpus `path`), the full `proposedMarkdown` body, and the `baseDocVersion` you read. If the document has moved on since you read it you get a conflict and must re-read.",
+      "Propose an edit to a document in the bound Collection — or a NEW document — as a reviewable suggestion. Nothing is EVER auto-applied: a human accepts or rejects it. To edit: read the document first, then pass its `slug` (or Corpus `path`), the full `proposedMarkdown` body, and the `baseDocVersion` you read; if the document has moved on since, you get a conflict and must re-read. To propose a new document: pass a slug or Corpus path that doesn't exist yet with `baseDocVersion: 0` and the full body; when a human applies it, the document is created and joins this Collection.",
     inputSchema: {
       type: "object",
       properties: {
         slug: {
           type: "string",
-          description: "Document slug (or use `path`).",
+          description:
+            "Document slug (or use `path`). A slug that doesn't exist yet, with baseDocVersion 0, proposes a new document.",
         },
         path: {
           type: "string",
           description:
-            "Corpus path such as `docs/brand-voice.md` (alternative to `slug`).",
+            "Corpus path such as `docs/brand-voice.md` (alternative to `slug`). A path that doesn't exist yet, with baseDocVersion 0, proposes a new document at that path.",
         },
         proposedMarkdown: {
           type: "string",
@@ -75,7 +76,7 @@ export const TOOLS = [
         baseDocVersion: {
           type: "number",
           description:
-            "The docVersion you read; must still be head or you get a conflict.",
+            "The docVersion you read; must still be head or you get a conflict. Pass 0 with a new slug/path to propose creating a document.",
         },
       },
       required: ["proposedMarkdown", "baseDocVersion"],

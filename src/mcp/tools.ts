@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { asCollectionSlug, asDocumentSlug } from "../ids";
 import { parseFrontmatter } from "../store/domain/frontmatter";
+import { CREATE_PROPOSAL_BASE_VERSION } from "../store/domain/suggestion";
+import { compact } from "../util";
 
 import type { McpExecutor } from "./executor";
 import { boundCollectionSlug, documentSlugFromArgs, strField } from "./params";
@@ -16,6 +18,71 @@ const SuggestEditArgs = z.object({
   proposedMarkdown: z.string(),
   baseDocVersion: z.number().int().nonnegative(),
 });
+
+// Create-proposals mint a NEW identifier, so unlike reads/edits (which
+// accept whatever slug already exists) the proposed slug is format-checked
+// at the boundary: the normalizeSlug alphabet — lowercase alphanumerics
+// joined by single leading/trailing-free dashes.
+const CREATE_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+// Shared create path for suggest_edit's baseDocVersion-0 form. The scoped
+// executor pins the proposal's origin to its bound Collection; `taken` is
+// mapped to CONFLICT — the same existence grade the REST create path
+// already exposes through its 403, so an agent can pick another name.
+async function proposeCreate(
+  id: unknown,
+  exec: McpExecutor,
+  target: Readonly<{ slug?: string; path?: string }>,
+  proposedMarkdown: string,
+): Promise<unknown> {
+  if (proposedMarkdown.trim() === "") {
+    return err(
+      id,
+      ERR.INVALID_PARAMS,
+      "a new-document proposal needs non-empty proposedMarkdown",
+    );
+  }
+  if (target.slug !== undefined && !CREATE_SLUG.test(target.slug)) {
+    return err(
+      id,
+      ERR.INVALID_PARAMS,
+      "not a valid new document slug (lowercase letters, digits, single dashes)",
+    );
+  }
+  const res = await exec.suggestCreate(
+    exec.callerRef,
+    compact({
+      slug: target.slug !== undefined ? asDocumentSlug(target.slug) : undefined,
+      path: target.path,
+      proposedMarkdown,
+    }),
+  );
+  if (res.ok) {
+    return ok(
+      id,
+      textContent(
+        JSON.stringify({
+          suggestionId: res.suggestionId,
+          created: true,
+          slug: res.slug,
+          note: "new-document proposal filed; a human reviews and applies it",
+        }),
+      ),
+    );
+  }
+  if (res.reason === "taken") {
+    return err(
+      id,
+      ERR.CONFLICT,
+      "that slug or path already belongs to a document; propose a different one",
+    );
+  }
+  return err(
+    id,
+    ERR.INVALID_PARAMS,
+    "suggest_edit with baseDocVersion 0 needs a valid new slug or Corpus path",
+  );
+}
 
 type ToolHandler = (args: {
   id: unknown;
@@ -113,6 +180,17 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       return err(id, ERR.INVALID_PARAMS, "suggest_edit needs slug or path");
     }
     if (!requested.ok) {
+      // The path resolved to nothing. With baseDocVersion 0 that is a
+      // NEW-document proposal; any other base version keeps the existing
+      // NOT_FOUND contract.
+      if (fields.data.baseDocVersion === CREATE_PROPOSAL_BASE_VERSION) {
+        return proposeCreate(
+          id,
+          exec,
+          { path: requested.label },
+          fields.data.proposedMarkdown,
+        );
+      }
       return err(id, ERR.NOT_FOUND, `unknown document: ${requested.label}`);
     }
     const res = await exec.suggestEdit(
@@ -151,10 +229,27 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
             }),
           ),
         );
-      case "missing":
-        // The doc was resolvable at slug-resolution but is gone now (or was
-        // gated out by the scoped executor): same NOT_FOUND, no oracle.
+      case "missing": {
+        // Not a member of the bound Collection (or gone). With
+        // baseDocVersion 0 this is the slug form of a NEW-document
+        // proposal; otherwise the same NOT_FOUND as before, no oracle. A
+        // slug that exists elsewhere in the project comes back from the
+        // create path as CONFLICT ("taken") — the grade of existence the
+        // REST create path already exposes.
+        if (fields.data.baseDocVersion === CREATE_PROPOSAL_BASE_VERSION) {
+          const rawPath = strField(params, "path");
+          return proposeCreate(
+            id,
+            exec,
+            {
+              slug: requested.label,
+              ...(rawPath === "" ? {} : { path: rawPath }),
+            },
+            fields.data.proposedMarkdown,
+          );
+        }
         return err(id, ERR.NOT_FOUND, `unknown document: ${requested.label}`);
+      }
       default: {
         // Exhaustive: a new CreateSuggestionResult reason is a compile error
         // here, with a defensive runtime fallback if one ever slips through.

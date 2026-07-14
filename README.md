@@ -52,10 +52,11 @@ version history.
 - **MCP** — each project exposes an MCP endpoint (`/mcp`) authenticated
   by OAuth bearer token or `cck_`-prefixed API key. An agent only ever
   sees the Collection its credential is bound to. It reads documents and
-  collections, and can **propose edits** with `suggest_edit` — a
-  reviewable suggestion a human accepts or rejects per hunk, never an
-  auto-applied write. Agents propose; only humans approve. Review state
-  (comments, suggestion threads) is otherwise off-MCP.
+  collections, and can **propose edits — and new documents** with
+  `suggest_edit`: a reviewable suggestion a human accepts or rejects
+  (per hunk for edits; create-then-attach for a proposed new document),
+  never an auto-applied write. Agents propose; only humans approve.
+  Review state (comments, suggestion threads) is otherwise off-MCP.
 - **CLI** — a Git-free `pull`/`push` tool (`pnpm corpus`) over a
   collection-scoped REST surface (`/api/v1/docs`), for editing documents
   from a terminal or CI with the same optimistic-concurrency contract as

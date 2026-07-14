@@ -13,10 +13,7 @@ import {
   documentFilenameChanged,
   documentRenamed,
 } from "../../store/domain/change-events";
-import {
-  frontmatterTitle,
-  parseFrontmatter,
-} from "../../store/domain/frontmatter";
+import { resolveTitle } from "../../store/domain/frontmatter";
 import {
   basename,
   defaultFilename,
@@ -26,7 +23,6 @@ import {
 } from "../../store/domain/paths";
 import { nextVersion } from "../../store/domain/versioning";
 import { documentVersion } from "../../store/domain/versions";
-import { inferTitle } from "../../util";
 import type {
   CommandOutcome,
   DomainChange,
@@ -109,12 +105,21 @@ export async function saveDocumentCommand(
     );
     if (occupant !== undefined) throw new FilenameCollision();
   }
-  const parsed = parseFrontmatter(input.markdown);
-  const body = parsed.ok ? parsed.body : input.markdown;
-  const fmTitle = parsed.ok ? frontmatterTitle(parsed.frontmatter) : undefined;
-  const title =
-    input.title ?? fmTitle ?? inferTitle(body, stripExtension(filename));
+  const title = resolveTitle({
+    markdown: input.markdown,
+    fallback: stripExtension(filename),
+    override: input.title,
+  });
   const docVersion = nextVersion(head, input.clientVersion);
+  // A brand-new document claims its slug: any open create-proposal for the
+  // same slug is now off-base, exactly like an edit suggestion whose head
+  // moved. saveDocumentCommand is the single creation chokepoint (editor,
+  // REST create, import, apply-create), so the stale rule lives here once.
+  // The apply-create path stales itself here too, then records its own
+  // terminal `applied` status afterwards — deliberate ordering.
+  if (head === undefined) {
+    await ctx.u.suggestions.staleOpenForDoc(input.slug);
+  }
   await ctx.u.blobs.put(contentHash, input.markdown, ctx.now);
   const node = await ctx.u.docs.put(
     input.slug,

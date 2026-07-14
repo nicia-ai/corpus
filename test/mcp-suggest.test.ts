@@ -169,6 +169,80 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     expect(res.error?.code).toBe(ERR.INVALID_PARAMS);
   });
 
+  it("baseDocVersion 0 with a fresh slug files a NEW-document proposal", async () => {
+    const { store, exec } = await setup();
+    const res = await call(exec, {
+      slug: "brand-new",
+      proposedMarkdown: "# Brand New\n\nbody",
+      baseDocVersion: 0,
+    });
+    const json = resultJson(res);
+    expect(json).toMatchObject({ created: true, slug: "brand-new" });
+    expect(typeof json.suggestionId).toBe("number");
+
+    const proposals = await store.listCreateProposals();
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({
+      slug: "brand-new",
+      title: "Brand New",
+      channel: "mcp",
+      createdBy: "apikey:agent-a",
+    });
+    // Nothing was created — the proposal is review state, not a document.
+    expect(await store.getDocument(docSlug("brand-new"))).toBeUndefined();
+  });
+
+  it("baseDocVersion 0 with a fresh Corpus path derives the slug like the import path", async () => {
+    const { store, exec } = await setup();
+    const res = await call(exec, {
+      path: "wiki/answer-x.md",
+      proposedMarkdown: "answer body",
+      baseDocVersion: 0,
+    });
+    expect(resultJson(res)).toMatchObject({
+      created: true,
+      slug: "wiki-answer-x",
+    });
+    const proposals = await store.listCreateProposals();
+    expect(proposals[0]?.path).toBe("wiki/answer-x.md");
+  });
+
+  it("CRITICAL: baseDocVersion 0 against a slug that exists OUTSIDE the bound Collection writes nothing", async () => {
+    const { store, exec } = await setup();
+    const res = await call(exec, {
+      slug: "doc-b",
+      proposedMarkdown: "intruder create",
+      baseDocVersion: 0,
+    });
+    // Same existence grade the REST create path exposes via its 403: the
+    // identifier is unavailable, and no proposal row is written.
+    expect(res.error?.code).toBe(ERR.CONFLICT);
+    expect(await store.listCreateProposals()).toHaveLength(0);
+    expect(await store.listSuggestions(docSlug("doc-b"))).toHaveLength(0);
+  });
+
+  it("baseDocVersion 0 with a malformed slug → INVALID_PARAMS", async () => {
+    const { store, exec } = await setup();
+    const res = await call(exec, {
+      slug: "Not A Slug!",
+      proposedMarkdown: "x",
+      baseDocVersion: 0,
+    });
+    expect(res.error?.code).toBe(ERR.INVALID_PARAMS);
+    expect(await store.listCreateProposals()).toHaveLength(0);
+  });
+
+  it("baseDocVersion 0 with empty proposedMarkdown → INVALID_PARAMS", async () => {
+    const { store, exec } = await setup();
+    const res = await call(exec, {
+      slug: "brand-new",
+      proposedMarkdown: "  \n",
+      baseDocVersion: 0,
+    });
+    expect(res.error?.code).toBe(ERR.INVALID_PARAMS);
+    expect(await store.listCreateProposals()).toHaveLength(0);
+  });
+
   it("suggest_edit is advertised in tools/list with a real input schema", async () => {
     const { exec } = await setup();
     const res = (await handleMcp(

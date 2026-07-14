@@ -35,8 +35,10 @@ import {
   renameFolder,
   type FolderRow,
 } from "@/lib/server/folders";
+import type { CreateProposalItem } from "@/lib/server/suggestions";
 
 import { DocumentUploader } from "./DocumentUploader";
+import { ProposedDocuments } from "./ProposedDocuments";
 
 // `null` parent = project root. A drag carries one item; a drop targets
 // a folder slug or the root.
@@ -60,11 +62,13 @@ export function DocumentsPage({
   documents,
   folders,
   collections,
+  proposals,
 }: Readonly<{
   projectId: ProjectId;
   documents: readonly DocListItem[];
   folders: readonly FolderRow[];
   collections: readonly ColListItem[];
+  proposals: readonly CreateProposalItem[];
 }>): React.ReactElement {
   const router = useRouter();
 
@@ -333,6 +337,12 @@ export function DocumentsPage({
           </>
         }
       />
+
+      {proposals.length > 0 && (
+        <div className="mb-6">
+          <ProposedDocuments projectId={projectId} proposals={proposals} />
+        </div>
+      )}
 
       {error && <p className="mb-3 text-base text-red-600">{error}</p>}
       {/* Page-level (not inside the selection bar) so a per-row delete
