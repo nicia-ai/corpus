@@ -160,10 +160,13 @@ responsibility.
   `(connectionId, projectId)` — a stray id from another project is a
   silent no-op. Regression keeper:
   `test/connections-cross-tenant.test.ts`.
-- Invitations: no `sendInvitationEmail`,
-  `requireEmailVerificationOnInvitation: false`. The owner shares the
-  `/invite/<id>` link out-of-band; Better Auth binds acceptance to the
-  invited email (intentional, not a bug).
+- Invitations: created by the team server fn (not Better Auth's
+  `sendInvitationEmail`), `requireEmailVerificationOnInvitation: false`.
+  The invite email sends fail-soft through `src/control/email.ts`
+  (Cloudflare Email Service or Resend, `EMAIL_PROVIDER`/`EMAIL_FROM` in
+  `src/control/env.ts`); the `/invite/<id>` link is always shown for
+  out-of-band sharing. Better Auth binds acceptance to the invited
+  email (intentional, not a bug).
 - `BETTER_AUTH_SECRET` is dev-only in `wrangler.jsonc` (`.min(32)` in
   `src/control/env.ts`); production sets it via `wrangler secret put`.
 - Verify library APIs against the installed version + current docs —

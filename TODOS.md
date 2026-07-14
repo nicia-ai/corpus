@@ -21,13 +21,17 @@ wedge (2026-06-07). Each item has enough context to pick up cold.
 - **What:** Email a document's collection members when an agent files a
   suggestion, so an absent human learns without reopening the tab.
 - **Why:** The presence WebSocket only nudges _connected_ clients
-  (`broadcastChanged`). The per-doc pending count (shipping now) covers in-app;
-  email covers the absent human — needed for a real product, not for the beta.
-- **Where to start:** Builds on the `openCountsByDoc` count work. Needs an email
-  sender (none wired today — note Better Auth invitations are deliberately
-  link-only, so there is no existing transactional email path) + member-address
-  lookup via the control DB.
-- **Depends on:** per-doc count surface; an email transport decision.
+  (`broadcastChanged`). The per-doc pending count covers in-app; email
+  covers the absent human — needed for a real product, not for the beta.
+- **Where to start:** The transport already exists — `sendEmail` in
+  `src/control/email.ts` (Cloudflare Email Service or Resend, selected by
+  `EMAIL_PROVIDER`/`EMAIL_FROM`/`RESEND_API_KEY` in `src/control/env.ts`),
+  already used fail-soft by invite sending in `src/lib/server/team.ts`.
+  Remaining work is the feature itself: member-address lookup via the
+  control DB, a recipient policy (all org members? owners?), and a hook at
+  the suggestion write's transport seam (the `/mcp` path in `src/api.ts`
+  has `env`; the DO does not send email).
+- **Depends on:** per-doc count surface (shipped); recipient policy.
 - **Blocks:** public launch.
 
 ## Zod-retrofit the existing MCP read tools
