@@ -138,6 +138,66 @@ describe("bulk folder upload — segment collisions roll back atomically", () =>
   });
 });
 
+// Filename uniqueness is a per-folder sibling namespace (derived path =
+// folder ancestry + filename), so the same filename may live in different
+// folders. The import path must scope its brand-new-filename collision
+// check to the document's target folder, not always the project root.
+describe("bulk folder upload — filename collision is folder-scoped", () => {
+  it("a folder-placed import may reuse a filename that a ROOT document holds", async () => {
+    const store = freshProject();
+    await store.importDocumentAtPath({
+      path: "index.md",
+      markdown: "# Root index",
+      changedBy: by,
+    });
+
+    // `wiki/index.md` lives in the `wiki` folder — a different sibling
+    // namespace from the root `index.md`, so it must be accepted.
+    const r = await store.importDocumentAtPath({
+      path: "wiki/index.md",
+      markdown: "# Wiki index",
+      changedBy: by,
+    });
+    expect(r).toMatchObject({
+      ok: true,
+      slug: "wiki-index",
+      created: true,
+      folderSlug: "wiki",
+    });
+
+    expect([...(await store.listDocumentSlugs())].sort()).toEqual([
+      "index",
+      "wiki-index",
+    ]);
+    expect((await store.getDocument(docSlug("index")))?.markdown).toContain(
+      "Root index",
+    );
+    expect(
+      (await store.getDocument(docSlug("wiki-index")))?.markdown,
+    ).toContain("Wiki index");
+  });
+
+  it("the same filename lands in two different folders", async () => {
+    const store = freshProject();
+    const a = await store.importDocumentAtPath({
+      path: "a/readme.md",
+      markdown: "A",
+      changedBy: by,
+    });
+    const b = await store.importDocumentAtPath({
+      path: "b/readme.md",
+      markdown: "B",
+      changedBy: by,
+    });
+    expect(a).toMatchObject({ ok: true, slug: "a-readme", folderSlug: "a" });
+    expect(b).toMatchObject({ ok: true, slug: "b-readme", folderSlug: "b" });
+    expect([...(await store.listDocumentSlugs())].sort()).toEqual([
+      "a-readme",
+      "b-readme",
+    ]);
+  });
+});
+
 // The link TARGET (the whole folder vs. the individual documents) is
 // derived by the DO from what the import actually created — never from a
 // client flag — so these assert behavior per upload shape. Uploads link

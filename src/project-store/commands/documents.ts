@@ -68,6 +68,13 @@ export type SaveDocumentCommandInput = Readonly<{
   markdown: string;
   title?: string;
   filename?: string;
+  // The folder this document lives in (null = project root). Scopes the
+  // brand-new-filename collision check to the correct sibling namespace,
+  // since filename uniqueness is per-folder (the path is folder ancestry +
+  // filename), not global. Defaults to root for the editor / REST-create
+  // paths, which never folder-place; the import path passes its resolved
+  // target folder.
+  folderSlug?: string | null;
   clientVersion: number;
   changedBy: string;
   // Set only by the apply-suggestion path: the durable origin recorded on
@@ -92,10 +99,14 @@ export async function saveDocumentCommand(
   // filename can collide: the auto-default is always free (it's derived
   // from the already-unique slug), and an existing document keeps its own
   // filename slot unless renamed via renameFilenameCommand, which already
-  // guards this. Editor-created documents are never folder-placed, so the
-  // whole root namespace is the collision scope (folderSlug: null).
+  // guards this. The collision scope is the document's own folder sibling
+  // namespace (root for editor/REST create; the resolved target folder for
+  // a folder-placed import) — filename uniqueness is per-folder, not global.
   if (head === undefined && input.filename !== undefined) {
-    const occupant = await ctx.u.folders.documentAt(null, filename);
+    const occupant = await ctx.u.folders.documentAt(
+      input.folderSlug ?? null,
+      filename,
+    );
     if (occupant !== undefined) throw new FilenameCollision();
   }
   const parsed = parseFrontmatter(input.markdown);
@@ -344,6 +355,7 @@ export async function importDocumentAtPathCommand(
     slug,
     markdown: input.markdown,
     filename,
+    folderSlug,
     clientVersion: head?.docVersion ?? 0,
     changedBy: input.changedBy,
   });
