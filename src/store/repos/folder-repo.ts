@@ -369,6 +369,23 @@ export class FolderRepo {
   // longer occupy the slot, so a re-upload at the same path creates a
   // fresh document rather than silently writing a new version onto a
   // hidden (archived) head.
+  // Resolve an EXISTING folder chain by directory names (root → leaf),
+  // creating nothing: the leaf folder's slug, null for an empty chain
+  // (project root), or undefined when any segment is missing — the path
+  // cannot be occupied by a document if its folder doesn't exist yet.
+  async folderAt(
+    dirSegments: readonly string[],
+  ): Promise<string | null | undefined> {
+    let parentSlug: string | null = null;
+    for (const name of dirSegments) {
+      const children = await this.childFolders(parentSlug);
+      const match = children.find((c) => c.node.name === name);
+      if (match === undefined) return undefined;
+      parentSlug = match.node.slug;
+    }
+    return parentSlug;
+  }
+
   async documentAt(
     folderSlug: string | null,
     filename: string,

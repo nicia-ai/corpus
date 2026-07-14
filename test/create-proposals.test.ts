@@ -69,6 +69,44 @@ describe("create-proposals (DO + D1 integration)", () => {
     expect(await store.listCreateProposals()).toHaveLength(0);
   });
 
+  it("propose rejects a path whose slot an existing document occupies", async () => {
+    const store = freshStore("cprop");
+    await seedCollection(store);
+    await store.importDocumentAtPath({
+      path: "wiki/notes.md",
+      markdown: "# occupied",
+      changedBy: "alice",
+    });
+    // Same path → the slot is taken project-wide, even though the derived
+    // slug would steer around the collision (it must fail at propose time,
+    // not linger as a proposal that can only go stale at apply).
+    const taken = await store.suggestCreate(AGENT, {
+      path: "wiki/notes.md",
+      proposedMarkdown: BODY,
+      originCollectionSlug: colSlug("col-a"),
+    });
+    expect(taken).toEqual({ ok: false, reason: "taken" });
+    // Root-level slots are checked the same way…
+    await store.importDocumentAtPath({
+      path: "readme.md",
+      markdown: "# root",
+      changedBy: "alice",
+    });
+    const rootTaken = await store.suggestCreate(AGENT, {
+      path: "readme.md",
+      proposedMarkdown: BODY,
+      originCollectionSlug: colSlug("col-a"),
+    });
+    expect(rootTaken).toEqual({ ok: false, reason: "taken" });
+    // …and a missing folder chain leaves the slot free.
+    const fresh = await store.suggestCreate(AGENT, {
+      path: "brand-new/notes.md",
+      proposedMarkdown: BODY,
+      originCollectionSlug: colSlug("col-a"),
+    });
+    expect(fresh.ok).toBe(true);
+  });
+
   it("apply succeeds for a folder-placed path when a root document shares the filename", async () => {
     const store = freshStore("cprop");
     await seedCollection(store);

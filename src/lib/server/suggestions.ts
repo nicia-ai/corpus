@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { connectControlDb } from "@/control/db";
+import { entitlementsOf } from "@/control/entitlements";
 import { resolveAuthorLabels } from "@/control/users";
 import { asDocumentSlug } from "@/ids";
 import type { CallerChannel } from "@/ids";
@@ -14,6 +15,7 @@ import type {
   CreateSuggestionResult,
   SuggestionView,
 } from "@/project-store/commands/suggestions";
+import { utf8Bytes } from "@/util";
 
 export type {
   ApplyCreateProposalResult,
@@ -132,6 +134,23 @@ export const applyCreateProposal = createServerFn({ method: "POST" })
   .validator(z.object({ suggestionId: z.number().int() }))
   .handler(async ({ data, context }): Promise<ApplyCreateProposalResult> => {
     const c = srv(context);
+    // Apply CREATES canonical markdown, so it owes the same quota check
+    // as the direct create path (documents.ts saveDocument). The open
+    // proposal supplies the byte count; a proposal that is no longer
+    // open creates nothing, so the DO's own not-open result suffices.
+    const proposal = (await storeOf(c).listCreateProposals()).find(
+      (candidate) => candidate.id === data.suggestionId,
+    );
+    if (proposal !== undefined) {
+      await entitlementsOf(c).assertWithinQuota({
+        action: "document_create",
+        userId: c.project?.userId,
+        organizationId: c.project?.organizationId,
+        projectId: c.project?.projectId,
+        amount: 1,
+        bytes: utf8Bytes(proposal.proposedMarkdown),
+      });
+    }
     return storeOf(c).applyCreateProposal({
       suggestionId: data.suggestionId,
       appliedBy: changedBy(c),

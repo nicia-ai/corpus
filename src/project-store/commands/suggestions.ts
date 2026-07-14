@@ -187,6 +187,19 @@ export async function createDocProposalCommand(
   if (input.slug === undefined && path === undefined) {
     return commandOutcome({ ok: false, reason: "invalid" });
   }
+  // A proposal must be appliable when accepted: reject a path whose slot
+  // an existing document already occupies (project-wide, not just the
+  // bound collection), instead of filing a proposal that can only ever
+  // go stale at apply. A missing folder chain means the slot is free.
+  if (path !== undefined) {
+    const dirFolder = await ctx.u.folders.folderAt(segments.slice(0, -1));
+    if (
+      dirFolder !== undefined &&
+      (await ctx.u.folders.documentAt(dirFolder, basename(path))) !== undefined
+    ) {
+      return commandOutcome({ ok: false, reason: "taken" });
+    }
+  }
   let slug: DocumentSlug;
   if (input.slug !== undefined) {
     slug = input.slug;

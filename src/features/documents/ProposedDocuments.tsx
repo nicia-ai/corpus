@@ -58,13 +58,24 @@ function ProposalCard({
     showToast(`Created “${proposal.title}”.`);
     await router.invalidate();
   });
-  const { pending: rejecting, run: reject } = useSubmit(async () => {
-    await rejectSuggestion({
+  const {
+    pending: rejecting,
+    error: rejectError,
+    run: reject,
+  } = useSubmit(async () => {
+    const r = await rejectSuggestion({
       data: { projectId, suggestionId: proposal.id },
     });
+    // A concurrent apply/reject already resolved it — refresh so the
+    // card reflects reality instead of toasting a false success.
+    if (!r.ok) {
+      await router.invalidate();
+      throw new Error("Proposal was already resolved.");
+    }
     showToast("Proposal rejected.");
     await router.invalidate();
   });
+  const acting = applying || rejecting;
 
   return (
     <article className={cardClass("space-y-3 px-4 py-3")}>
@@ -97,12 +108,12 @@ function ProposalCard({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button disabled={applying} onClick={() => void apply()}>
+        <Button disabled={acting} onClick={() => void apply()}>
           Create document
         </Button>
         <Button
           variant="secondary"
-          disabled={rejecting}
+          disabled={acting}
           onClick={() => void reject()}
         >
           Reject
@@ -110,8 +121,10 @@ function ProposalCard({
         <Button variant="secondary" onClick={() => setPreview((p) => !p)}>
           {preview ? "Hide preview" : "Show preview"}
         </Button>
-        {applyError !== undefined && (
-          <span className="text-sm text-red-600">{applyError}</span>
+        {(applyError ?? rejectError) !== undefined && (
+          <span className="text-sm text-red-600">
+            {applyError ?? rejectError}
+          </span>
         )}
       </div>
     </article>
