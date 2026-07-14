@@ -54,6 +54,59 @@ const SKIP_MARKS: ReadonlySet<string> = new Set([
   "StrikethroughMark",
 ]);
 
+// A destination link's href plus the [labelFrom, labelTo) range of its
+// label — between the `[` opener and the `]` closer. Shared by the
+// table-cell walker (spanFor) and live-preview's decorateLink so the two
+// readers agree on link geometry. Undefined for a reference / bracket-only
+// link (no URL child) or malformed delimiters; the caller renders those
+// literally. A URL-bearing Link's LinkMark children are exactly `[ ] ( )`,
+// so the `]` closer is always the second — index it directly.
+export type LinkParts = Readonly<{
+  href: string;
+  labelFrom: number;
+  labelTo: number;
+}>;
+
+export function linkParts(
+  slice: SliceText,
+  node: InlineNode,
+): LinkParts | undefined {
+  const url = node.getChild("URL");
+  if (url === null) return undefined;
+  const marks = node.getChildren("LinkMark");
+  const open = marks[0];
+  const close = marks[1];
+  if (open === undefined || close === undefined || close.from <= open.to) {
+    return undefined;
+  }
+  return {
+    href: slice(url.from, url.to),
+    labelFrom: open.to,
+    labelTo: close.from,
+  };
+}
+
+// An image's resolved src and (plain-text) alt. Shared by the table-cell
+// walker and live-preview's decorateImage. Undefined when there is no URL
+// child, an empty src, or missing brackets — the caller leaves the raw
+// `![…]` source in place. `![` and `]` are always the first two LinkMarks.
+export type ImageParts = Readonly<{ src: string; alt: string }>;
+
+export function imageParts(
+  slice: SliceText,
+  node: InlineNode,
+): ImageParts | undefined {
+  const url = node.getChild("URL");
+  if (url === null) return undefined;
+  const src = slice(url.from, url.to);
+  if (src === "") return undefined;
+  const marks = node.getChildren("LinkMark");
+  const open = marks[0];
+  const close = marks[1];
+  if (open === undefined || close === undefined) return undefined;
+  return { src, alt: slice(open.to, close.from) };
+}
+
 // The spans for one handled child node, or undefined for a node kind
 // this walker doesn't model — its raw text then flows through unchanged
 // (the safe default for entities, raw HTML, and future node types).
@@ -84,24 +137,21 @@ function spanFor(
       return [{ kind: "code", text }];
     }
     case "Link": {
-      const url = node.getChild("URL");
-      if (url === null) {
-        // No destination (`[text]`): render literally, brackets included —
-        // LinkMark is not skipped, so the recursion emits them as text
-        // while still rendering any emphasis inside the label.
+      // No destination (`[text]`): render literally, brackets included —
+      // LinkMark is not skipped, so the recursion emits them as text while
+      // still rendering any emphasis inside the label.
+      if (node.getChild("URL") === null) {
         return inlineSpans(slice, node, node.from, node.to);
       }
-      const marks = node.getChildren("LinkMark");
-      const open = marks[0];
-      const close = marks.find((m) => slice(m.from, m.to) === "]") ?? marks[1];
-      if (open === undefined || close === undefined || close.from <= open.to) {
+      const parts = linkParts(slice, node);
+      if (parts === undefined) {
         return [{ kind: "text", text: slice(node.from, node.to) }];
       }
       return [
         {
           kind: "link",
-          href: slice(url.from, url.to),
-          children: inlineSpans(slice, node, open.to, close.from),
+          href: parts.href,
+          children: inlineSpans(slice, node, parts.labelFrom, parts.labelTo),
         },
       ];
     }
@@ -120,18 +170,10 @@ function spanFor(
         },
       ];
     case "Image": {
-      const url = node.getChild("URL");
-      if (url === null) return undefined;
-      const marks = node.getChildren("LinkMark");
-      const altStart = marks[0]?.to ?? node.from + 2;
-      const altEnd = marks[1]?.from ?? node.to;
-      return [
-        {
-          kind: "image",
-          src: slice(url.from, url.to),
-          alt: slice(altStart, altEnd),
-        },
-      ];
+      const parts = imageParts(slice, node);
+      return parts === undefined
+        ? undefined
+        : [{ kind: "image", src: parts.src, alt: parts.alt }];
     }
     case "Escape":
       // `\|`, `\*`, … — render the escaped character alone.

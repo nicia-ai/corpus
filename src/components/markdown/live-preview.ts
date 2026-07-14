@@ -16,6 +16,7 @@ import {
 } from "@codemirror/view";
 
 import { frontmatter, imageReplace, tableReplace } from "./block-widgets";
+import { imageParts, linkParts, type SliceText } from "./inline-spans";
 
 // The Lezer syntax-node type, derived from CodeMirror's public API rather than
 // importing @lezer/common directly (it is a transitive dep, not hoisted under
@@ -265,22 +266,17 @@ function decorateLink(
   state: EditorState,
   node: MdNode,
 ): void {
-  const urlNode = node.getChild("URL");
-  if (!urlNode) return; // reference / bracket-only links stay raw
+  const slice: SliceText = (f, t) => state.doc.sliceString(f, t);
+  const parts = linkParts(slice, node);
+  if (!parts) return; // reference / bracket-only links stay raw
   if (touchesSelection(state, node.from, node.to)) return;
-  const marks = node.getChildren("LinkMark");
-  const open = marks[0];
-  const close =
-    marks.find((m) => state.doc.sliceString(m.from, m.to) === "]") ?? marks[1];
-  if (!open || !close || close.from <= open.to) return;
-  const url = state.doc.sliceString(urlNode.from, urlNode.to);
-  if (node.from < open.to) decos.push(hide(node.from, open.to));
-  if (close.from < node.to) decos.push(hide(close.from, node.to));
+  if (node.from < parts.labelFrom) decos.push(hide(node.from, parts.labelFrom));
+  if (parts.labelTo < node.to) decos.push(hide(parts.labelTo, node.to));
   decos.push(
     Decoration.mark({
       class: "cm-md-link",
-      attributes: { title: url, "data-href": url },
-    }).range(open.to, close.from),
+      attributes: { title: parts.href, "data-href": parts.href },
+    }).range(parts.labelFrom, parts.labelTo),
   );
 }
 
@@ -294,14 +290,10 @@ function decorateImage(
   node: MdNode,
 ): void {
   if (touchesLine(state, node.from, node.to)) return; // editing: raw source
-  const urlNode = node.getChild("URL");
-  const src = urlNode ? state.doc.sliceString(urlNode.from, urlNode.to) : "";
-  if (src === "") return;
-  const linkMarks = node.getChildren("LinkMark");
-  const altStart = linkMarks[0]?.to ?? node.from + 2;
-  const altEnd = linkMarks[1]?.from ?? node.to;
-  const alt = state.doc.sliceString(altStart, altEnd);
-  decos.push(imageReplace(node.from, node.to, src, alt));
+  const slice: SliceText = (f, t) => state.doc.sliceString(f, t);
+  const parts = imageParts(slice, node);
+  if (!parts) return;
+  decos.push(imageReplace(node.from, node.to, parts.src, parts.alt));
 }
 
 // Task list items: swap the `[ ]`/`[x]` marker for a checkbox widget and strike
