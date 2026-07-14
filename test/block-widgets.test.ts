@@ -1,26 +1,124 @@
+import { markdownLanguage } from "@codemirror/lang-markdown";
 import { describe, expect, it } from "vitest";
 
-import { parseTable } from "@/components/markdown/block-widgets";
+import {
+  type TableModel,
+  tableModelFromTree,
+} from "@/components/markdown/block-widgets";
+import { type InlineSpan, spanText } from "@/components/markdown/inline-spans";
 
-// parseTable/splitRow must agree with remark-gfm's cell splitting (the read
-// view's renderer for the same document) — including honoring a
-// backslash-escaped `|` as literal cell content, not a column separator.
+// The table widget's model is walked from the SAME Lezer tree the editor
+// parses, and must agree with remark-gfm (the read view's renderer for the
+// same document): inline markdown renders inside cells, a backslash-escaped
+// `|` is literal cell content, an empty interior cell keeps its column.
+// Tests parse standalone table sources with the editor's own language.
 
-describe("parseTable", () => {
+function model(src: string): TableModel | undefined {
+  const table = markdownLanguage.parser.parse(src).topNode.getChild("Table");
+  if (table === null) return undefined;
+  return tableModelFromTree((from, to) => src.slice(from, to), table);
+}
+
+function texts(cells: readonly (readonly InlineSpan[])[]): string[] {
+  return cells.map(spanText);
+}
+
+describe("tableModelFromTree", () => {
   it("splits ordinary rows on unescaped pipes", () => {
-    const model = parseTable("| a | b |\n| - | - |\n| one | two |");
-    expect(model?.header).toEqual(["a", "b"]);
-    expect(model?.rows).toEqual([["one", "two"]]);
+    const m = model("| a | b |\n| - | - |\n| one | two |");
+    expect(texts(m?.header ?? [])).toEqual(["a", "b"]);
+    expect((m?.rows ?? []).map(texts)).toEqual([["one", "two"]]);
   });
 
   it("keeps a backslash-escaped pipe as literal cell content", () => {
-    const model = parseTable("| a | b |\n| - | - |\n| one\\|two | three |");
-    expect(model?.header).toEqual(["a", "b"]);
-    expect(model?.rows).toEqual([["one|two", "three"]]);
+    const m = model("| a | b |\n| - | - |\n| one\\|two | three |");
+    expect((m?.rows ?? []).map(texts)).toEqual([["one|two", "three"]]);
   });
 
-  it("preserves a genuinely empty interior cell", () => {
-    const model = parseTable("| a | b |\n| - | - |\n| one || two |");
-    expect(model?.rows).toEqual([["one", "", "two"]]);
+  it("preserves a genuinely empty interior cell's column", () => {
+    const m = model("| a | b | c |\n| - | - | - |\n| one || two |");
+    expect((m?.rows ?? []).map(texts)).toEqual([["one", "", "two"]]);
+  });
+
+  it("parses column alignments from the delimiter line", () => {
+    const m = model("| a | b | c |\n| :-: | ---: | --- |\n| x | y | z |");
+    expect(m?.aligns).toEqual(["center", "right", ""]);
+  });
+
+  it("renders strong emphasis as a span, not literal asterisks", () => {
+    const m = model("| a |\n| - |\n| **Milestone Name** |");
+    const cell = m?.rows[0]?.[0] ?? [];
+    expect(cell).toEqual([
+      { kind: "strong", children: [{ kind: "text", text: "Milestone Name" }] },
+    ]);
+    expect(spanText(cell)).toBe("Milestone Name");
+  });
+
+  it("renders inline code, strikethrough, and emphasis inside one cell", () => {
+    const m = model("| a |\n| - |\n| run `pnpm check` then ~~skip~~ *ship* |");
+    const cell = m?.rows[0]?.[0] ?? [];
+    expect(cell).toEqual([
+      { kind: "text", text: "run " },
+      { kind: "code", text: "pnpm check" },
+      { kind: "text", text: " then " },
+      { kind: "del", children: [{ kind: "text", text: "skip" }] },
+      { kind: "text", text: " " },
+      { kind: "em", children: [{ kind: "text", text: "ship" }] },
+    ]);
+  });
+
+  it("renders a destination link with href and label", () => {
+    const m = model("| a |\n| - |\n| see [the spec](spec.md 't') here |");
+    const cell = m?.rows[0]?.[0] ?? [];
+    expect(cell).toEqual([
+      { kind: "text", text: "see " },
+      {
+        kind: "link",
+        href: "spec.md",
+        children: [{ kind: "text", text: "the spec" }],
+      },
+      { kind: "text", text: " here" },
+    ]);
+  });
+
+  it("keeps a bracket-only reference literal, brackets included", () => {
+    const m = model("| a |\n| - |\n| a [shortcut ref] stays |");
+    expect(spanText(m?.rows[0]?.[0] ?? [])).toBe("a [shortcut ref] stays");
+  });
+
+  it("keeps a wikilink literal (no wikilink support yet)", () => {
+    const m = model("| a |\n| - |\n| see [[element-1-prospects]] |");
+    expect(spanText(m?.rows[0]?.[0] ?? [])).toBe("see [[element-1-prospects]]");
+  });
+
+  it("renders emphasis nested inside a link label", () => {
+    const m = model("| a |\n| - |\n| [**bold** label](x.md) |");
+    const cell = m?.rows[0]?.[0] ?? [];
+    expect(cell).toEqual([
+      {
+        kind: "link",
+        href: "x.md",
+        children: [
+          { kind: "strong", children: [{ kind: "text", text: "bold" }] },
+          { kind: "text", text: " label" },
+        ],
+      },
+    ]);
+  });
+
+  it("renders an image as an image span with src and alt", () => {
+    const m = model("| a |\n| - |\n| ![journey](assets/j.png) |");
+    expect(m?.rows[0]?.[0]).toEqual([
+      { kind: "image", src: "assets/j.png", alt: "journey" },
+    ]);
+  });
+
+  it("leaves a ragged short row's missing columns empty at render", () => {
+    const m = model("| a | b |\n| - | - |\n| only |");
+    expect(texts(m?.rows[0] ?? [])).toEqual(["only"]);
+  });
+
+  it("returns undefined for a non-table source", () => {
+    expect(model("just a paragraph")).toBeUndefined();
   });
 });

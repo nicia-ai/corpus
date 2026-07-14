@@ -7,6 +7,13 @@ import {
   parseFrontmatter,
 } from "@/store/domain/frontmatter";
 
+import {
+  type InlineNode,
+  type InlineSpan,
+  inlineSpans,
+  type SliceText,
+} from "./inline-spans";
+
 // Block-level live-preview widgets — the rich renderers that make the editor a
 // faithful read surface: images, GFM tables (read-only render; edit the
 // source), and the leading YAML frontmatter as a metadata panel. Each is the
@@ -17,6 +24,18 @@ import {
 // scanner generates them.
 
 // --- Images -----------------------------------------------------------------
+
+// Shared by the standalone image widget and images inside table cells.
+const IMAGE_CLASS = "my-1 inline-block max-w-full rounded-md align-bottom";
+
+function imageElement(src: string, alt: string): HTMLElement {
+  const img = document.createElement("img");
+  img.className = IMAGE_CLASS;
+  img.src = src;
+  img.alt = alt;
+  img.loading = "lazy";
+  return img;
+}
 
 class ImageWidget extends WidgetType {
   constructor(
@@ -29,12 +48,7 @@ class ImageWidget extends WidgetType {
     return other.src === this.src && other.alt === this.alt;
   }
   override toDOM(): HTMLElement {
-    const img = document.createElement("img");
-    img.className = "my-1 inline-block max-w-full rounded-md align-bottom";
-    img.src = this.src;
-    img.alt = this.alt;
-    img.loading = "lazy";
-    return img;
+    return imageElement(this.src, this.alt);
   }
   // A click places the caret in the image syntax (revealing it for editing).
   override ignoreEvent(): boolean {
@@ -62,61 +76,148 @@ export function imageReplace(
 
 type TableAlign = "left" | "right" | "center" | "";
 
-// Exported for unit testing splitRow/parseTable's cell-splitting behavior
-// directly, without standing up an EditorState + widget DOM.
+// The rendered model of a GFM table: per-column alignment plus header and
+// body cells as inline-span lists (inline-spans.ts), so `**bold**`,
+// `` `code` ``, links, and images render inside cells exactly as they do
+// in body prose — matching remark-gfm, the read view's renderer for the
+// same document. Cells are trimmed span lists indexed by COLUMN (an empty
+// interior cell `| a || b |` keeps its slot). Exported for unit testing
+// the tree walk directly, without standing up an EditorState + widget DOM.
 export type TableModel = Readonly<{
   aligns: readonly TableAlign[];
-  header: readonly string[];
-  rows: readonly (readonly string[])[];
+  header: readonly (readonly InlineSpan[])[];
+  rows: readonly (readonly (readonly InlineSpan[])[])[];
 }>;
 
-// Split a GFM table row into cells, honoring a backslash-escaped `|` as
-// literal cell content rather than a column separator (matching remark-gfm,
-// the read view's renderer for the same document — a naive `split("|")`
-// diverges from it on any escaped pipe).
-function splitRow(line: string): string[] {
-  const trimmed = line.trim();
-  const cells: string[] = [];
-  let cell = "";
-  for (let i = 0; i < trimmed.length; i += 1) {
-    const ch = trimmed[i] ?? "";
-    if (ch === "\\" && trimmed[i + 1] === "|") {
-      cell += "|";
-      i += 1;
-      continue;
-    }
-    if (ch === "|") {
-      cells.push(cell.trim());
-      cell = "";
-      continue;
-    }
-    cell += ch;
+// Column alignments from the delimiter line (`| :-: | ---: |`). Escaped
+// pipes can't occur in a well-formed delimiter row, so a plain split is
+// faithful here (cell content goes through the syntax tree instead). The
+// optional leading/trailing `|` leaves empty boundary segments; interior
+// alignment cells are never empty (each is `---`/`:-:`), so dropping every
+// empty segment keeps exactly the real columns.
+function parseAligns(delimLine: string): TableAlign[] {
+  return delimLine
+    .trim()
+    .split("|")
+    .map((c) => c.trim())
+    .filter((c) => c !== "")
+    .map((d) => {
+      const l = d.startsWith(":");
+      const r = d.endsWith(":");
+      return l && r ? "center" : r ? "right" : l ? "left" : "";
+    });
+}
+
+// Lezer's cell text spans include surrounding whitespace padding
+// (`| one |` → cell node covers `one` only, but be safe for edge parses);
+// GFM trims cell content, so trim the leading/trailing text spans.
+function trimSpans(spans: readonly InlineSpan[]): readonly InlineSpan[] {
+  const first = spans[0];
+  const last = spans[spans.length - 1];
+  const needsTrim =
+    (first?.kind === "text" && /^\s/.test(first.text)) ||
+    (last?.kind === "text" && /\s$/.test(last.text));
+  if (!needsTrim) return spans; // Lezer already excludes cell padding.
+  const out = [...spans];
+  const head = out[0];
+  if (head?.kind === "text") {
+    const text = head.text.replace(/^\s+/, "");
+    if (text === "") out.shift();
+    else out[0] = { kind: "text", text };
   }
-  cells.push(cell.trim());
-  // A leading/trailing `|` is an optional GFM row delimiter, producing an
-  // empty boundary cell here; drop it. An escaped `\|` never reaches this
-  // branch as a delimiter, so a genuinely empty interior cell (`| a || b |`)
-  // is preserved.
-  if (cells.length > 1 && cells[0] === "") cells.shift();
-  if (cells.length > 1 && cells[cells.length - 1] === "") cells.pop();
+  const tail = out[out.length - 1];
+  if (tail?.kind === "text") {
+    const text = tail.text.replace(/\s+$/, "");
+    if (text === "") out.pop();
+    else out[out.length - 1] = { kind: "text", text };
+  }
+  return out;
+}
+
+// Cells of one header/body row, indexed by column. Lezer emits NO
+// TableCell node for an empty interior cell (`| one || two |` is
+// delimiter, cell, delimiter, delimiter, cell, delimiter), so the column
+// index is derived from the count of delimiters preceding the cell — a
+// leading `|` opens column 0, a pipe-less row starts directly in it.
+function rowCells(
+  slice: SliceText,
+  row: InlineNode,
+): readonly (readonly InlineSpan[])[] {
+  const cells: (readonly InlineSpan[])[] = [];
+  const leadingDelim = row.firstChild?.name === "TableDelimiter";
+  let delims = 0;
+  for (let child = row.firstChild; child !== null; child = child.nextSibling) {
+    if (child.name === "TableDelimiter") {
+      delims += 1;
+    } else if (child.name === "TableCell") {
+      const col = delims - (leadingDelim ? 1 : 0);
+      cells[col] = trimSpans(inlineSpans(slice, child, child.from, child.to));
+    }
+  }
+  for (let i = 0; i < cells.length; i += 1) cells[i] ??= [];
   return cells;
 }
 
-export function parseTable(src: string): TableModel | undefined {
-  const [headerLine, delimLine, ...bodyLines] = src
-    .split("\n")
-    .filter((l) => l.trim() !== "");
-  if (headerLine === undefined || delimLine === undefined) return undefined;
-  const aligns: TableAlign[] = splitRow(delimLine).map((d) => {
-    const l = d.startsWith(":");
-    const r = d.endsWith(":");
-    return l && r ? "center" : r ? "right" : l ? "left" : "";
-  });
+// Build the rendered table model from the already-parsed Table node —
+// the cells' inline markdown arrives pre-parsed as the node's children,
+// so no second parser pass runs and the widget can never disagree with
+// the editor's own syntax tree. Undefined when the node lacks a header
+// (left as raw source by the caller).
+export function tableModelFromTree(
+  slice: SliceText,
+  table: InlineNode,
+): TableModel | undefined {
+  const headerNode = table.getChild("TableHeader");
+  if (headerNode === null) return undefined;
+  // The alignment line is the TableDelimiter that is a DIRECT child of
+  // Table (cell separators are children of TableHeader/TableRow).
+  const delim = table.getChild("TableDelimiter");
   return {
-    aligns,
-    header: splitRow(headerLine),
-    rows: bodyLines.map(splitRow),
+    aligns: delim === null ? [] : parseAligns(slice(delim.from, delim.to)),
+    header: rowCells(slice, headerNode),
+    rows: table.getChildren("TableRow").map((r) => rowCells(slice, r)),
   };
+}
+
+// Render a span list into a parent element. Inline visuals reuse the
+// editor's own classes (`cm-md-code`, `cm-md-link`) so designTheme rules
+// style widget internals identically to body prose; links carry
+// `data-href`, so the editor's shared mousedown handler (plain click in
+// read views, Cmd/Ctrl-click while editing) follows them from inside the
+// table exactly like a body link.
+function appendSpans(el: HTMLElement, spans: readonly InlineSpan[]): void {
+  for (const s of spans) {
+    switch (s.kind) {
+      case "text":
+        el.appendChild(document.createTextNode(s.text));
+        break;
+      case "code": {
+        const code = document.createElement("code");
+        code.className = "cm-md-code";
+        code.textContent = s.text;
+        el.appendChild(code);
+        break;
+      }
+      case "image":
+        el.appendChild(imageElement(s.src, s.alt));
+        break;
+      case "link": {
+        const link = document.createElement("span");
+        link.className = "cm-md-link";
+        link.title = s.href;
+        link.setAttribute("data-href", s.href);
+        appendSpans(link, s.children);
+        el.appendChild(link);
+        break;
+      }
+      default: {
+        const wrap = document.createElement(s.kind);
+        appendSpans(wrap, s.children);
+        el.appendChild(wrap);
+        break;
+      }
+    }
+  }
 }
 
 class TableWidget extends WidgetType {
@@ -136,19 +237,29 @@ class TableWidget extends WidgetType {
     const { model } = this;
     const table = document.createElement("table");
     table.className = "my-3 border-collapse text-sm";
-    const alignClass = (i: number): string =>
-      model.aligns[i] === "right"
-        ? "text-right"
-        : model.aligns[i] === "center"
-          ? "text-center"
-          : "text-left";
+    // Alignment is fixed per column, so precompute each column's header and
+    // body class once instead of re-deriving the ternary for every cell.
+    const colCount = model.header.length;
+    const thClass: string[] = [];
+    const tdClass: string[] = [];
+    for (let i = 0; i < colCount; i += 1) {
+      const align =
+        model.aligns[i] === "right"
+          ? "text-right"
+          : model.aligns[i] === "center"
+            ? "text-center"
+            : "text-left";
+      thClass[i] =
+        `border border-slate-200 bg-slate-50 px-3 py-2 font-medium ${align}`;
+      tdClass[i] = `border border-slate-200 px-3 py-2 ${align}`;
+    }
 
     const thead = document.createElement("thead");
     const htr = document.createElement("tr");
     model.header.forEach((cell, i) => {
       const th = document.createElement("th");
-      th.className = `border border-slate-200 bg-slate-50 px-3 py-2 font-medium ${alignClass(i)}`;
-      th.textContent = cell;
+      th.className = thClass[i] ?? "";
+      appendSpans(th, cell);
       htr.appendChild(th);
     });
     thead.appendChild(htr);
@@ -157,12 +268,12 @@ class TableWidget extends WidgetType {
     const tbody = document.createElement("tbody");
     for (const row of model.rows) {
       const tr = document.createElement("tr");
-      model.header.forEach((_h, i) => {
+      for (let i = 0; i < colCount; i += 1) {
         const td = document.createElement("td");
-        td.className = `border border-slate-200 px-3 py-2 ${alignClass(i)}`;
-        td.textContent = row[i] ?? "";
+        td.className = tdClass[i] ?? "";
+        appendSpans(td, row[i] ?? []);
         tr.appendChild(td);
-      });
+      }
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
@@ -174,19 +285,19 @@ class TableWidget extends WidgetType {
 }
 
 // Replace a GFM table block with a rendered (read-only) <table>. The caller
-// passes the Table node range; the block range is line-aligned. Returns
-// undefined when the source doesn't parse as a table (left as raw source).
-// The parsed model is passed to the widget so toDOM doesn't re-parse.
+// passes the parsed Table node; the block range is line-aligned. Returns
+// undefined when the node lacks a table header (left as raw source).
+// The model is built here so the widget's toDOM never re-walks the tree.
 export function tableReplace(
   state: EditorState,
-  nodeFrom: number,
-  nodeTo: number,
+  table: InlineNode,
 ): CmRange<Decoration> | undefined {
-  const from = state.doc.lineAt(nodeFrom).from;
-  const to = state.doc.lineAt(Math.min(nodeTo, state.doc.length)).to;
-  const src = state.doc.sliceString(from, to);
-  const model = parseTable(src);
+  const from = state.doc.lineAt(table.from).from;
+  const to = state.doc.lineAt(Math.min(table.to, state.doc.length)).to;
+  const slice: SliceText = (f, t) => state.doc.sliceString(f, t);
+  const model = tableModelFromTree(slice, table);
   if (model === undefined) return undefined;
+  const src = state.doc.sliceString(from, to);
   return Decoration.replace({
     widget: new TableWidget(src, model),
     block: true,
