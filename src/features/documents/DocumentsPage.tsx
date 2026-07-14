@@ -118,31 +118,47 @@ export function DocumentsPage({
   // in-flight call so a stale result can't repopulate a cleared box.
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<readonly SearchHit[]>();
+  const [searchError, setSearchError] = useState(false);
   const searchSeq = useRef(0);
   const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchActive = query.trim().length >= MIN_QUERY_CHARS;
+
+  function runSearch(q: string, seq: number): void {
+    searchDocuments({ data: { projectId, query: q } })
+      .then((res) => {
+        if (seq !== searchSeq.current) return;
+        setHits(res);
+      })
+      .catch(() => {
+        if (seq !== searchSeq.current) return;
+        // A failed request is distinct from an empty result — surface it so
+        // the user can retry rather than read an outage as "no matches".
+        setSearchError(true);
+      });
+  }
 
   function onQueryChange(next: string): void {
     setQuery(next);
     if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
     const q = next.trim();
     searchSeq.current += 1;
+    setSearchError(false);
     if (q.length < MIN_QUERY_CHARS) {
       setHits(undefined);
       return;
     }
     const seq = searchSeq.current;
-    searchTimer.current = setTimeout(() => {
-      searchDocuments({ data: { projectId, query: q } })
-        .then((res) => {
-          if (seq !== searchSeq.current) return;
-          setHits(res);
-        })
-        .catch(() => {
-          if (seq !== searchSeq.current) return;
-          setHits([]);
-        });
-    }, 250);
+    searchTimer.current = setTimeout(() => runSearch(q, seq), 250);
+  }
+
+  function retrySearch(): void {
+    const q = query.trim();
+    if (q.length < MIN_QUERY_CHARS) return;
+    if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
+    searchSeq.current += 1;
+    setSearchError(false);
+    setHits(undefined);
+    runSearch(q, searchSeq.current);
   }
 
   // Document slugs in visible top-to-bottom order (collapsed folders
@@ -472,7 +488,13 @@ export function DocumentsPage({
           documents={documents}
         />
       ) : searchActive ? (
-        <SearchResults projectId={projectId} hits={hits} query={query.trim()} />
+        <SearchResults
+          projectId={projectId}
+          hits={hits}
+          error={searchError}
+          onRetry={retrySearch}
+          query={query.trim()}
+        />
       ) : (
         <div
           onDragOver={(e) => {
@@ -545,12 +567,33 @@ export function DocumentsPage({
 function SearchResults({
   projectId,
   hits,
+  error,
+  onRetry,
   query,
 }: Readonly<{
   projectId: ProjectId;
   hits: readonly SearchHit[] | undefined;
+  error: boolean;
+  onRetry: () => void;
   query: string;
 }>): React.ReactElement {
+  if (error) {
+    return (
+      <p
+        className="flex items-center gap-3 px-3 py-6 text-sm text-slate-500"
+        aria-live="polite"
+      >
+        Search failed.
+        <button
+          type="button"
+          onClick={onRetry}
+          className="font-medium text-slate-900 hover:underline"
+        >
+          Retry
+        </button>
+      </p>
+    );
+  }
   // hits === undefined only while a query >= MIN_QUERY_CHARS is in flight
   // (a shorter query clears the box and hides this view entirely).
   if (hits === undefined) {
@@ -584,30 +627,35 @@ function SearchResults({
               {h.path}
             </span>
           </span>
-          <SearchSnippetLine hit={h} />
+          <SearchSnippetLine snippet={h.snippet} />
         </Link>
       ))}
     </div>
   );
 }
 
-// The matched span is emphasized with a neutral slate wash + weight (no
-// new accent color); offsets come from the server so the highlighted
-// occurrence is exactly the one the snippet was cut around.
+// The FTS snippet arrives with `<mark>…</mark>` around the matched terms.
+// Split on those delimiters and emphasize the matched segments with a
+// neutral slate wash + weight (no new accent color). Every segment renders
+// as escaped text, never HTML, so document content cannot inject markup.
 function SearchSnippetLine({
-  hit,
-}: Readonly<{ hit: SearchHit }>): React.ReactElement {
-  const { snippet, matchStart, matchEnd } = hit;
-  if (matchStart === undefined || matchEnd === undefined) {
-    return <p className="mt-0.5 truncate text-sm text-slate-500">{snippet}</p>;
-  }
+  snippet,
+}: Readonly<{ snippet: string }>): React.ReactElement {
+  const parts = snippet.split(/<\/?mark>/);
   return (
     <p className="mt-0.5 truncate text-sm text-slate-500">
-      {snippet.slice(0, matchStart)}
-      <mark className="rounded-sm bg-slate-200 px-0.5 font-medium text-slate-900">
-        {snippet.slice(matchStart, matchEnd)}
-      </mark>
-      {snippet.slice(matchEnd)}
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <mark
+            key={i}
+            className="rounded-sm bg-slate-200 px-0.5 font-medium text-slate-900"
+          >
+            {part}
+          </mark>
+        ) : (
+          part
+        ),
+      )}
     </p>
   );
 }

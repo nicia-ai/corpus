@@ -14,6 +14,8 @@ export type DocumentFields = Readonly<{
   contentHash: string;
   docVersion: number;
   updatedAt: string;
+  // Derived fulltext index content (title + body); see `deriveSearchText`.
+  searchText: string;
 }>;
 
 // All Document node reads/writes. The node carries only the head pointer
@@ -55,13 +57,20 @@ export class DocumentRepo {
   // Title is head-pointer metadata, not content — a rename touches only
   // `title`/`updatedAt` (partial-merge update), never `contentHash` or
   // `docVersion`, so it does NOT cut a DocumentVersion and the
-  // content-addressed chain is untouched.
+  // content-addressed chain is untouched. `searchText` rides along because
+  // the title is part of the fulltext content (recomputed by the caller,
+  // which owns the body).
   async rename(
     node: DocumentNode,
     title: string,
+    searchText: string,
     updatedAt: string,
   ): Promise<DocumentNode> {
-    return this.g.nodes.Document.update(node.id, { title, updatedAt });
+    return this.g.nodes.Document.update(node.id, {
+      title,
+      searchText,
+      updatedAt,
+    });
   }
 
   // `filename` is also head-pointer metadata (the path segment for link
@@ -80,7 +89,23 @@ export class DocumentRepo {
   // primitive as `rename`/`setFilename`). The content-addressed
   // `DocumentVersion` chain and blobs are deliberately untouched so
   // existing CollectionVersion snapshots and bundle export still resolve.
+  // `searchText` is cleared so the archived doc leaves the fulltext index
+  // (there is no unarchive path; a future one would recompute it).
   async archive(node: DocumentNode, archivedAt: string): Promise<DocumentNode> {
-    return this.g.nodes.Document.update(node.id, { archivedAt });
+    return this.g.nodes.Document.update(node.id, {
+      archivedAt,
+      searchText: "",
+    });
+  }
+
+  // Set only the derived fulltext content — used to backfill documents
+  // written before `searchText` existed. Touches nothing else (not
+  // `updatedAt`): a reindex is not a head edit. The write auto-syncs the
+  // FTS index for this node.
+  async setSearchText(
+    node: DocumentNode,
+    searchText: string,
+  ): Promise<DocumentNode> {
+    return this.g.nodes.Document.update(node.id, { searchText });
   }
 }

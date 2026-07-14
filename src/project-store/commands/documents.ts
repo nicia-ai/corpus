@@ -21,6 +21,7 @@ import {
   pathSegments,
   stripExtension,
 } from "../../store/domain/paths";
+import { deriveSearchText } from "../../store/domain/search";
 import { nextVersion } from "../../store/domain/versioning";
 import { documentVersion } from "../../store/domain/versions";
 import type {
@@ -123,7 +124,14 @@ export async function saveDocumentCommand(
   await ctx.u.blobs.put(contentHash, input.markdown, ctx.now);
   const node = await ctx.u.docs.put(
     input.slug,
-    { title, filename, contentHash, docVersion, updatedAt: ctx.now },
+    {
+      title,
+      filename,
+      contentHash,
+      docVersion,
+      updatedAt: ctx.now,
+      searchText: deriveSearchText(title, input.markdown),
+    },
     head,
   );
   await ctx.u.versions.appendDocumentVersion(
@@ -177,7 +185,15 @@ export async function renameDocumentCommand(
   if (node.title === input.title) {
     return { result: { status: "noop" }, changes: [] };
   }
-  await ctx.u.docs.rename(node, input.title, ctx.now);
+  // Title is part of the fulltext content; recompute `searchText` against the
+  // unchanged body (the rename doesn't touch the blob).
+  const body = (await ctx.u.blobs.get(node.contentHash)) ?? "";
+  await ctx.u.docs.rename(
+    node,
+    input.title,
+    deriveSearchText(input.title, body),
+    ctx.now,
+  );
   const change = documentRenamed({
     slug: input.slug,
     docVersion: node.docVersion,

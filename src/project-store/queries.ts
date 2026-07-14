@@ -1,4 +1,7 @@
+import type { Store } from "@nicia-ai/typegraph";
+
 import { assembleCollection, type AssembledCollection } from "../corpus";
+import type { CanonicalGraph } from "../graph";
 import {
   asCollectionSlug,
   asDocumentSlug,
@@ -17,7 +20,7 @@ import {
   resolveRelativePath,
   resolveWikiPath,
 } from "../store/domain/paths";
-import { headSnippet, searchSnippet } from "../store/domain/search";
+import { toSafeFulltextQuery } from "../store/domain/search";
 import {
   type DocumentChain,
   verifyChain,
@@ -27,7 +30,6 @@ import type {
   CollectionDocView,
   CollectionMeta,
 } from "../store/repos/collection-graph";
-import type { DocumentNode } from "../store/repos/document-repo";
 import { compact, estimateTokens, pluralize } from "../util";
 
 import type {
@@ -99,62 +101,51 @@ export async function listDocumentsProjection(u: ProjectUnit): Promise<
 const SEARCH_RESULT_LIMIT = 20;
 const SEARCH_MIN_QUERY = 2;
 
-// Case-insensitive substring search over live document HEADS (title +
-// body). A bounded in-memory scan, deliberately: a project DO holds at
-// most hundreds of documents, drizzle-kit owns all DDL (no hand-rolled
-// FTS table), and the blobs are one batched read. Title hits rank ahead
-// of body-only hits; each rank orders by path for determinism.
+// Full-text search over live document heads, backed by TypeGraph's FTS5
+// index on the derived `searchText` field (title + body). Tokenized +
+// bm25-ranked, so multi-word queries match non-adjacent terms and results
+// come back by relevance, not path order. The query is reduced to safe word
+// tokens (`toSafeFulltextQuery`) and run in "plain" mode, so no FTS5 operator
+// syntax can inject or throw. Archived docs are excluded because their
+// `searchText` is cleared on archive; the `archivedAt` skip is defence in
+// depth. Path is derived per hit (≤ SEARCH_RESULT_LIMIT), never over the
+// whole corpus.
 export async function searchDocumentsProjection(
+  store: Store<CanonicalGraph>,
   u: ProjectUnit,
   query: string,
 ): Promise<readonly DocumentSearchHit[]> {
-  const needle = query.trim().toLowerCase();
+  const needle = toSafeFulltextQuery(query);
   if (needle.length < SEARCH_MIN_QUERY) return [];
-  const docs = (await u.docs.listAll()).filter(
-    (d) => d.archivedAt === undefined,
-  );
-  // Reuse the already-fetched, already-filtered doc set for path derivation
-  // so the live-document scan runs once, not twice.
-  const [bytes, { slugToPath }] = await Promise.all([
-    u.blobs.getMany(docs.map((d) => d.contentHash)),
-    pathIndex(u, docs),
-  ]);
-  const titleHits: DocumentSearchHit[] = [];
-  const bodyHits: DocumentSearchHit[] = [];
-  for (const d of docs) {
-    const body = bytes.get(d.contentHash) ?? "";
-    const lowerBody = body.toLowerCase();
-    const bodyIndex = lowerBody.indexOf(needle);
-    const inTitle = d.title.toLowerCase().includes(needle);
-    if (!inTitle && bodyIndex === -1) continue;
-    // Point the preview at the body match when there is one; a title-only
-    // hit previews the body head instead. `bodyIndex` is an index into the
-    // lowercased body, but searchSnippet slices the original — and
-    // `toLowerCase()` is not always length-preserving (e.g. U+0130 İ),
-    // which would shift the highlight off the match. Only highlight when
-    // the body is 1:1 under lowercasing; otherwise fall back to an
-    // un-highlighted head preview rather than emit a wrong span.
-    const canHighlight = bodyIndex !== -1 && lowerBody.length === body.length;
-    const cut = canHighlight
-      ? searchSnippet(body, bodyIndex, needle.length)
-      : headSnippet(body);
-    const hit: DocumentSearchHit = compact({
-      slug: d.slug,
-      title: d.title,
-      path: slugToPath.get(d.slug) ?? d.filename,
-      docVersion: d.docVersion,
-      field: inTitle ? ("title" as const) : ("body" as const),
-      snippet: cut.snippet,
-      matchStart: cut.matchStart,
-      matchEnd: cut.matchEnd,
+  const hits = await store.search.fulltext("Document", {
+    query: needle,
+    limit: SEARCH_RESULT_LIMIT,
+    mode: "plain",
+    includeSnippets: true,
+  });
+  const out: DocumentSearchHit[] = [];
+  for (const { node, snippet } of hits) {
+    if (node.archivedAt !== undefined) continue;
+    out.push({
+      slug: node.slug,
+      title: node.title,
+      path: await hitPath(u, node.slug, node.filename),
+      snippet: snippet ?? "",
     });
-    (inTitle ? titleHits : bodyHits).push(hit);
   }
-  const byPath = (a: DocumentSearchHit, b: DocumentSearchHit): number =>
-    a.path.localeCompare(b.path);
-  titleHits.sort(byPath);
-  bodyHits.sort(byPath);
-  return [...titleHits, ...bodyHits].slice(0, SEARCH_RESULT_LIMIT);
+  return out;
+}
+
+// Derive one hit's display path (folder ancestry + filename) without
+// scanning the whole document set — the search result is already bounded.
+async function hitPath(
+  u: ProjectUnit,
+  slug: string,
+  filename: string,
+): Promise<string> {
+  const folder = await u.folders.documentFolder(asDocumentSlug(slug));
+  const names = folder != null ? await u.folders.ancestorNames(folder) : [];
+  return derivePath(names, filename);
 }
 
 // Every LIVE document as a link-resolution ref (slug + derived path).
@@ -501,10 +492,7 @@ export async function resolvedViews(
     }));
 }
 
-export async function pathIndex(
-  u: ProjectUnit,
-  liveDocs?: readonly DocumentNode[],
-): Promise<
+export async function pathIndex(u: ProjectUnit): Promise<
   Readonly<{
     pathToSlug: Map<string, string>;
     slugToPath: Map<string, string>;
@@ -513,9 +501,7 @@ export async function pathIndex(
   // Archived docs retain their in_folder edge but must not occupy a path —
   // otherwise a re-upload at the same path collides and relative-link
   // resolution becomes non-deterministic (can resolve to the hidden doc).
-  // A caller that already holds the live-doc set can pass it to avoid a
-  // second full scan; filter defensively either way.
-  const docs = (liveDocs ?? (await u.docs.listAll())).filter(
+  const docs = (await u.docs.listAll()).filter(
     (d) => d.archivedAt === undefined,
   );
   const folders = await Promise.all(

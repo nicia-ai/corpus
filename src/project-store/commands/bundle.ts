@@ -15,6 +15,7 @@ import {
 } from "../../store/domain/bundle";
 import { DEFAULT_COLLECTION_DELIVERY } from "../../store/domain/collection-expand";
 import { defaultFilename } from "../../store/domain/paths";
+import { deriveSearchText } from "../../store/domain/search";
 import { collectionVersionSnapshot } from "../../store/domain/versions";
 import { compact, DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS } from "../../util";
 import type { CommandOutcome, ProjectCommandContext } from "../command";
@@ -54,6 +55,9 @@ export async function importBundleCommand(
         contentHash: entry.meta.contentHash,
         docVersion: entry.meta.docVersion,
         updatedAt: entry.meta.updatedAt,
+        // Derived, not carried by the bundle — recomputed from the imported
+        // head so the reconstructed store is searchable.
+        searchText: deriveSearchText(entry.meta.title, entry.md),
       },
       undefined,
     );

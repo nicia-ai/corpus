@@ -160,6 +160,7 @@ import { chooseImportLinkTarget } from "./store/domain/import-link";
 import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
 import type { RetentionPolicy } from "./store/domain/retention";
+import { deriveSearchText } from "./store/domain/search";
 import { isCreateProposal } from "./store/domain/suggestion";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
@@ -208,6 +209,10 @@ export type {
 } from "./project-store/contracts";
 
 type Unit = ProjectUnit;
+
+// Persistent marker: set once the one-time `searchText` backfill has run for
+// this DO, so a reindex never repeats across restarts.
+const SEARCH_BACKFILL_KEY = "search:backfilled:v1";
 
 // Maps a committed command's outcome to the real-time change to broadcast,
 // or undefined to fall back to the domain-derived change. Always a function
@@ -321,6 +326,10 @@ export class ProjectStore extends DurableObject<Env> {
   // Bounded by the active set of callers × collections.
   private readonly readDedupCache = new Map<string, string>();
   private instrumentationOutbox: ProjectInstrumentation | undefined;
+  // Cleared until the one-time `searchText` backfill has run for this DO
+  // (see `ensureSearchBackfilled`); mirrors a persistent storage marker so
+  // the reindex happens at most once per DO, not once per instance.
+  private searchBackfilled = false;
 
   private ledgerDb(): LedgerDb {
     return (this.ledger ??= asLedgerDb(drizzle(this.ctx.storage)));
@@ -651,7 +660,52 @@ export class ProjectStore extends DurableObject<Env> {
   }
 
   async searchDocuments(query: string): Promise<readonly DocumentSearchHit[]> {
-    return searchDocumentsProjection(await this.read(), query);
+    await this.ensureSearchBackfilled();
+    const store = await this.ensureStore();
+    return searchDocumentsProjection(
+      store,
+      this.unit(store, this.ledgerDb()),
+      query,
+    );
+  }
+
+  // Populate `searchText` for live documents written before the field
+  // existed (pre-FTS DOs); new and edited documents index on write.
+  // Idempotent — skips docs already carrying content. When any doc was
+  // backfilled, follow with a `rebuildFulltext` pass: a document written
+  // before the FTS table existed has no index row at all, and rebuild is
+  // the sanctioned way to index rows that predate a `searchable()` field.
+  // Returns the number of documents (re)indexed.
+  async reindexSearchText(): Promise<number> {
+    const reindexed = await this.write(async (u) => {
+      const docs = (await u.docs.listAll()).filter(
+        (d) => d.archivedAt === undefined,
+      );
+      let count = 0;
+      for (const d of docs) {
+        if (d.searchText !== undefined && d.searchText !== "") continue;
+        const body = (await u.blobs.get(d.contentHash)) ?? "";
+        await u.docs.setSearchText(d, deriveSearchText(d.title, body));
+        count += 1;
+      }
+      return count;
+    });
+    if (reindexed > 0) {
+      const store = await this.ensureStore();
+      await store.search.rebuildFulltext("Document");
+    }
+    return reindexed;
+  }
+
+  private async ensureSearchBackfilled(): Promise<void> {
+    if (this.searchBackfilled) return;
+    if (await this.ctx.storage.get<boolean>(SEARCH_BACKFILL_KEY)) {
+      this.searchBackfilled = true;
+      return;
+    }
+    await this.reindexSearchText();
+    await this.ctx.storage.put(SEARCH_BACKFILL_KEY, true);
+    this.searchBackfilled = true;
   }
 
   async listCollections(): Promise<readonly CollectionMeta[]> {
