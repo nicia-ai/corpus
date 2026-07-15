@@ -7,7 +7,7 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DocRow } from "@/components/documents/DocRow";
 import { FolderHeader } from "@/components/documents/FolderHeader";
@@ -78,25 +78,33 @@ export function DocumentsPage({
 }>): React.ReactElement {
   const router = useRouter();
 
-  const childFolders = new Map<DropTarget, FolderRow[]>();
-  for (const f of [...folders].sort((a, b) => a.position - b.position)) {
-    const list = childFolders.get(f.parentSlug) ?? [];
-    list.push(f);
-    childFolders.set(f.parentSlug, list);
-  }
-  const docsByFolder = new Map<DropTarget, DocListItem[]>();
-  for (const d of documents) {
-    const list = docsByFolder.get(d.folderSlug) ?? [];
-    list.push(d);
-    docsByFolder.set(d.folderSlug, list);
-  }
+  const { childFolders, docsByFolder } = useMemo(() => {
+    const nextFolders = new Map<DropTarget, FolderRow[]>();
+    for (const folder of [...folders].sort((a, b) => a.position - b.position)) {
+      const list = nextFolders.get(folder.parentSlug) ?? [];
+      list.push(folder);
+      nextFolders.set(folder.parentSlug, list);
+    }
+    const nextDocs = new Map<DropTarget, DocListItem[]>();
+    for (const document of documents) {
+      const list = nextDocs.get(document.folderSlug) ?? [];
+      list.push(document);
+      nextDocs.set(document.folderSlug, list);
+    }
+    return { childFolders: nextFolders, docsByFolder: nextDocs };
+  }, [documents, folders]);
 
   const drag = useRef<Dragged | null>(null);
   // `undefined` = nothing hovered; `null` = root container; a string =
   // that folder slug.
   const [over, setOver] = useState<DropTarget | undefined>(undefined);
   const [expanded, setExpanded] = useState<ReadonlySet<FolderSlug>>(
-    () => new Set(folders.map((f) => f.slug)),
+    () =>
+      new Set(
+        folders
+          .filter((folder) => folder.parentSlug === null)
+          .map((folder) => folder.slug),
+      ),
   );
   const [creatingIn, setCreatingIn] = useState<DropTarget | undefined>();
   const [selected, setSelected] = useState<ReadonlySet<DocumentSlug>>(
@@ -122,6 +130,16 @@ export function DocumentsPage({
   const searchSeq = useRef(0);
   const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchActive = query.trim().length >= MIN_QUERY_CHARS;
+
+  useEffect(
+    () => () => {
+      if (searchTimer.current !== undefined) {
+        clearTimeout(searchTimer.current);
+      }
+      searchSeq.current += 1;
+    },
+    [],
+  );
 
   function runSearch(q: string, seq: number): void {
     searchDocuments({ data: { projectId, query: q } })
@@ -165,7 +183,7 @@ export function DocumentsPage({
   // Document slugs in visible top-to-bottom order (collapsed folders
   // contribute nothing) — the index space shift-click ranges over.
   // Mirrors the render: a folder's subfolders precede its own documents.
-  const visibleDocOrder = ((): DocumentSlug[] => {
+  const visibleDocOrder = useMemo((): DocumentSlug[] => {
     const out: DocumentSlug[] = [];
     const walk = (parent: DropTarget): void => {
       for (const f of childFolders.get(parent) ?? []) {
@@ -175,7 +193,7 @@ export function DocumentsPage({
     };
     walk(null);
     return out;
-  })();
+  }, [childFolders, docsByFolder, expanded]);
 
   function selectOne(slug: DocumentSlug, range: boolean) {
     if (range && anchor.current !== null) {
@@ -362,7 +380,7 @@ export function DocumentsPage({
               onClick={() => setCreatingIn(null)}
               className={buttonStyles(
                 "secondary",
-                "inline-flex items-center gap-1.5",
+                "inline-flex items-center gap-1.5!",
               )}
             >
               <FolderPlus className="size-4" />
@@ -373,7 +391,7 @@ export function DocumentsPage({
               params={{ projectId }}
               className={buttonStyles(
                 "secondary",
-                "inline-flex items-center gap-1.5",
+                "inline-flex items-center gap-1.5!",
               )}
             >
               <Upload className="size-4" />
@@ -384,7 +402,7 @@ export function DocumentsPage({
               params={{ projectId }}
               className={buttonStyles(
                 "primary",
-                "inline-flex items-center gap-1.5",
+                "inline-flex items-center gap-1.5!",
               )}
             >
               <Plus className="size-4" />
@@ -417,7 +435,7 @@ export function DocumentsPage({
             <button
               type="button"
               onClick={() => onQueryChange("")}
-              className="text-sm font-medium text-slate-500 hover:text-slate-900"
+              className="min-h-11 text-sm font-medium text-slate-500 hover:text-slate-900"
             >
               Clear
             </button>
@@ -443,7 +461,7 @@ export function DocumentsPage({
           <button
             type="button"
             onClick={() => setMove({ kind: "docs" })}
-            className="inline-flex items-center gap-1.5 font-medium text-slate-600 hover:text-slate-900"
+            className="inline-flex min-h-11 items-center gap-1.5 font-medium text-slate-600 hover:text-slate-900"
           >
             <FolderInput className="size-4" />
             Move
@@ -452,14 +470,14 @@ export function DocumentsPage({
             type="button"
             disabled={archive.pending}
             onClick={() => void archive.run([...selected])}
-            className="font-medium text-red-600 hover:underline disabled:opacity-50"
+            className="min-h-11 font-medium text-red-600 hover:underline disabled:opacity-50"
           >
             {archive.pending ? "Deleting…" : "Delete"}
           </button>
           <button
             type="button"
             onClick={() => setSelected(new Set())}
-            className="text-slate-500 hover:underline"
+            className="min-h-11 text-slate-500 hover:underline"
           >
             Clear
           </button>
@@ -588,7 +606,7 @@ function SearchResults({
         <button
           type="button"
           onClick={onRetry}
-          className="font-medium text-slate-900 hover:underline"
+          className="min-h-11 font-medium text-slate-900 hover:underline"
         >
           Retry
         </button>

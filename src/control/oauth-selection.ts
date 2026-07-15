@@ -15,7 +15,7 @@ import { oauthConnectionSelection, pendingConnect } from "./schema/app";
 // The custom access-token claim that carries the bound Connection.
 // Spec-compliant audience stays the single fixed `${base}/mcp`; the
 // Connection is this orthogonal namespaced claim. One definition so the
-// stamp (auth.ts customAccessTokenClaims) and the read (api.ts OAuth
+// stamp (auth.server.ts customAccessTokenClaims) and the read (api.ts OAuth
 // path) can never drift.
 export const connectionClaimKey = (base: string): string =>
   `${base}/connection`;

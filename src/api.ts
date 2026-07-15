@@ -13,7 +13,7 @@ import {
 } from "jose";
 import { z } from "zod";
 
-import { getAuth } from "./auth";
+import { getAuth } from "./auth.server";
 import { API_KEY_PREFIX } from "./control/api-keys";
 import {
   resolveApiKey,

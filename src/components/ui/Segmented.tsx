@@ -23,6 +23,34 @@ export function Segmented<T extends string>({
   onChange: (next: T) => void;
   ariaLabel: string;
 }>): React.ReactElement {
+  const handleKey = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    const index = options.findIndex((option) => option.value === value);
+    if (index < 0) return;
+    const last = options.length - 1;
+    const next =
+      event.key === "ArrowRight"
+        ? index === last
+          ? 0
+          : index + 1
+        : event.key === "ArrowLeft"
+          ? index === 0
+            ? last
+            : index - 1
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? last
+              : -1;
+    if (next < 0) return;
+    const option = options[next];
+    if (option === undefined) return;
+    event.preventDefault();
+    if (next !== index) onChange(option.value);
+    event.currentTarget.parentElement
+      ?.querySelectorAll<HTMLButtonElement>('button[role="tab"]')
+      [next]?.focus();
+  };
+
   return (
     <div
       role="tablist"
@@ -38,9 +66,11 @@ export function Segmented<T extends string>({
             type="button"
             role="tab"
             aria-selected={active}
+            tabIndex={active ? 0 : -1}
             onClick={() => onChange(o.value)}
+            onKeyDown={handleKey}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded px-3 py-1.5",
+              "inline-flex min-h-11 items-center gap-1.5 rounded px-3 py-1.5",
               active
                 ? "bg-slate-100 font-medium text-slate-900"
                 : "text-slate-500 hover:text-slate-900",

@@ -297,7 +297,6 @@ function layoutPlugin(onLayout: LiveReviewConfig["onLayout"]): Extension {
       }
       update(u: ViewUpdate): void {
         if (
-          u.docChanged ||
           u.geometryChanged ||
           u.viewportChanged ||
           u.transactions.some(marksChanged)

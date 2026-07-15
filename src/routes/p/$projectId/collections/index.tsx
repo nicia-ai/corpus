@@ -37,7 +37,7 @@ function Collections() {
           !creating && (
             <Button
               onClick={() => setCreating(true)}
-              className="inline-flex items-center gap-1.5"
+              className="inline-flex items-center gap-1.5!"
             >
               <Plus className="size-4" />
               Collection

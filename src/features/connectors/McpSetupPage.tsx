@@ -26,7 +26,7 @@ import {
   revokeApiKey,
 } from "@/lib/server/api-keys";
 import type { ColMetaResult } from "@/lib/server/collections";
-import type { Role } from "@/lib/server/team";
+import type { Role } from "@/lib/server/team.functions";
 
 const KEY = "<YOUR_API_KEY>";
 
@@ -241,7 +241,7 @@ export function McpSetupPage({
             <div className="mb-2 text-sm font-medium text-slate-500">
               MCP endpoint
             </div>
-            <Card className="flex items-center gap-3 p-4">
+            <Card className="flex items-center gap-3 p-4!">
               <code className="flex-1 truncate text-base">{url}</code>
               <CopyButton value={url} label="Copy MCP URL" />
             </Card>
@@ -304,7 +304,7 @@ export function McpSetupPage({
             onChange={setToolId}
             options={TOOLS.map((t) => ({ value: t.id, label: t.label }))}
           />
-          <Card className="mt-4 space-y-3 p-4">
+          <Card className="mt-4 space-y-3 p-4!">
             <p className="text-sm text-slate-500">{tool.caption}</p>
             <div className="relative">
               <CopyButton
@@ -500,7 +500,7 @@ function ApiKeyManager({
       ) : (
         <Button
           onClick={() => setCreating(true)}
-          className="inline-flex items-center gap-1.5"
+          className="inline-flex items-center gap-1.5!"
         >
           <Plus className="size-4" />
           New API Key
@@ -633,7 +633,7 @@ function RevokeButton({ id, name }: Readonly<{ id: string; name: string }>) {
       type="button"
       disabled={pending}
       onClick={() => void run()}
-      className="text-sm text-slate-500 hover:text-red-600 disabled:opacity-50"
+      className="min-h-11 text-sm text-slate-500 hover:text-red-600 disabled:opacity-50"
     >
       Revoke
     </button>

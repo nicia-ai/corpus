@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { resolveServerEnv } from "@/control/env";
+import { resolveServerEnv } from "@/control/env.server";
 import { assertServerContext as srv } from "@/lib/server-context";
 
 // Whether the sign-in / sign-up pages should render "Continue with

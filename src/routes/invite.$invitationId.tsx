@@ -9,7 +9,7 @@ import {
   acceptInvitation,
   type AcceptResult,
   loadInviteSession,
-} from "@/lib/server/team";
+} from "@/lib/server/team.functions";
 
 export const Route = createFileRoute("/invite/$invitationId")({
   component: Invite,

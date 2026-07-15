@@ -53,7 +53,7 @@ export function DocHeader({
                 aria-label="Rename title"
                 title="Rename title"
                 onClick={onEditTitle}
-                className="grid size-7 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                className="grid size-11 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
               >
                 <Pencil className="size-4" />
               </button>

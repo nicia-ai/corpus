@@ -35,6 +35,7 @@ import { compact, estimateTokens, pluralize } from "../util";
 import type {
   CollectionOutline,
   DocumentHistoryEntry,
+  DocumentHistoryMeta,
   DocumentSearchHit,
   DocumentSnapshot,
   OutlineDoc,
@@ -402,6 +403,53 @@ export async function documentHistoryProjection(
       });
     })
     .sort((a, b) => b.docVersion - a.docVersion);
+}
+
+export async function documentHistoryPageProjection(
+  u: ProjectUnit,
+  slug: DocumentSlug,
+  selectedVersion?: number,
+): Promise<
+  Readonly<{
+    history: readonly DocumentHistoryMeta[];
+    active: DocumentHistoryEntry | undefined;
+  }>
+> {
+  const rows = [...(await u.versions.documentVersions(slug))].sort(
+    (a, b) => b.docVersion - a.docVersion,
+  );
+  const retainedHashes = await u.blobs.existing(
+    rows.map((row) => row.contentHash),
+  );
+  const history = rows.map((row) =>
+    compact({
+      docVersion: row.docVersion,
+      changedAt: row.changedAt,
+      changedBy: row.changedBy,
+      diffSummary: row.diffSummary,
+      retained: retainedHashes.has(row.contentHash),
+    }),
+  );
+  const selected =
+    rows.find((row) => row.docVersion === selectedVersion) ??
+    rows[1] ??
+    rows[0];
+  if (selected === undefined) return { history, active: undefined };
+
+  const markdown = retainedHashes.has(selected.contentHash)
+    ? await u.blobs.get(selected.contentHash)
+    : undefined;
+  return {
+    history,
+    active: compact({
+      docVersion: selected.docVersion,
+      changedAt: selected.changedAt,
+      changedBy: selected.changedBy,
+      diffSummary: selected.diffSummary,
+      markdown: markdown ?? "",
+      retained: markdown !== undefined,
+    }),
+  };
 }
 
 export async function verifyHistoryProjection(

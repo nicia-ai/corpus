@@ -1,4 +1,4 @@
-import { cn } from "@/lib/cn";
+import { clsx } from "clsx";
 
 // DESIGN.md: blue is spent on primary action and the shared-linkage
 // fan-out; the wordmark borrows that one pixel of accent (the period).
@@ -20,7 +20,7 @@ export function Wordmark({
 }>): React.ReactElement {
   return (
     <span
-      className={cn(
+      className={clsx(
         SIZE[size],
         "font-semibold tracking-tight text-slate-900",
         className,

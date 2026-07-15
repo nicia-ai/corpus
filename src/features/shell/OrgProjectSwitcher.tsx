@@ -103,7 +103,7 @@ export function OrgProjectSwitcher({
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder={placeholder}
-        className={fieldInputClass("text-sm")}
+        className={fieldInputClass("text-sm!")}
       />
       {submit.error && (
         <p className="mt-1 text-sm text-red-600">{submit.error}</p>
@@ -135,7 +135,7 @@ export function OrgProjectSwitcher({
           setCreating(key);
           setName("");
         }}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+        className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
       >
         {icon}
         {label}
@@ -175,7 +175,7 @@ export function OrgProjectSwitcher({
                   to="/p/$projectId"
                   params={{ projectId: p.id }}
                   onClick={closeMenu}
-                  className="flex items-center gap-2 rounded-md px-2 py-2 text-base text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                  className="flex min-h-11 items-center gap-2 rounded-md px-2 py-2 text-base text-slate-700 hover:bg-slate-50 hover:text-slate-900"
                 >
                   <span className="min-w-0 flex-1 truncate">{p.name}</span>
                   {p.id === current.project.id && (
@@ -203,7 +203,7 @@ export function OrgProjectSwitcher({
               to="/p/$projectId/settings"
               params={{ projectId }}
               onClick={closeMenu}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
             >
               <Settings className="size-4 shrink-0" />
               Manage project

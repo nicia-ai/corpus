@@ -10,9 +10,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   DOCUMENT_BODY_CLASS,
+  Markdown,
   MarkdownContent,
 } from "@/components/markdown/Markdown";
-import { MarkdownEditor } from "@/components/markdown/MarkdownEditor";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { AbsoluteTime } from "@/components/ui/DateTime";
@@ -26,11 +26,18 @@ import { useSubmit } from "@/lib/forms";
 import {
   type DocSnapshot,
   type DocVersionEntry,
+  type DocVersionMeta,
   saveDocument,
 } from "@/lib/server/documents";
 import { useFollowDocLink } from "@/lib/use-follow-doc-link";
 
 const CHANGE_PREVIEW_LIMIT = 8;
+
+function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
+}
 
 type HistoryView = "version" | "compare";
 
@@ -42,7 +49,7 @@ type CompareSection = Readonly<
 // Author for display: the control-plane-resolved name when present, the
 // "import" sentinel as a readable label, otherwise nothing (a raw user id
 // or the empty "no user" sentinel is noise, not provenance).
-function authorOf(e: Readonly<DocVersionEntry>): string | undefined {
+function authorOf(e: Readonly<DocVersionMeta>): string | undefined {
   if (e.changedByName !== undefined) return e.changedByName;
   if (e.changedBy === "import") return "Imported";
   return undefined;
@@ -257,7 +264,7 @@ function ChangeNavigator({
       <div className="flex gap-2">
         <Button
           variant="secondary"
-          className="flex size-9 items-center justify-center p-0"
+          size="icon"
           disabled={index === 0}
           aria-label="Previous change"
           title="Previous change"
@@ -267,7 +274,7 @@ function ChangeNavigator({
         </Button>
         <Button
           variant="secondary"
-          className="flex size-9 items-center justify-center p-0"
+          size="icon"
           disabled={index >= count - 1}
           aria-label="Next change"
           title="Next change"
@@ -289,13 +296,14 @@ function ChangeNavigator({
 export function DocumentHistory({
   current,
   entries,
+  active,
   projectId,
 }: Readonly<{
   current: DocSnapshot;
-  entries: readonly DocVersionEntry[];
+  entries: readonly DocVersionMeta[];
+  active: DocVersionEntry | undefined;
   projectId: ProjectId;
 }>): React.ReactElement {
-  const [picked, setPicked] = useState<number>();
   const [view, setView] = useState<HistoryView>("version");
   const [focusedChangeIndex, setFocusedChangeIndex] = useState(0);
   const pendingScrollIndex = useRef<number | undefined>(undefined);
@@ -303,9 +311,6 @@ export function DocumentHistory({
   const router = useRouter();
   const navigate = useNavigate();
   const followLink = useFollowDocLink(projectId);
-
-  const active =
-    entries.find((e) => e.docVersion === picked) ?? entries[1] ?? entries[0];
 
   const diffLines = useMemo(
     () => (active ? lineDiff(active.markdown, current.markdown) : []),
@@ -327,14 +332,10 @@ export function DocumentHistory({
     view === "compare" && active !== undefined && !isCurrent && active.retained;
 
   useEffect(() => {
-    changeRefs.current = [];
-  }, [active?.docVersion, current.docVersion]);
-
-  useEffect(() => {
     if (!showCompare || pendingScrollIndex.current === undefined) return;
     changeRefs.current[pendingScrollIndex.current]?.scrollIntoView({
       block: "center",
-      behavior: "smooth",
+      behavior: scrollBehavior(),
     });
     pendingScrollIndex.current = undefined;
   }, [compareSections, showCompare]);
@@ -387,7 +388,7 @@ export function DocumentHistory({
     }
     changeRefs.current[next]?.scrollIntoView({
       block: "center",
-      behavior: "smooth",
+      behavior: scrollBehavior(),
     });
   };
 
@@ -465,25 +466,15 @@ export function DocumentHistory({
                 onCompare={() => showCompareAt(0)}
               />
             )}
-            {/* Read-only live-preview: the SAME renderer as the editor, so the
-                viewed version styles prose identically (code syntax highlighting
-                is editor-only per DESIGN.md; the CodeMirror surface brings its
-                own `.md`-equivalent typography, so this card carries padding
-                only, not the `.md` class). Keyed by version so each selection
-                mounts clean state. */}
-            <div
-              className={cardClass(
-                "px-6 py-8 sm:px-10 sm:py-10 lg:px-14 lg:py-12",
-              )}
+            <section
+              aria-label={`Version ${active.docVersion.toString()} of ${current.title}`}
             >
-              <MarkdownEditor
+              <Markdown
                 key={active.docVersion}
-                readOnly
-                value={active.markdown}
-                ariaLabel={`Version ${active.docVersion} of ${current.title}`}
+                source={active.markdown}
                 onFollowLink={followLink}
               />
-            </div>
+            </section>
           </>
         )}
       </div>
@@ -513,9 +504,14 @@ export function DocumentHistory({
               <li key={e.docVersion}>
                 <button
                   onClick={() => {
-                    setPicked(e.docVersion);
                     setFocusedChangeIndex(0);
                     if (view === "compare") pendingScrollIndex.current = 0;
+                    void navigate({
+                      to: "/p/$projectId/documents/$slug/versions",
+                      params: { projectId, slug: current.slug },
+                      search: { version: e.docVersion },
+                      replace: true,
+                    });
                   }}
                   aria-label={ariaLabel}
                   aria-current={on ? "true" : undefined}

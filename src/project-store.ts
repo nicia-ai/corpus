@@ -103,6 +103,7 @@ import type {
   CollectionOutline,
   CreateInCollectionResult,
   DocumentHistoryEntry,
+  DocumentHistoryMeta,
   DocumentSearchHit,
   ImportAndLinkInput,
   ImportAndLinkResult,
@@ -134,6 +135,7 @@ import {
   collectionOutlineProjection,
   collectionStructureProjection,
   documentHistoryProjection,
+  documentHistoryPageProjection,
   getDocumentProjection,
   resolvedMembersProjection,
   listCollectionsProjection,
@@ -253,6 +255,12 @@ export type DocumentReviewSnapshot = Readonly<{
 export type DocumentHistorySnapshot = Readonly<{
   doc: DocumentSnapshot | undefined;
   history: readonly DocumentHistoryEntry[];
+}>;
+
+export type DocumentHistoryPageSnapshot = Readonly<{
+  doc: DocumentSnapshot | undefined;
+  history: readonly DocumentHistoryMeta[];
+  active: DocumentHistoryEntry | undefined;
 }>;
 
 // Internal sentinel: a scoped create's bound collection vanished between
@@ -699,6 +707,18 @@ export class ProjectStore extends DurableObject<Env> {
       documentHistoryProjection(u, slug),
     ]);
     return { doc, history };
+  }
+
+  async documentHistoryPageSnapshot(
+    slug: DocumentSlug,
+    selectedVersion?: number,
+  ): Promise<DocumentHistoryPageSnapshot> {
+    const u = await this.read();
+    const [doc, page] = await Promise.all([
+      getDocumentProjection(u, slug),
+      documentHistoryPageProjection(u, slug, selectedVersion),
+    ]);
+    return { doc, ...page };
   }
 
   async listDocuments(): Promise<

@@ -60,6 +60,7 @@ export type DocVersionEntry = Readonly<{
   markdown: string;
   retained: boolean;
 }>;
+export type DocVersionMeta = Omit<DocVersionEntry, "markdown">;
 export type SaveResult = Readonly<
   | { ok: true; docVersion: number }
   | { ok: false; conflict: true; currentVersion: number }

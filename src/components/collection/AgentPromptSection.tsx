@@ -42,7 +42,7 @@ export function AgentPromptSection({
     description,
   });
   return (
-    <Card className="mt-4 space-y-5 p-4">
+    <Card className="mt-4 space-y-5 p-4!">
       <div className="relative">
         <CopyButton
           value={prompt}

@@ -327,7 +327,7 @@ class FrontmatterWidget extends WidgetType {
     const card = document.createElement("div");
     // Mirror Markdown.tsx's FrontmatterPanel: a slate-100 card (reads on the
     // white document ground) with an uppercase eyebrow over a key/value grid.
-    card.className = cardClass("my-2 bg-slate-100 px-6 py-4 sm:px-8");
+    card.className = cardClass("my-2 bg-slate-100 px-6! py-4! sm:px-8!");
     const eyebrow = document.createElement("div");
     eyebrow.className =
       "mb-2 text-sm font-medium tracking-wide text-slate-500 uppercase";

@@ -9,8 +9,8 @@ export const tabBarClass = "flex gap-5 border-b border-slate-200";
 
 export function tabItemClass(active: boolean): string {
   return active
-    ? "-mb-px border-b-2 border-slate-900 pb-2 text-base font-medium text-slate-900"
-    : "-mb-px border-b-2 border-transparent pb-2 text-base text-slate-500 hover:text-slate-900";
+    ? "-mb-px inline-flex min-h-11 items-center border-b-2 border-slate-900 pb-2 text-base font-medium text-slate-900"
+    : "-mb-px inline-flex min-h-11 items-center border-b-2 border-transparent pb-2 text-base text-slate-500 hover:text-slate-900";
 }
 
 type Option<T extends string> = Readonly<{ value: T; label: string }>;

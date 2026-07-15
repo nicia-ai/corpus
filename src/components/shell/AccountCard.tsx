@@ -44,7 +44,7 @@ export function AccountCard({
       {isAdmin && (
         <Link
           to="/admin"
-          className="mb-1 flex items-center gap-2.5 rounded-md px-2 py-2 text-base font-medium text-slate-600 hover:bg-slate-200 hover:text-slate-900"
+          className="mb-1 flex min-h-11 items-center gap-2.5 rounded-md px-2 py-2 text-base font-medium text-slate-600 hover:bg-slate-200 hover:text-slate-900"
         >
           <ShieldCheck className="size-4 shrink-0" />
           Admin
@@ -74,7 +74,7 @@ export function AccountCard({
               window.location.href = "/sign-in";
             });
           }}
-          className="grid size-8 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+          className="grid size-11 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-slate-200 hover:text-slate-900"
         >
           <LogOut className="size-4" />
         </button>

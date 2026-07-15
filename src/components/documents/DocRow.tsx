@@ -42,28 +42,30 @@ export function DocRow({
       onDragStart={onDragStart}
       style={treeIndent(depth)}
       className={cn(
-        "group flex items-center gap-2 py-2 pr-3 text-base",
+        "group flex items-center gap-2 py-1 pr-3 text-base [contain-intrinsic-size:auto_3.5rem] [content-visibility:auto]",
         selected ? "bg-blue-50" : "hover:bg-slate-50",
       )}
     >
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={(e) =>
-          onSelect(
-            e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey,
-          )
-        }
-        aria-label={`Select ${doc.title}`}
-        className="size-4 shrink-0 accent-blue-600"
-      />
+      <label className="grid size-11 shrink-0 place-items-center">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={(e) =>
+            onSelect(
+              e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey,
+            )
+          }
+          aria-label={`Select ${doc.title}`}
+          className="size-5 accent-blue-600"
+        />
+      </label>
       <FileText className="size-4 shrink-0 text-slate-400" aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <Link
             to="/p/$projectId/documents/$slug"
             params={{ projectId, slug: doc.slug }}
-            className="truncate font-medium text-blue-600 hover:underline"
+            className="inline-flex min-h-11 min-w-0 items-center truncate font-medium text-blue-600 hover:underline"
           >
             {doc.title}
           </Link>
@@ -100,7 +102,7 @@ export function DocRow({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onBlur={() => setEditing(false)}
-                className={fieldInputClass("w-44 py-1 font-mono text-sm")}
+                className={fieldInputClass("w-44! py-1! font-mono text-sm!")}
               />
             </form>
           ) : (
@@ -111,7 +113,7 @@ export function DocRow({
                 setEditing(true);
               }}
               title="Rename file"
-              className="hidden max-w-48 truncate font-mono text-slate-400 hover:text-slate-900 sm:inline"
+              className="hidden min-h-11 max-w-48 truncate font-mono text-slate-400 hover:text-slate-900 sm:inline"
             >
               {doc.filename}
             </button>

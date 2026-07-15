@@ -2,7 +2,7 @@ import { createMiddleware } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
 
-import { getAuth } from "@/auth";
+import { getAuth } from "@/auth.server";
 import { connectControlDb } from "@/control/db";
 import { resolveProjectById } from "@/control/project-resolution";
 import { assertServerContext, UnauthorizedError } from "@/lib/server-context";

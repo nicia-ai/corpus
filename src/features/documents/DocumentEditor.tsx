@@ -1,6 +1,6 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { CheckCircle2, MessageSquareText } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProseDiff, DiffPanel } from "@/components/diff/Diff";
 import { DocHeader } from "@/components/document/DocHeader";
@@ -13,6 +13,7 @@ import type {
 import {
   type DocRef,
   MarkdownEditor,
+  type MarkdownEditorHandle,
 } from "@/components/markdown/MarkdownEditor";
 import { ReviewComposer } from "@/components/review/Composer";
 import { ReviewMobileDialog } from "@/components/review/ReviewPanel";
@@ -75,6 +76,8 @@ export type VisibleDocSnapshot = Readonly<{
   markdown: string;
 }>;
 
+type Conflict = Readonly<{ theirs: DocSnapshot; mine: string }>;
+
 const EMPTY_BLOCKS: readonly [] = [];
 const EMPTY_FLASH: readonly SourceRange[] = [];
 const EMPTY_MARKS: readonly ReviewMark[] = [];
@@ -120,16 +123,21 @@ export function DocumentEditor({
   const [renamingFile, setRenamingFile] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
-  const [draft, setDraft] = useState(doc.markdown);
+  const editorRef = useRef<MarkdownEditorHandle>(null);
+  const [editorSeed, setEditorSeed] = useState(doc.markdown);
+  const [dirty, setDirty] = useState(false);
   const [broken, setBroken] = useState(0);
   // The version a save is optimistically checked against. Starts at the
   // loaded doc; after resolving a 409 without overwriting it advances to
   // the fetched head, so the next save doesn't immediately re-conflict.
   // A successful save remounts this component (version key), resetting it.
   const [base, setBase] = useState<DocSnapshot>(doc);
-  const [conflict, setConflict] = useState<DocSnapshot>();
+  const [conflict, setConflict] = useState<Conflict>();
   const head = base.updatedAt >= doc.updatedAt ? base : doc;
-  const dirty = draft !== head.markdown;
+  const currentDraft = useCallback(
+    (): string => editorRef.current?.getValue() ?? editorSeed,
+    [editorSeed],
+  );
 
   // "Never lose a write" extends to the tab-close edge: if the user
   // has unsaved changes and tries to close/refresh the tab, the browser
@@ -146,8 +154,40 @@ export function DocumentEditor({
     };
   }, [dirty]);
 
+  const lastRefreshAt = useRef(0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  useEffect(
+    () => () => {
+      if (refreshTimer.current !== undefined) {
+        clearTimeout(refreshTimer.current);
+      }
+    },
+    [],
+  );
   const refreshRoute = useCallback((): void => {
-    void router.invalidate();
+    // Every explicit mutation is also echoed over the project socket. Collapse
+    // that pair and invalidate only this leaf route; root analytics and the
+    // project shell have no dependency on document review state.
+    const invalidate = (): void => {
+      lastRefreshAt.current = Date.now();
+      refreshTimer.current = undefined;
+      void router.invalidate({
+        filter: (match) => match.routeId === "/p/$projectId/documents/$slug/",
+      });
+    };
+    const elapsed = Date.now() - lastRefreshAt.current;
+    if (elapsed >= 250) {
+      if (refreshTimer.current !== undefined) {
+        clearTimeout(refreshTimer.current);
+      }
+      invalidate();
+      return;
+    }
+    // Preserve the latest write. A pure leading-edge throttle can drop a
+    // distinct mutation that lands just after an unrelated socket refresh.
+    refreshTimer.current ??= setTimeout(invalidate, 250 - elapsed);
   }, [router]);
 
   // The DO broadcasts every write to all sockets, including the actor's own.
@@ -158,8 +198,8 @@ export function DocumentEditor({
     (change: RealtimeChange | undefined): void => {
       const isSelf =
         change?.actorId !== undefined && change.actorId === viewerId;
-      const remoteContentChange =
-        !isSelf && shouldFlashContentChange(change, head.slug);
+      const contentChange = shouldFlashContentChange(change, head.slug);
+      const remoteContentChange = !isSelf && contentChange;
 
       // refreshRoute() re-runs the loader, which bumps doc.docVersion and
       // remounts this component (the version-keyed remount that normally
@@ -170,7 +210,11 @@ export function DocumentEditor({
       if (remoteContentChange && dirty) {
         void getDocument({ data: { projectId, slug: head.slug } }).then(
           (theirs) => {
-            if (theirs !== undefined) setConflict(theirs);
+            if (theirs !== undefined) {
+              const mine = currentDraft();
+              setEditorSeed(mine);
+              setConflict({ theirs, mine });
+            }
           },
         );
         return;
@@ -189,13 +233,19 @@ export function DocumentEditor({
           suggestions.suggestions.map((s) => s.id),
         );
       }
-      refreshRoute();
+      // A self echo for the body just saved must not invalidate a newer draft
+      // typed while that request was in flight; its parent key would remount
+      // the editor from the older server body and lose those keystrokes.
+      if (!(isSelf && dirty && contentChange)) {
+        if (shouldRefreshDocumentPage(change, head.slug)) refreshRoute();
+      }
       if (isSelf) return;
       const message = collabToastMessage(change, head.slug);
       if (message !== undefined) showToast(message);
     },
     [
       dirty,
+      currentDraft,
       head.docVersion,
       head.markdown,
       head.slug,
@@ -216,6 +266,7 @@ export function DocumentEditor({
     error: suggestError,
     run: suggest,
   } = useSubmit(async () => {
+    const draft = currentDraft();
     const r = await createSuggestion({
       data: {
         projectId,
@@ -258,9 +309,7 @@ export function DocumentEditor({
   // Presence + live nudges over the project's real-time channel. On a change
   // (anyone's write), refresh the document + review loader.
   const presence = useCollab(projectId, head.slug, handleCollabChanged);
-  // Memoized: presence only changes on WebSocket messages, but this component
-  // re-renders on every keystroke (draft state). Without memo, the filter
-  // allocates a new array per keystroke.
+  // Memoized because presence updates independently of the editor buffer.
   const here = useMemo(
     () => presence.filter((p) => p.docSlug === head.slug),
     [presence, head.slug],
@@ -399,7 +448,9 @@ export function DocumentEditor({
   }, []);
 
   function discard() {
-    setDraft(head.markdown);
+    editorRef.current?.setValue(head.markdown);
+    setEditorSeed(head.markdown);
+    setDirty(false);
   }
 
   const {
@@ -421,14 +472,30 @@ export function DocumentEditor({
         const theirs = await getDocument({
           data: { projectId, slug: against.slug },
         });
-        if (theirs !== undefined) setConflict(theirs);
+        if (theirs !== undefined) {
+          const mine = currentDraft();
+          setEditorSeed(mine);
+          setConflict({ theirs, mine });
+        }
         return;
       }
       throw new Error("Save was rolled back — please retry.");
     }
+    const saved: DocSnapshot = {
+      ...against,
+      markdown: body,
+      docVersion: r.docVersion,
+      updatedAt: new Date().toISOString(),
+    };
+    const latest = currentDraft();
+    const newerDraft = latest !== body;
+    editorRef.current?.setCleanValue(body);
+    setEditorSeed(latest);
+    setBase(saved);
     setConflict(undefined);
-    showToast("Saved");
-    void router.invalidate();
+    setDirty(newerDraft);
+    showToast(newerDraft ? "Saved — newer changes are still unsaved" : "Saved");
+    if (!newerDraft) refreshRoute();
   });
 
   const {
@@ -452,7 +519,7 @@ export function DocumentEditor({
     setBase({ ...head, title: t });
     setRenaming(false);
     showToast("Title updated");
-    void router.invalidate();
+    refreshRoute();
   });
 
   const {
@@ -481,7 +548,7 @@ export function DocumentEditor({
     setBase({ ...head, filename: f });
     setRenamingFile(false);
     showToast("File renamed");
-    void router.invalidate();
+    refreshRoute();
   });
 
   const navigate = useNavigate();
@@ -510,8 +577,8 @@ export function DocumentEditor({
   });
 
   const conflictDiff = useMemo(
-    () => (conflict ? lineDiff(conflict.markdown, draft) : []),
-    [conflict, draft],
+    () => (conflict ? lineDiff(conflict.theirs.markdown, conflict.mine) : []),
+    [conflict],
   );
 
   if (conflict !== undefined) {
@@ -524,11 +591,11 @@ export function DocumentEditor({
           The document changed while you were editing. Choose how to resolve —
           nothing is lost.
         </p>
-        <div className="grid grid-cols-2 gap-4">
-          <DiffPanel title={`Their version (v${conflict.docVersion})`}>
-            {conflict.markdown}
+        <div className="grid gap-4 md:grid-cols-2">
+          <DiffPanel title={`Their version (v${conflict.theirs.docVersion})`}>
+            {conflict.theirs.markdown}
           </DiffPanel>
-          <DiffPanel title="Your version">{draft}</DiffPanel>
+          <DiffPanel title="Your version">{conflict.mine}</DiffPanel>
         </div>
         <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
           <div className="mb-1 text-sm font-medium text-slate-500">
@@ -536,15 +603,19 @@ export function DocumentEditor({
           </div>
           <ProseDiff lines={conflictDiff} />
         </div>
-        <div className="mt-4 flex items-center gap-3">
-          <Button disabled={pending} onClick={() => void save(conflict, draft)}>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button
+            disabled={pending}
+            onClick={() => void save(conflict.theirs, conflict.mine)}
+          >
             Keep mine (overwrite theirs)
           </Button>
           <Button
             variant="secondary"
             onClick={() => {
-              setDraft(conflict.markdown);
-              setBase(conflict);
+              setEditorSeed(conflict.theirs.markdown);
+              setBase(conflict.theirs);
+              setDirty(false);
               setConflict(undefined);
               // Adopt their version: refresh so blocks/comments/docVersion match
               // the new head (else review marks + clientVersion stay stale).
@@ -556,7 +627,9 @@ export function DocumentEditor({
           <Button
             variant="secondary"
             onClick={() => {
-              setBase(conflict);
+              setEditorSeed(conflict.mine);
+              setBase(conflict.theirs);
+              setDirty(true);
               setConflict(undefined);
             }}
           >
@@ -580,9 +653,10 @@ export function DocumentEditor({
     to: number;
     dismiss: () => void;
   }>): React.ReactNode => {
+    const draft = currentDraft();
     if (dirty) {
       return (
-        <Card className="w-72 space-y-2 p-3 shadow-md">
+        <Card className="w-72 space-y-2 p-3! shadow-md">
           <p className="text-sm text-slate-600">
             Save your changes to comment or suggest on the document.
           </p>
@@ -706,7 +780,10 @@ export function DocumentEditor({
       <span className="text-sm font-medium text-slate-600">
         Unsaved changes
       </span>
-      <Button disabled={pending} onClick={() => void save(head, draft)}>
+      <Button
+        disabled={pending}
+        onClick={() => void save(head, currentDraft())}
+      >
         Save
       </Button>
       <Button variant="secondary" onClick={discard}>
@@ -733,6 +810,7 @@ export function DocumentEditor({
       baseMarkdown={head.markdown}
       presence={here}
       layout={layout}
+      applyDisabled={dirty}
       onChange={refreshRoute}
     />
   );
@@ -783,13 +861,16 @@ export function DocumentEditor({
         <div className="min-w-0">
           <MarkdownEditor
             review
-            value={draft}
-            onChange={setDraft}
+            value={editorSeed}
+            syncValue={false}
+            cleanValue={head.markdown}
+            editorRef={editorRef}
+            onDirtyChange={setDirty}
             docRefs={docRefs}
             selfSlug={head.slug}
             onBrokenChange={setBroken}
             ariaLabel={`Edit document body: ${head.title}`}
-            onSave={() => void save(head, draft)}
+            onSave={() => void save(head, currentDraft())}
             onFollowLink={followLink}
             // Review anchors are saved-document coordinates; while the draft has
             // diverged they would paint on the wrong text, so suppress them
@@ -912,6 +993,20 @@ function shouldFlashContentChange(
     change?.docSlug === currentSlug &&
     (change.action === "document.updated" ||
       change.action === "suggestion.applied")
+  );
+}
+
+function shouldRefreshDocumentPage(
+  change: RealtimeChange | undefined,
+  currentSlug: string,
+): boolean {
+  if (change === undefined || change.docSlug === currentSlug) return true;
+  // Other documents only affect this editor when the project path map changes.
+  // Content/review writes elsewhere do not invalidate the current document.
+  return (
+    change.action === "document.created" ||
+    change.action === "document.filename_changed" ||
+    change.action === "document.archived"
   );
 }
 

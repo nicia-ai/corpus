@@ -16,7 +16,7 @@ export function SidebarLinkItem({
       {...(link.external
         ? { target: "_blank", rel: "noopener noreferrer" }
         : {})}
-      className="mb-1 flex items-center gap-2.5 rounded-md px-2 py-2 text-base font-medium text-slate-600 hover:bg-slate-200 hover:text-slate-900"
+      className="mb-1 flex min-h-11 items-center gap-2.5 rounded-md px-2 py-2 text-base font-medium text-slate-600 hover:bg-slate-200 hover:text-slate-900"
     >
       <Icon className="size-4 shrink-0" />
       <span className="flex-1">{link.label}</span>

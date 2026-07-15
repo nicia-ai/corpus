@@ -97,7 +97,7 @@ export function ReviewComposer({
     // wrong, when it's the selection that's too short).
     if (quote.length < commentMinChars) {
       return (
-        <Card className="w-72 space-y-2 p-3 shadow-md">
+        <Card className="w-72 space-y-2 p-3! shadow-md">
           <Quote text={quote} />
           <p className="text-sm text-slate-500">
             Select at least {commentMinChars} characters to comment.
@@ -110,7 +110,7 @@ export function ReviewComposer({
     }
     const disabled = commenting || body.trim() === "";
     return (
-      <Card className="w-72 space-y-2 p-3 shadow-md">
+      <Card className="w-72 space-y-2 p-3! shadow-md">
         <Quote text={quote} />
         <textarea
           autoFocus
@@ -134,7 +134,7 @@ export function ReviewComposer({
 
   const disabled = suggesting || edited.trim() === "";
   return (
-    <Card className="w-80 space-y-2 p-3 shadow-md">
+    <Card className="w-80 space-y-2 p-3! shadow-md">
       <div className="text-sm text-slate-500">Propose an edit</div>
       <textarea
         autoFocus
@@ -166,7 +166,7 @@ function PopoverAction({
       // before the click handler opens the composer.
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className="rounded-sm px-2 py-1 text-sm font-medium text-blue-600 hover:bg-slate-50"
+      className="min-h-11 rounded-sm px-2 py-1 text-sm font-medium text-blue-600 hover:bg-slate-50"
     >
       {label}
     </button>

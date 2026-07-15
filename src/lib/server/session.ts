@@ -2,12 +2,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { z } from "zod";
 
-import { getAuth } from "@/auth";
+import { getAuth } from "@/auth.server";
 import type { Role } from "@/control/access";
 import { countConnectionsByCollection } from "@/control/connections";
 import { connectControlDb } from "@/control/db";
 import { entitlementsOf } from "@/control/entitlements";
-import { resolveServerEnv, type SidebarLink } from "@/control/env";
+import type { SidebarLink } from "@/control/env";
+import { resolveServerEnv } from "@/control/env.server";
 import { provenanceSlug } from "@/control/org-lifecycle";
 import { defaultProjectForOrgSlug } from "@/control/project-admin";
 import {

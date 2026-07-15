@@ -687,6 +687,63 @@ function updateForSelectionChange(
   return next;
 }
 
+// Map the existing decorations through the edit, then rebuild only the
+// top-level blocks touched by the change and the caret. Markdown can change
+// the parse shape of a neighboring block (for example, deleting a blank line),
+// so the one-character padding deliberately pulls both adjacent blocks into
+// the replacement window.
+function updateForDocChange(
+  value: DecorationSet,
+  tr: Transaction,
+): DecorationSet {
+  let from = tr.state.doc.length;
+  let to = 0;
+  const include = (pos: number): void => {
+    const clamped = Math.max(0, Math.min(pos, tr.state.doc.length));
+    const range = topLevelNodeRange(tr.state, clamped);
+    from = Math.min(from, range[0]);
+    to = Math.max(to, range[1]);
+  };
+
+  const includeOld = (pos: number): void => {
+    const clamped = Math.max(0, Math.min(pos, tr.startState.doc.length));
+    const range = topLevelNodeRange(tr.startState, clamped);
+    from = Math.min(from, tr.changes.mapPos(range[0], -1));
+    to = Math.max(to, tr.changes.mapPos(range[1], 1));
+  };
+
+  tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    // Include both parse shapes. Removing a fence can split one old block into
+    // many new ones; adding one can merge many old blocks into one new block.
+    // Either shape may therefore define the larger invalidation window.
+    includeOld(fromA - 1);
+    includeOld(toA + 1);
+    include(fromB - 1);
+    include(toB + 1);
+  });
+  for (const range of tr.state.selection.ranges) {
+    include(range.from);
+    include(range.to);
+  }
+
+  const beforeFrontmatter = frontmatter(tr.startState);
+  const afterFrontmatter = frontmatter(tr.state);
+  if (beforeFrontmatter !== undefined || afterFrontmatter !== undefined) {
+    const end = Math.max(beforeFrontmatter?.to ?? 0, afterFrontmatter?.to ?? 0);
+    if (from <= end) from = 0;
+  }
+
+  const fm = frontmatter(tr.state);
+  const add = computeDecorationsInRange(tr.state, from, to, fm);
+  const fmDeco = from === 0 ? frontmatterDecoration(tr.state, fm) : undefined;
+  return value.map(tr.changes).update({
+    filterFrom: from,
+    filterTo: to,
+    filter: () => false,
+    add: fmDeco === undefined ? add : [fmDeco, ...add],
+  });
+}
+
 // Recompute when the doc, the selection, the focus state, or the readOnly facet
 // changes (each flips the reveal gate), or when the async parse advances.
 // Deliberately NOT on every `tr.reconfigured`: the editor reconfigures the
@@ -696,8 +753,8 @@ function updateForSelectionChange(
 export const livePreviewField = StateField.define<DecorationSet>({
   create: computeDecorations,
   update(value, tr) {
+    if (tr.docChanged) return updateForDocChange(value, tr);
     if (
-      tr.docChanged ||
       tr.startState.field(revealGate) !== tr.state.field(revealGate) ||
       tr.startState.readOnly !== tr.state.readOnly ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState)

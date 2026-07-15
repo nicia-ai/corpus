@@ -148,7 +148,7 @@ function CollectionView() {
               <Button
                 onClick={() => void connect()}
                 disabled={connecting}
-                className="inline-flex items-center gap-1.5"
+                className="inline-flex items-center gap-1.5!"
               >
                 <Plug className="size-4" />
                 {connecting ? "Connecting…" : "Connect this collection"}

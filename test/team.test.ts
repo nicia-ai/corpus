@@ -2,12 +2,12 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
-import { getAuth } from "../src/auth";
+import { getAuth } from "../src/auth.server";
 import { connectControlDb } from "../src/control/db";
 import { membershipCount } from "../src/control/project-admin";
 import { resolveProject } from "../src/control/project-resolution";
 import { invitation } from "../src/control/schema/better-auth";
-import { createTeamInvitation } from "../src/lib/server/team";
+import { createTeamInvitation } from "../src/lib/server/team.server";
 
 import { signUpSession } from "./_helpers";
 

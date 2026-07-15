@@ -1,4 +1,4 @@
-import { cn } from "@/lib/cn";
+import { clsx } from "clsx";
 
 // The two button shapes the product uses (DESIGN.md: one blue accent for
 // primary actions, slate-bordered ghost for everything else). Exported as a
@@ -8,7 +8,11 @@ import { cn } from "@/lib/cn";
 type Variant = "primary" | "secondary" | "danger";
 
 const BASE =
-  "inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50";
+const SIZE = {
+  default: "min-h-11 px-3 py-1.5",
+  icon: "size-11",
+} as const;
 
 const VARIANT: Readonly<Record<Variant, string>> = {
   primary: "bg-blue-600 text-white hover:bg-blue-700",
@@ -23,17 +27,19 @@ export function buttonStyles(
   variant: Variant = "primary",
   className?: string,
 ): string {
-  return cn(BASE, VARIANT[variant], className);
+  return clsx(BASE, SIZE.default, VARIANT[variant], className);
 }
 
 type Props = Readonly<
   React.ComponentProps<"button"> & {
     variant?: Variant;
+    size?: keyof typeof SIZE;
   }
 >;
 
 export function Button({
   variant = "primary",
+  size = "default",
   className,
   type = "button",
   ...rest
@@ -41,7 +47,7 @@ export function Button({
   return (
     <button
       type={type}
-      className={buttonStyles(variant, className)}
+      className={clsx(BASE, SIZE[size], VARIANT[variant], className)}
       {...rest}
     />
   );

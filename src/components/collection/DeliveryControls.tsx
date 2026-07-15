@@ -34,7 +34,7 @@ export function AddAction({
       disabled={pending}
       aria-label={label}
       onClick={onAdd}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+      className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
     >
       <Plus className="size-4" aria-hidden />
       Add
@@ -68,7 +68,7 @@ export function DeliveryToggle({
         onChange(on ? "reference" : "core");
       }}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-medium transition-colors",
+        "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-medium transition-colors",
         on
           ? "border-blue-200 bg-blue-50 text-blue-700"
           : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
@@ -99,7 +99,7 @@ export function RemoveAction({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-slate-400 opacity-0 hover:bg-white hover:text-red-700 focus-visible:opacity-100 group-hover:opacity-100"
+      className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-slate-400 opacity-0 hover:bg-white hover:text-red-700 focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
     >
       <X className="size-4" aria-hidden />
       Remove

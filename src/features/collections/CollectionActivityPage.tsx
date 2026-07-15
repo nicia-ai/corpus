@@ -130,7 +130,7 @@ function PostActivationPromptCard({
   };
 
   return (
-    <div className={cardClass("mb-6 p-5")}>
+    <div className={cardClass("mb-6 p-5!")}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold text-slate-900">
@@ -143,7 +143,7 @@ function PostActivationPromptCard({
         <button
           type="button"
           onClick={() => setDismissed(true)}
-          className="rounded-md p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-900"
+          className="grid size-11 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-900"
           aria-label="Dismiss"
         >
           <XIcon className="size-4" />

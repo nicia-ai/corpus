@@ -44,7 +44,10 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      {
+        name: "viewport",
+        content: "width=device-width, initial-scale=1, viewport-fit=cover",
+      },
       { title: "Corpus" },
     ],
     links: [

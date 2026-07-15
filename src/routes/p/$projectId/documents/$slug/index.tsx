@@ -3,26 +3,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DocumentCurrentPage } from "@/features/documents/DocumentCurrentPage";
 import { asProjectId } from "@/ids";
 import { getDocumentReview } from "@/lib/server/document-review";
-import { getDocumentRefs } from "@/lib/server/documents";
 
 export const Route = createFileRoute("/p/$projectId/documents/$slug/")({
   component: CurrentTabRoute,
-  // One review payload: document head + anchor blocks + comments + suggestions,
-  // plus the project's doc refs (slug + path) for the editor's broken-link
-  // linter and wikilink resolution (the editor is the always-on surface now,
-  // so they load with the page). The doc-list
-  // fetch is non-fatal — it only feeds a cosmetic linter. Mutations and live
-  // nudges refresh this loader via router.invalidate().
+  // One server-function invocation: document head + review state + the
+  // project's doc refs for link resolution. Independent store reads are
+  // parallelized inside the server function, so request middleware and the
+  // browser/server boundary are crossed once.
   loader: async ({ params }) => {
-    const [review, docRefs] = await Promise.all([
-      getDocumentReview({
-        data: { projectId: params.projectId, slug: params.slug },
-      }),
-      getDocumentRefs({ data: { projectId: params.projectId } }).catch(
-        (): { slug: string; path: string }[] => [],
-      ),
-    ]);
-    return { ...review, docRefs };
+    return getDocumentReview({
+      data: { projectId: params.projectId, slug: params.slug },
+    });
   },
 });
 

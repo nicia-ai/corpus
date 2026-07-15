@@ -14,7 +14,7 @@ import {
 // — Platform-admin gate ———————————————————————————————————————————
 // Product-wide visibility, NOT org ownership. The gate is the platform
 // role (`user.role === "admin"`, Better Auth admin plugin), bootstrapped
-// for the first admin by ADMIN_EMAILS at signup (see auth.ts). An org
+// for the first admin by ADMIN_EMAILS at signup (see auth.server.ts). An org
 // "owner" (`member.role`, see control/access.ts) spans a single org's
 // projects and never reaches here. Every admin server fn calls this
 // first — hiding UI is not a gate.
