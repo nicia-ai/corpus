@@ -1,6 +1,5 @@
 import {
   asDocumentSlug,
-  asProjectId,
   type CallerRef,
   type CollectionSlug,
   type ProjectId,
@@ -30,10 +29,7 @@ export function scopedExecutor(
   boundSlug: CollectionSlug,
   members: readonly string[],
   callerRef: CallerRef,
-  location: Readonly<{ baseUrl: string; projectId: ProjectId }> = {
-    baseUrl: "http://localhost:8787",
-    projectId: asProjectId("test-project"),
-  },
+  location: Readonly<{ baseUrl: string; projectId: ProjectId }>,
 ): McpExecutor {
   const memberSet = new Set<string>(members);
   return {
