@@ -1,5 +1,5 @@
 import { Check, MessageSquare, PencilLine, X } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ProseDiff } from "@/components/diff/Diff";
 import { Field } from "@/components/Field";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import { lineDiff, type DiffLine } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
 import type { CommentAnchorEvidence, ReviewItem } from "@/lib/review-items";
+import { placeReviewRailItems } from "@/lib/review-rail-layout";
 import type { CommentStatus } from "@/lib/server/comments";
 import { addComment, resolveComment } from "@/lib/server/comments";
 import {
@@ -23,6 +24,7 @@ import {
 import type { PresenceUser } from "@/lib/use-collab";
 
 const REVIEW_CARD_CLASS = cardClass("space-y-3 px-4! py-3!");
+const REVIEW_CARD_GAP = 12;
 
 export type ReviewRailLayout = Readonly<{
   itemTops: Readonly<Record<string, number>>;
@@ -99,6 +101,15 @@ function ReviewItems({
   applyDisabled: boolean;
   onChange: () => void;
 }>): React.ReactElement {
+  const [itemHeights, setItemHeights] = useState<
+    Readonly<Record<string, number>>
+  >({});
+  const updateItemHeight = useCallback((id: string, height: number): void => {
+    setItemHeights((current) =>
+      current[id] === height ? current : { ...current, [id]: height },
+    );
+  }, []);
+
   function renderItem(item: ReviewItem): React.ReactElement {
     return item.kind === "comment" ? (
       <CommentCard
@@ -144,18 +155,37 @@ function ReviewItems({
     }
   }
 
+  const itemById = new Map<string, ReviewItem>(
+    positionedItems.map(({ item }) => [item.id, item] as const),
+  );
+  const placements = placeReviewRailItems(
+    positionedItems.map(({ item, top }) => ({
+      id: item.id,
+      anchorTop: top,
+      height: itemHeights[item.id] ?? 0,
+    })),
+    REVIEW_CARD_GAP,
+  );
+  const positionedHeight = placements.at(-1)?.bottom ?? 0;
+
   return (
     <>
-      <div className="relative" style={{ minHeight: layout.documentHeight }}>
-        {positionedItems.map(({ item, top }) => {
+      <div
+        className="relative"
+        style={{ minHeight: Math.max(layout.documentHeight, positionedHeight) }}
+      >
+        {placements.map(({ id, top }) => {
+          const item = itemById.get(id);
+          if (item === undefined) return null;
           return (
-            <div
-              key={item.id}
-              className="absolute right-0 left-0"
-              style={{ top }}
+            <MeasuredReviewItem
+              key={id}
+              id={id}
+              top={top}
+              onHeight={updateItemHeight}
             >
               {renderItem(item)}
-            </div>
+            </MeasuredReviewItem>
           );
         })}
       </div>
@@ -167,6 +197,38 @@ function ReviewItems({
         </div>
       )}
     </>
+  );
+}
+
+function MeasuredReviewItem({
+  id,
+  top,
+  onHeight,
+  children,
+}: Readonly<{
+  id: string;
+  top: number;
+  onHeight: (id: string, height: number) => void;
+  children: React.ReactNode;
+}>): React.ReactElement {
+  const element = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = element.current;
+    if (node === null) return;
+    const report = (): void => {
+      onHeight(id, Math.ceil(node.getBoundingClientRect().height));
+    };
+    report();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(report);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [id, onHeight]);
+
+  return (
+    <div ref={element} className="absolute right-0 left-0" style={{ top }}>
+      {children}
+    </div>
   );
 }
 

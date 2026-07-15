@@ -724,5 +724,17 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
         default: 25,
       },
     });
+    expect(waitTool?.inputSchema?.properties?.afterMessageId).toMatchObject({
+      type: "integer",
+      minimum: 0,
+      default: 0,
+    });
+    const replyTool = res.result.tools.find(
+      (candidate) => candidate.name === "reply_to_proposal",
+    );
+    expect(replyTool?.inputSchema?.properties).toMatchObject({
+      proposalId: { type: "integer", minimum: 1 },
+      body: { type: "string", minLength: 1, maxLength: 2000 },
+    });
   });
 });

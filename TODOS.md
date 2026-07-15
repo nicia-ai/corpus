@@ -49,14 +49,16 @@ wedge (2026-06-07). Each item has enough context to pick up cold.
 - **Depends on:** nothing. Independent cleanup.
 - **Blocks:** nothing.
 
-## Approach B — two-way co-authoring loop
+## General review co-authoring over MCP
 
-- **What:** Agent reads open comments/suggestions over MCP and responds/revises
-  (not just proposes). The full human↔agent loop.
+- **What:** Extend the shipped proposal-scoped result/message loop to general
+  document comments and reviewer threads. Agents can already read outcomes and
+  exchange messages inside proposals they originated; they still cannot browse
+  or resolve the wider human review surface.
 - **Why:** The north star ("humans and agents author markdown together"). But it
   builds the whole collab surface onto MCP — only justified once a user is hooked
   on one-way agent-suggest (design doc P4).
-- **Where to start:** Widen the `McpExecutor` port with comment/suggestion reads
-  - an agent reply path; design the agent-facing thread model.
+- **Where to start:** Design an agent-facing model for general comment threads,
+  including which threads are visible and which actions remain human-only.
 - **Depends on:** behavioral demand from the agent-as-suggester beta.
 - **Blocks:** nothing. Explicitly post-validation.

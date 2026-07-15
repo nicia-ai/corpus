@@ -32,6 +32,7 @@ export function Field(
     type?: string;
     as?: "input" | "textarea";
     rows?: number;
+    maxLength?: number;
     required?: boolean;
     mono?: boolean;
     ariaDescribedBy?: string | undefined;
@@ -45,6 +46,7 @@ export function Field(
         <textarea
           required={required}
           rows={props.rows ?? 12}
+          maxLength={props.maxLength}
           value={props.value}
           onChange={(e) => props.onChange(e.target.value)}
           aria-describedby={props.ariaDescribedBy}
@@ -56,6 +58,7 @@ export function Field(
         <input
           type={props.type ?? "text"}
           required={required}
+          maxLength={props.maxLength}
           value={props.value}
           onChange={(e) => props.onChange(e.target.value)}
           aria-describedby={props.ariaDescribedBy}

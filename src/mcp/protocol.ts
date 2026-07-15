@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { PROPOSAL_MESSAGE_MAX_LENGTH } from "../lib/proposal-message";
+
 export const RpcSchema = z.object({
   jsonrpc: z.literal("2.0"),
   id: z.unknown().optional(),
@@ -89,7 +91,9 @@ export const TOOLS = [
             "How long to wait before returning an open result (0-25 seconds; default 25).",
         },
         afterMessageId: {
-          type: "number",
+          type: "integer",
+          minimum: 0,
+          default: 0,
           description:
             "Return when a proposal message with a larger id appears. Omit or pass 0 for the first wait; on later waits pass the largest message id already seen.",
         },
@@ -105,11 +109,14 @@ export const TOOLS = [
       type: "object",
       properties: {
         proposalId: {
-          type: "number",
+          type: "integer",
+          minimum: 1,
           description: "The suggestionId returned by suggest_edit.",
         },
         body: {
           type: "string",
+          minLength: 1,
+          maxLength: PROPOSAL_MESSAGE_MAX_LENGTH,
           description: "A concise reply to the human reviewer.",
         },
       },
