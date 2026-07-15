@@ -105,16 +105,17 @@ For API-key auth, add `"headers": { "Authorization": "Bearer <YOUR_API_KEY>" }`.
 Once connected, the agent has these tools, all scoped to
 the Connection's bound Collection:
 
-| Tool                  | Does                                                                                                                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_collections`    | The Collection this connection is bound to (a connection targets exactly one).                                                                                                    |
-| `read_collection`     | The always-included guidance for the bound Collection. No `collectionSlug` is needed.                                                                                             |
-| `list_documents`      | The documents in the bound Collection — path, slug, title, version, size, and a `delivery` field (`"core"` = always-included, `"reference"` = on-demand).                         |
-| `read_document`       | Read one document's markdown, verbatim, by `path` or `slug`.                                                                                                                      |
-| `read_document_meta`  | Parsed YAML frontmatter for one document in the bound Collection, by `path` or `slug`.                                                                                            |
-| `verify_history`      | Verify a document's (or the bound Collection's) version chain is intact.                                                                                                          |
-| `suggest_edit`        | Propose an edit to a document — or a NEW document (pass a fresh slug/path with `baseDocVersion: 0`). Always a reviewable suggestion a human applies; never an auto-applied write. |
-| `get_proposal_result` | Check one of this caller's proposals for its human outcome, accepted hunks, resulting document version, and optional reviewer note. Other callers' proposals remain invisible.    |
+| Tool                    | Does                                                                                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_collections`      | The Collection this connection is bound to (a connection targets exactly one).                                                                                                    |
+| `read_collection`       | The always-included guidance for the bound Collection. No `collectionSlug` is needed.                                                                                             |
+| `list_documents`        | The documents in the bound Collection — path, slug, title, version, size, and a `delivery` field (`"core"` = always-included, `"reference"` = on-demand).                         |
+| `read_document`         | Read one document's markdown, verbatim, by `path` or `slug`.                                                                                                                      |
+| `read_document_meta`    | Parsed YAML frontmatter for one document in the bound Collection, by `path` or `slug`.                                                                                            |
+| `verify_history`        | Verify a document's (or the bound Collection's) version chain is intact.                                                                                                          |
+| `suggest_edit`          | Propose an edit to a document — or a NEW document (pass a fresh slug/path with `baseDocVersion: 0`). Always a reviewable suggestion a human applies; never an auto-applied write. |
+| `get_proposal_result`   | Check one of this caller's proposals for its human outcome, accepted hunks, resulting document version, and optional reviewer note. Other callers' proposals remain invisible.    |
+| `await_proposal_review` | Wait up to 25 seconds for one of this caller's open proposals to receive a human decision, returning early when it settles.                                                       |
 
 The same data is also exposed as MCP **resources**:
 `collection://<slug>`, `collection://<slug>/outline`, and
@@ -129,8 +130,11 @@ reviews and applies, and retrieval/RAG is deliberately out of scope —
 you decide what's in a Collection, not a similarity score. Bundle
 export is the owner path (web UI), never the agent surface.
 
-After `suggest_edit` returns a `suggestionId`, the same caller can pass it
-to `get_proposal_result`. Outcomes are `open`, `applied`,
+After `suggest_edit` returns a `suggestionId` and canonical `reviewUrl`, hand
+the URL to the reviewer and pass the id to `await_proposal_review`. The wait
+returns as soon as a decision lands or after 25 seconds with `timedOut: true`;
+the agent can call it again without losing state. `get_proposal_result` is the
+non-waiting form. Outcomes are `open`, `applied`,
 `partially_applied`, `rejected`, or `stale`, so an agent can distinguish a
 complete acceptance from a human-selected subset and continue from the
 resulting canonical version.

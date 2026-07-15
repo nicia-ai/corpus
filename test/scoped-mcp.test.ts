@@ -13,6 +13,7 @@ import {
   asCallerRef,
   asCollectionSlug,
   asDocumentSlug,
+  asProjectId,
   type ConnectionId,
 } from "../src/ids";
 import type { McpExecutor } from "../src/mcp";
@@ -25,10 +26,15 @@ import {
   signUp,
 } from "./_helpers";
 
+const TEST_LOCATION = {
+  baseUrl: "https://corpus.example.com",
+  projectId: asProjectId("test-project"),
+} as const;
+
 // — scopedExecutor unit tests — pure filtering against a stub
 //   McpExecutor, no DO. Verifies the read-side scope rules.
 
-function stubExec(): Omit<McpExecutor, "callerRef"> {
+function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
   return {
     listCollections: () =>
       Promise.resolve([
@@ -140,6 +146,7 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
       asCollectionSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
+      TEST_LOCATION,
     );
     const cols = await exec.listCollections();
     expect(cols.map((c) => c.slug)).toEqual(["marketing"]);
@@ -151,6 +158,7 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
       asCollectionSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
+      TEST_LOCATION,
     );
     const docs = await exec.listDocuments();
     expect(docs.map((d) => d.slug)).toEqual(["brand-voice"]);
@@ -162,6 +170,7 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
       asCollectionSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
+      TEST_LOCATION,
     );
     expect(await exec.readCollection(asCollectionSlug("hr"))).toEqual({
       found: false,
@@ -177,6 +186,7 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
       asCollectionSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
+      TEST_LOCATION,
     );
     expect(await exec.getDocument(asDocumentSlug("brand-voice"))).toBeDefined();
     expect(await exec.getDocument(asDocumentSlug("handbook"))).toBeUndefined();
@@ -189,6 +199,7 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
       asCollectionSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
+      TEST_LOCATION,
     );
     const o = await exec.collectionOutline(asCollectionSlug("marketing"));
     expect(o.found).toBe(true);
@@ -212,6 +223,7 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
       asCollectionSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
+      TEST_LOCATION,
     );
     expect(await exec.collectionMembers(asCollectionSlug("marketing"))).toEqual(
       ["brand-voice"],

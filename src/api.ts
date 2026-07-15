@@ -92,7 +92,10 @@ async function respondMcp(
   // the projection's "second distinct caller connected" signal
   // latches once and stays.
   await inner.recordCallerConnected(callerRef);
-  const exec = scopedExecutor(inner, ref.collectionSlug, members, callerRef);
+  const exec = scopedExecutor(inner, ref.collectionSlug, members, callerRef, {
+    baseUrl: env.BETTER_AUTH_URL,
+    projectId: ref.projectId,
+  });
   return Response.json(await handleMcp(parsed.data, exec));
 }
 

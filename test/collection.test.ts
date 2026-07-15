@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asCallerRef } from "../src/ids";
+import { asCallerRef, asProjectId } from "../src/ids";
 import { handleMcp, type McpExecutor } from "../src/mcp";
 import {
   DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS,
@@ -226,6 +226,8 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
 describe("MCP JSON-RPC dispatcher", () => {
   const fake: McpExecutor = {
     callerRef: asCallerRef("apikey:test"),
+    baseUrl: "http://localhost:8787",
+    projectId: asProjectId("test-project"),
     recordRead: () => Promise.resolve(),
     suggestEdit: () =>
       Promise.resolve({ ok: false as const, reason: "missing" as const }),
@@ -305,6 +307,7 @@ describe("MCP JSON-RPC dispatcher", () => {
       fake,
     )) as { result: { tools: { name: string }[] } };
     expect(r.result.tools.map((t) => t.name).sort()).toEqual([
+      "await_proposal_review",
       "get_proposal_result",
       "list_collections",
       "list_documents",

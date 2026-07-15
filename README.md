@@ -57,8 +57,10 @@ version history.
   (per hunk for edits; create-then-attach for a proposed new document),
   never an auto-applied write. Agents propose; only humans approve. With
   `get_proposal_result`, the originating caller can retrieve the outcome,
-  accepted hunks, resulting version, and optional reviewer note. Comments
-  and unrelated suggestion state remain off-MCP.
+  accepted hunks, resulting version, and optional reviewer note. The proposal
+  response includes a canonical review URL, and `await_proposal_review`
+  provides a bounded human-handoff wait. Comments and unrelated suggestion
+  state remain off-MCP.
 - **CLI** — a Git-free `pull`/`push` tool (`pnpm corpus`) over a
   collection-scoped REST surface (`/api/v1/docs`), for editing documents
   from a terminal or CI with the same optimistic-concurrency contract as

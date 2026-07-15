@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   asCallerRef,
   asConnectionId,
+  asProjectId,
   asUserId,
   callerRefFromOAuth,
 } from "../src/ids";
@@ -22,6 +23,10 @@ import { colSlug, docSlug, freshStore } from "./_helpers";
 const DOC_A = "alpha one\n\nbeta two";
 const DOC_B = "gamma one\n\ndelta two";
 const AGENT = asCallerRef("apikey:agent-a");
+const TEST_LOCATION = {
+  baseUrl: "http://localhost:8787",
+  projectId: asProjectId("test-project"),
+} as const;
 
 type RpcResponse = Readonly<{
   result?: { content?: { text: string }[] };
@@ -62,7 +67,13 @@ async function setup(): Promise<{
   await store.attachDocument(colSlug("col-b"), docSlug("doc-b"), 1, "bob");
 
   const members = (await store.collectionMembers(colSlug("col-a"))) ?? [];
-  const exec = scopedExecutor(store, colSlug("col-a"), members, AGENT);
+  const exec = scopedExecutor(
+    store,
+    colSlug("col-a"),
+    members,
+    AGENT,
+    TEST_LOCATION,
+  );
   return { store, exec };
 }
 
@@ -88,6 +99,14 @@ function resultJson(res: RpcResponse): Record<string, unknown> {
     throw new Error(`expected a result, got ${JSON.stringify(res)}`);
   }
   return JSON.parse(text) as Record<string, unknown>;
+}
+
+function expectedReviewUrl(proposalId: number, slug?: string): string {
+  const path =
+    slug === undefined
+      ? "/p/test-project/documents"
+      : `/p/test-project/documents/${slug}`;
+  return `http://localhost:8787${path}#proposal-${String(proposalId)}`;
 }
 
 describe("suggest_edit MCP tool (DO + D1 integration)", () => {
@@ -130,6 +149,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       documentSlug: "doc-a",
       baseDocVersion: 1,
       outcome: "open",
+      reviewUrl: expectedReviewUrl(proposalId, "doc-a"),
       acceptedHunks: [],
     });
 
@@ -168,6 +188,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       colSlug("col-a"),
       (await store.collectionMembers(colSlug("col-a"))) ?? [],
       asCallerRef("apikey:agent-b"),
+      TEST_LOCATION,
     );
     expect(
       (await call(other, { proposalId }, "get_proposal_result")).error,
@@ -183,12 +204,14 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       colSlug("col-a"),
       members,
       callerRefFromOAuth(userId, asConnectionId("conn-a")),
+      TEST_LOCATION,
     );
     const second = scopedExecutor(
       store,
       colSlug("col-a"),
       members,
       callerRefFromOAuth(userId, asConnectionId("conn-b")),
+      TEST_LOCATION,
     );
     const proposalId = resultJson(
       await call(first, {
@@ -234,6 +257,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       documentSlug: "doc-a",
       baseDocVersion: 1,
       outcome: "applied",
+      reviewUrl: expectedReviewUrl(proposalId, "doc-a"),
       resultingDocVersion: 2,
       resolvedAt: expect.any(String),
       acceptedHunks: [{ ...hunk, decision: "accepted" }],
@@ -293,6 +317,76 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
         await call(exec, { proposalId: staleId }, "get_proposal_result"),
       ),
     ).toMatchObject({ outcome: "stale" });
+  });
+
+  it("hands off a canonical review URL and supports bounded waits", async () => {
+    const { store, exec } = await setup();
+    const proposed = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nwait for this`,
+        baseDocVersion: 1,
+      }),
+    );
+    const proposalId = proposed.suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+    expect(proposed.reviewUrl).toBe(expectedReviewUrl(proposalId, "doc-a"));
+
+    expect(
+      resultJson(
+        await call(
+          exec,
+          { proposalId, timeoutSeconds: 0 },
+          "await_proposal_review",
+        ),
+      ),
+    ).toMatchObject({ outcome: "open", timedOut: true });
+
+    const startedAt = Date.now();
+    const waiting = call(
+      exec,
+      { proposalId, timeoutSeconds: 3 },
+      "await_proposal_review",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await store.rejectSuggestion({
+      suggestionId: proposalId,
+      rejectedBy: "alice",
+      reviewerNote: "Please take a different direction.",
+    });
+    expect(resultJson(await waiting)).toMatchObject({
+      outcome: "rejected",
+      timedOut: false,
+      reviewerNote: "Please take a different direction.",
+    });
+    expect(Date.now() - startedAt).toBeLessThan(2500);
+
+    expect(
+      (
+        await call(
+          exec,
+          { proposalId, timeoutSeconds: 26 },
+          "await_proposal_review",
+        )
+      ).error?.code,
+    ).toBe(ERR.INVALID_PARAMS);
+
+    const other = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      asCallerRef("apikey:agent-b"),
+      TEST_LOCATION,
+    );
+    expect(
+      (
+        await call(
+          other,
+          { proposalId, timeoutSeconds: 0 },
+          "await_proposal_review",
+        )
+      ).error?.code,
+    ).toBe(ERR.NOT_FOUND);
   });
 
   it("CRITICAL: an agent bound to Collection A cannot suggest against a doc in Collection B", async () => {
@@ -369,6 +463,9 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     const json = resultJson(res);
     expect(json).toMatchObject({ created: true, slug: "brand-new" });
     expect(typeof json.suggestionId).toBe("number");
+    const proposalId = json.suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+    expect(json.reviewUrl).toBe(expectedReviewUrl(proposalId));
 
     const proposals = await store.listCreateProposals();
     expect(proposals).toHaveLength(1);
@@ -381,8 +478,6 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     // Nothing was created — the proposal is review state, not a document.
     expect(await store.getDocument(docSlug("brand-new"))).toBeUndefined();
 
-    const proposalId = json.suggestionId;
-    if (typeof proposalId !== "number") throw new Error("missing proposal id");
     expect(
       await store.applyCreateProposal({
         suggestionId: proposalId,
@@ -398,6 +493,9 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       resultingDocVersion: 1,
       reviewerNote: "Useful addition.",
     });
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).not.toHaveProperty("reviewUrl");
   });
 
   it("baseDocVersion 0 with a fresh Corpus path derives the slug like the import path", async () => {
@@ -483,6 +581,18 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     expect(resultTool?.inputSchema?.properties?.proposalId).toMatchObject({
       type: "integer",
       minimum: 1,
+    });
+    const waitTool = res.result.tools.find(
+      (candidate) => candidate.name === "await_proposal_review",
+    );
+    expect(waitTool?.inputSchema?.properties).toMatchObject({
+      proposalId: { type: "integer", minimum: 1 },
+      timeoutSeconds: {
+        type: "integer",
+        minimum: 0,
+        maximum: 25,
+        default: 25,
+      },
     });
   });
 });
