@@ -43,6 +43,13 @@
       "when": 1784151610362,
       "tag": "0005_messy_mauler",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784153463017,
+      "tag": "0006_high_tana_nile",
+      "breakpoints": true
     }
   ]
 }

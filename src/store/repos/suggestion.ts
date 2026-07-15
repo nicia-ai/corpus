@@ -5,9 +5,12 @@ import {
   type LedgerDb,
   type NewSuggestion,
   type NewSuggestionHunk,
+  type NewSuggestionMessage,
   suggestion,
   suggestionHunk,
+  suggestionMessage,
   type SuggestionHunkRow,
+  type SuggestionMessageRow,
   type SuggestionRow,
   type SuggestionStatus,
 } from "../../db";
@@ -30,6 +33,25 @@ export class SuggestionRepo {
   async addHunks(rows: readonly NewSuggestionHunk[]): Promise<void> {
     if (rows.length === 0) return;
     await this.db.insert(suggestionHunk).values([...rows]);
+  }
+
+  async addMessage(row: NewSuggestionMessage): Promise<number> {
+    const [r] = await this.db
+      .insert(suggestionMessage)
+      .values(row)
+      .returning({ id: suggestionMessage.id });
+    return r?.id ?? 0;
+  }
+
+  messagesForSuggestions(
+    ids: readonly number[],
+  ): Promise<readonly SuggestionMessageRow[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.db
+      .select()
+      .from(suggestionMessage)
+      .where(inArray(suggestionMessage.suggestionId, [...ids]))
+      .orderBy(suggestionMessage.id);
   }
 
   forDoc(documentSlug: string): Promise<readonly SuggestionRow[]> {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { asCollectionSlug, asDocumentSlug } from "../ids";
+import { proposalMessageSchema } from "../lib/proposal-message";
 import type { ProposalResult } from "../project-store/commands/suggestions";
 import { parseFrontmatter } from "../store/domain/frontmatter";
 import { CREATE_PROPOSAL_BASE_VERSION } from "../store/domain/suggestion";
@@ -26,6 +27,11 @@ const GetProposalResultArgs = z.object({
 
 const AwaitProposalReviewArgs = GetProposalResultArgs.extend({
   timeoutSeconds: z.number().int().min(0).max(25).default(25),
+  afterMessageId: z.number().int().nonnegative().default(0),
+});
+
+const ReplyToProposalArgs = GetProposalResultArgs.extend({
+  body: proposalMessageSchema,
 });
 
 // One-second cadence keeps handoffs responsive while bounding a maximum wait
@@ -251,7 +257,12 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       exec.callerRef,
       fields.data.proposalId,
     );
-    while (result.found && result.outcome === "open") {
+    const hasNewMessage = (): boolean =>
+      result.found &&
+      result.messages.some(
+        (message) => message.id > fields.data.afterMessageId,
+      );
+    while (result.found && result.outcome === "open" && !hasNewMessage()) {
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) break;
       await delay(Math.min(REVIEW_POLL_MS, remainingMs));
@@ -261,16 +272,53 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       );
     }
     if (!result.found) return err(id, ERR.NOT_FOUND, "unknown proposal");
+    const messageReceived = hasNewMessage();
     return ok(
       id,
       textContent(
         JSON.stringify({
           ...result,
           reviewUrl: proposalReviewUrl(exec, result),
-          timedOut: result.outcome === "open",
+          messageReceived,
+          timedOut: result.outcome === "open" && !messageReceived,
         }),
       ),
     );
+  },
+
+  reply_to_proposal: async ({ id, exec, params }) => {
+    const fields = ReplyToProposalArgs.safeParse(params);
+    if (!fields.success) {
+      return err(
+        id,
+        ERR.INVALID_PARAMS,
+        "reply_to_proposal needs a positive integer proposalId and a non-empty body of at most 2000 characters",
+      );
+    }
+    const result = await exec.replyToProposal(
+      exec.callerRef,
+      fields.data.proposalId,
+      fields.data.body,
+    );
+    if (result.ok) {
+      return ok(
+        id,
+        textContent(
+          JSON.stringify({
+            proposalId: fields.data.proposalId,
+            messageId: result.messageId,
+            note: "reply added; the human reviewer retains decision control",
+          }),
+        ),
+      );
+    }
+    return result.reason === "missing"
+      ? err(id, ERR.NOT_FOUND, "unknown proposal")
+      : err(
+          id,
+          ERR.CONFLICT,
+          "proposal is already settled; file a new proposal if more changes are needed",
+        );
   },
 
   suggest_edit: async ({ id, exec, params }) => {

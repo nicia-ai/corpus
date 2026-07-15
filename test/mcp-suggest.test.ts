@@ -140,6 +140,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       outcome: "open",
       reviewUrl: expectedReviewUrl(proposalId, "doc-a"),
       acceptedHunks: [],
+      messages: [],
     });
 
     const suggestion = (await store.listSuggestions(docSlug("doc-a")))[0];
@@ -175,6 +176,13 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       (await store.collectionMembers(colSlug("col-a"))) ?? [],
       asCallerRef("apikey:agent-b"),
     );
+    expect(
+      await store.replyToProposal(
+        asCallerRef("apikey:agent-b"),
+        proposalId,
+        "direct cross-caller write",
+      ),
+    ).toEqual({ ok: false, reason: "missing" });
     expect(
       (await call(other, { proposalId }, "get_proposal_result")).error,
     )?.toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
@@ -244,7 +252,109 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       resultingDocVersion: 2,
       resolvedAt: expect.any(String),
       acceptedHunks: [{ ...hunk, decision: "accepted" }],
+      messages: [],
     });
+  });
+
+  it("keeps reviewer/agent replies proposal-scoped and hides human identity", async () => {
+    const { store, exec } = await setup();
+    const proposalId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nconversation change`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+
+    expect(
+      await store.addSuggestionMessage({
+        suggestionId: proposalId,
+        body: "Please narrow this to the collection's terminology.",
+        createdBy: "human-user-id-should-not-leak",
+        channel: "web",
+      }),
+    ).toMatchObject({ ok: true });
+
+    const reviewed = resultJson(
+      await call(exec, { proposalId }, "get_proposal_result"),
+    );
+    expect(reviewed.messages).toEqual([
+      expect.objectContaining({
+        body: "Please narrow this to the collection's terminology.",
+        role: "reviewer",
+        channel: "web",
+      }),
+    ]);
+    expect(JSON.stringify(reviewed)).not.toContain(
+      "human-user-id-should-not-leak",
+    );
+
+    expect(
+      resultJson(
+        await call(
+          exec,
+          { proposalId, body: "Understood — I will re-propose narrowly." },
+          "reply_to_proposal",
+        ),
+      ),
+    ).toMatchObject({ proposalId, messageId: expect.any(Number) });
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({
+      messages: [
+        { role: "reviewer", channel: "web" },
+        { role: "proposer", channel: "mcp" },
+      ],
+    });
+
+    const other = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      asCallerRef("apikey:agent-b"),
+    );
+    expect(
+      (
+        await call(
+          other,
+          { proposalId, body: "cross-caller write" },
+          "reply_to_proposal",
+        )
+      ).error?.code,
+    ).toBe(ERR.NOT_FOUND);
+
+    const afterCrossCaller = resultJson(
+      await call(exec, { proposalId }, "get_proposal_result"),
+    );
+    expect(JSON.stringify(afterCrossCaller)).not.toContain(
+      "cross-caller write",
+    );
+    expect(JSON.stringify(afterCrossCaller)).not.toContain(
+      "direct cross-caller write",
+    );
+
+    await store.rejectSuggestion({
+      suggestionId: proposalId,
+      rejectedBy: "alice",
+    });
+    expect(
+      (
+        await call(
+          exec,
+          { proposalId, body: "late reply" },
+          "reply_to_proposal",
+        )
+      ).error?.code,
+    ).toBe(ERR.CONFLICT);
+    const afterLateReply = resultJson(
+      await call(exec, { proposalId }, "get_proposal_result"),
+    );
+    expect(JSON.stringify(afterLateReply)).not.toContain("late reply");
+    expect(
+      (await call(exec, { proposalId, body: "   " }, "reply_to_proposal")).error
+        ?.code,
+    ).toBe(ERR.INVALID_PARAMS);
   });
 
   it("reports rejected and stale terminal outcomes", async () => {
@@ -369,6 +479,44 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
         )
       ).error?.code,
     ).toBe(ERR.NOT_FOUND);
+  });
+
+  it("await_proposal_review returns early for new reviewer feedback", async () => {
+    const { store, exec } = await setup();
+    const proposalId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nmessage-aware wait`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+
+    const startedAt = Date.now();
+    const waiting = call(
+      exec,
+      { proposalId, timeoutSeconds: 3, afterMessageId: 0 },
+      "await_proposal_review",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await store.addSuggestionMessage({
+      suggestionId: proposalId,
+      body: "Can you make this more specific?",
+      createdBy: "alice",
+      channel: "web",
+    });
+    expect(resultJson(await waiting)).toMatchObject({
+      outcome: "open",
+      messageReceived: true,
+      timedOut: false,
+      messages: [
+        {
+          role: "reviewer",
+          body: "Can you make this more specific?",
+        },
+      ],
+    });
+    expect(Date.now() - startedAt).toBeLessThan(2500);
   });
 
   it("CRITICAL: an agent bound to Collection A cannot suggest against a doc in Collection B", async () => {

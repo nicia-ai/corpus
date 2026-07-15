@@ -188,6 +188,14 @@ export function scopedExecutor(
         ? inner.proposalResult(callerRef, proposalId)
         : Promise.resolve({ found: false as const }),
 
+    replyToProposal: (suppliedCallerRef, proposalId, body) =>
+      suppliedCallerRef === callerRef
+        ? inner.replyToProposal(callerRef, proposalId, body)
+        : Promise.resolve({
+            ok: false as const,
+            reason: "missing" as const,
+          }),
+
     // Membership-gate. A non-member slug is indistinguishable from a
     // truly unknown document (the agent cannot probe to learn what
     // exists outside its Collection).

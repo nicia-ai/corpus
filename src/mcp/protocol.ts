@@ -71,7 +71,7 @@ export const TOOLS = [
   {
     name: "await_proposal_review",
     description:
-      "Wait briefly for a human decision on one proposal created by this caller. Hand the reviewUrl returned by suggest_edit to the reviewer first, then call this tool. It returns as soon as the proposal is applied, partially applied, rejected, or stale; after at most 25 seconds it returns the still-open result with timedOut:true so the caller can wait again.",
+      "Wait briefly for a human decision or a new proposal message. Hand the reviewUrl returned by suggest_edit to the reviewer first, then call this tool. It returns as soon as the proposal settles or a message newer than afterMessageId arrives; after at most 25 seconds it returns the still-open result with timedOut:true so the caller can wait again.",
     inputSchema: {
       type: "object",
       properties: {
@@ -88,8 +88,32 @@ export const TOOLS = [
           description:
             "How long to wait before returning an open result (0-25 seconds; default 25).",
         },
+        afterMessageId: {
+          type: "number",
+          description:
+            "Return when a proposal message with a larger id appears. Omit or pass 0 for the first wait; on later waits pass the largest message id already seen.",
+        },
       },
       required: ["proposalId"],
+    },
+  },
+  {
+    name: "reply_to_proposal",
+    description:
+      "Reply inside one still-open proposal created by this caller. Use get_proposal_result or await_proposal_review to read reviewer messages, then reply here or file a revised proposal with suggest_edit. This tool cannot read or write general document comments and cannot resolve reviewer feedback.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: {
+          type: "number",
+          description: "The suggestionId returned by suggest_edit.",
+        },
+        body: {
+          type: "string",
+          description: "A concise reply to the human reviewer.",
+        },
+      },
+      required: ["proposalId", "body"],
     },
   },
   {

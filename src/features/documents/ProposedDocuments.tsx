@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Field } from "@/components/Field";
 import { Markdown } from "@/components/markdown/Markdown";
+import { ProposalConversation } from "@/components/review/ProposalConversation";
 import { ViaBadge } from "@/components/review/ReviewRail";
 import { Button } from "@/components/ui/Button";
 import { RelativeTime } from "@/components/ui/DateTime";
@@ -112,6 +113,13 @@ function ProposalCard({
           />
         </div>
       )}
+      <ProposalConversation
+        projectId={projectId}
+        proposalId={proposal.id}
+        messages={proposal.messages}
+        canReply
+        onChange={() => void router.invalidate()}
+      />
       <Field
         label="Reviewer note (optional)"
         as="textarea"

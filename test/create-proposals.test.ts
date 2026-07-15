@@ -45,6 +45,52 @@ async function propose(
 }
 
 describe("create-proposals (DO + D1 integration)", () => {
+  it("projects proposal messages to the human UI and caller-scoped MCP result", async () => {
+    const store = freshStore("cprop");
+    await seedCollection(store);
+    const id = await propose(store, { slug: "conversation" });
+
+    await store.addSuggestionMessage({
+      suggestionId: id,
+      body: "Clarify the opening paragraph.",
+      createdBy: "reviewer-user-id",
+      channel: "web",
+    });
+    expect(await store.listCreateProposals()).toMatchObject([
+      {
+        id,
+        messages: [
+          {
+            body: "Clarify the opening paragraph.",
+            createdBy: "reviewer-user-id",
+            channel: "web",
+          },
+        ],
+      },
+    ]);
+
+    expect(
+      await store.replyToProposal(AGENT, id, "I will tighten it."),
+    ).toMatchObject({ ok: true });
+    const result = await store.proposalResult(AGENT, id);
+    expect(result).toMatchObject({
+      found: true,
+      messages: [
+        { role: "reviewer", channel: "web" },
+        { role: "proposer", channel: "mcp" },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain("reviewer-user-id");
+
+    await store.rejectSuggestion({ suggestionId: id, rejectedBy: "paul" });
+    expect(await store.replyToProposal(AGENT, id, "too late")).toEqual({
+      ok: false,
+      reason: "not-open",
+    });
+    const settled = await store.proposalResult(AGENT, id);
+    expect(JSON.stringify(settled)).not.toContain("too late");
+  });
+
   it("apply creates the document at the proposed path and attaches it as reference", async () => {
     const store = freshStore("cprop");
     await seedCollection(store);

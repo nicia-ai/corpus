@@ -314,6 +314,7 @@ describe("MCP JSON-RPC dispatcher", () => {
       "read_collection",
       "read_document",
       "read_document_meta",
+      "reply_to_proposal",
       "suggest_edit",
       "verify_history",
     ]);

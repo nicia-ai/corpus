@@ -7,12 +7,14 @@ import { resolveAuthorLabels } from "@/control/users";
 import { asDocumentSlug } from "@/ids";
 import type { CallerChannel } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
+import { proposalMessageSchema } from "@/lib/proposal-message";
 import { reviewerNoteSchema } from "@/lib/reviewer-note";
 import { changedBy, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
 import type {
   ApplyCreateProposalResult,
   ApplySuggestionResult,
+  AddSuggestionMessageResult,
   CreateSuggestionResult,
   SuggestionView,
 } from "@/project-store/commands/suggestions";
@@ -48,7 +50,10 @@ export const listSuggestions = createServerFn({ method: "GET" })
     ];
     const names = await resolveAuthorLabels(
       connectControlDb(c.env.DB),
-      suggestions.map((s) => s.createdBy),
+      suggestions.flatMap((s) => [
+        s.createdBy,
+        ...s.messages.map((message) => message.createdBy),
+      ]),
     );
     return { suggestions, names: Object.fromEntries(names) };
   });
@@ -115,6 +120,13 @@ export type CreateProposalItem = Readonly<{
   authorLabel: string;
   channel: CallerChannel;
   createdAt: string;
+  messages: readonly Readonly<{
+    id: number;
+    body: string;
+    authorLabel: string;
+    channel: CallerChannel;
+    createdAt: string;
+  }>[];
 }>;
 
 export const listCreateProposals = createServerFn({ method: "GET" })
@@ -124,7 +136,10 @@ export const listCreateProposals = createServerFn({ method: "GET" })
     const proposals = await storeOf(c).listCreateProposals();
     const names = await resolveAuthorLabels(
       connectControlDb(c.env.DB),
-      proposals.map((p) => p.createdBy),
+      proposals.flatMap((proposal) => [
+        proposal.createdBy,
+        ...proposal.messages.map((message) => message.createdBy),
+      ]),
     );
     return proposals.map((p) => ({
       id: p.id,
@@ -135,8 +150,46 @@ export const listCreateProposals = createServerFn({ method: "GET" })
       authorLabel: names.get(p.createdBy) ?? p.createdBy,
       channel: p.channel,
       createdAt: p.createdAt,
+      messages: p.messages.map((message) => ({
+        id: message.id,
+        body: message.body,
+        authorLabel: names.get(message.createdBy) ?? message.createdBy,
+        channel: message.channel,
+        createdAt: message.createdAt,
+      })),
     }));
   });
+
+export const addProposalMessage = createServerFn({ method: "POST" })
+  .middleware([projectMiddleware])
+  .validator(
+    z.object({
+      suggestionId: z.number().int().positive(),
+      body: proposalMessageSchema,
+    }),
+  )
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<
+      Readonly<
+        | { ok: true; messageId: number }
+        | { ok: false; reason: "missing" | "not-open" }
+      >
+    > => {
+      const c = srv(context);
+      const result: AddSuggestionMessageResult = await storeOf(
+        c,
+      ).addSuggestionMessage({
+        suggestionId: data.suggestionId,
+        body: data.body,
+        createdBy: changedBy(c),
+        channel: "web",
+      });
+      return result.ok ? { ok: true, messageId: result.messageId } : result;
+    },
+  );
 
 export const applyCreateProposal = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])

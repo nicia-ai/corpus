@@ -78,6 +78,9 @@ import {
 } from "./project-store/commands/import-link";
 import { seedExampleCommand } from "./project-store/commands/seed";
 import {
+  addSuggestionMessageCommand,
+  type AddSuggestionMessageInput,
+  type AddSuggestionMessageResult,
   applyCreateProposalCommand,
   type ApplyCreateProposalInput,
   type ApplyCreateProposalResult,
@@ -1335,7 +1338,10 @@ export class ProjectStore extends DurableObject<Env> {
     if (proposal?.createdBy !== callerRef) {
       return { found: false };
     }
-    const hunks = await u.suggestions.hunksFor(proposal.id);
+    const [hunks, messages] = await Promise.all([
+      u.suggestions.hunksFor(proposal.id),
+      u.suggestions.messagesForSuggestions([proposal.id]),
+    ]);
     const acceptedHunks = hunks
       .filter((h) => h.decision === "accepted")
       .map((h) => ({
@@ -1366,6 +1372,54 @@ export class ProjectStore extends DurableObject<Env> {
       reviewerNote: proposal.reviewerNote ?? undefined,
       resolvedAt: proposal.resolvedAt ?? undefined,
       acceptedHunks,
+      messages: messages.map((message) => ({
+        id: message.id,
+        body: message.body,
+        role:
+          message.createdBy === proposal.createdBy
+            ? ("proposer" as const)
+            : ("reviewer" as const),
+        channel: message.channel,
+        createdAt: message.createdAt,
+      })),
+    });
+  }
+
+  async addSuggestionMessage(
+    input: AddSuggestionMessageInput,
+  ): Promise<AddSuggestionMessageResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(
+      now,
+      (ctx) => addSuggestionMessageCommand(ctx, input),
+      (out) =>
+        out.result.ok
+          ? {
+              area: "review",
+              action: "suggestion.replied",
+              actorId: input.createdBy,
+              docSlug: out.result.documentSlug,
+              channel: input.channel,
+            }
+          : undefined,
+    );
+    return outcome.result;
+  }
+
+  // Caller-scoped MCP reply. The expected creator guard is enforced inside
+  // the write transaction, so a guessed id cannot race into another caller's
+  // proposal and a terminal proposal cannot receive a late reply.
+  async replyToProposal(
+    callerRef: CallerRef,
+    proposalId: number,
+    body: string,
+  ): Promise<AddSuggestionMessageResult> {
+    return this.addSuggestionMessage({
+      suggestionId: proposalId,
+      body,
+      createdBy: callerRef,
+      channel: "mcp",
+      expectedCreatedBy: callerRef,
     });
   }
 
@@ -1373,7 +1427,24 @@ export class ProjectStore extends DurableObject<Env> {
   // reachable through the McpExecutor port).
   async listCreateProposals(): Promise<readonly CreateProposalView[]> {
     const u = await this.read();
-    return (await u.suggestions.openCreates()).map(createProposalView);
+    const proposals = await u.suggestions.openCreates();
+    const messages = await u.suggestions.messagesForSuggestions(
+      proposals.map((proposal) => proposal.id),
+    );
+    return proposals.map((proposal) =>
+      createProposalView(
+        proposal,
+        messages
+          .filter((message) => message.suggestionId === proposal.id)
+          .map((message) => ({
+            id: message.id,
+            body: message.body,
+            createdBy: message.createdBy,
+            channel: message.channel,
+            createdAt: message.createdAt,
+          })),
+      ),
+    );
   }
 
   async applyCreateProposal(
@@ -1422,9 +1493,11 @@ export class ProjectStore extends DurableObject<Env> {
     const suggestions = (await u.suggestions.forDoc(slug)).filter(
       (s) => !isCreateProposal(s),
     );
-    const hunks = await u.suggestions.hunksForSuggestions(
-      suggestions.map((s) => s.id),
-    );
+    const ids = suggestions.map((s) => s.id);
+    const [hunks, messages] = await Promise.all([
+      u.suggestions.hunksForSuggestions(ids),
+      u.suggestions.messagesForSuggestions(ids),
+    ]);
     return suggestions.map((s) => ({
       id: s.id,
       status: s.status,
@@ -1444,6 +1517,15 @@ export class ProjectStore extends DurableObject<Env> {
           baseEnd: h.baseEnd,
           proposedText: h.proposedText,
           decision: h.decision,
+        })),
+      messages: messages
+        .filter((message) => message.suggestionId === s.id)
+        .map((message) => ({
+          id: message.id,
+          body: message.body,
+          createdBy: message.createdBy,
+          channel: message.channel,
+          createdAt: message.createdAt,
         })),
     }));
   }

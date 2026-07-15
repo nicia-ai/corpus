@@ -50,6 +50,14 @@ export type SuggestionHunkView = Readonly<{
   decision: HunkDecision;
 }>;
 
+export type SuggestionMessageView = Readonly<{
+  id: number;
+  body: string;
+  createdBy: string;
+  channel: CallerChannel;
+  createdAt: string;
+}>;
+
 export type SuggestionView = Readonly<{
   id: number;
   status: SuggestionStatus;
@@ -62,6 +70,15 @@ export type SuggestionView = Readonly<{
   createdAt: string;
   reviewerNote: string | null;
   hunks: readonly SuggestionHunkView[];
+  messages: readonly SuggestionMessageView[];
+}>;
+
+export type ProposalMessage = Readonly<{
+  id: number;
+  body: string;
+  role: "proposer" | "reviewer";
+  channel: CallerChannel;
+  createdAt: string;
 }>;
 
 export type ProposalOutcome =
@@ -80,6 +97,7 @@ export type ProposalResult = Readonly<
       reviewerNote?: string;
       resolvedAt?: string;
       acceptedHunks: readonly SuggestionHunkView[];
+      messages: readonly ProposalMessage[];
     }
 >;
 
@@ -259,6 +277,7 @@ export type CreateProposalView = Readonly<{
   createdBy: string;
   channel: CallerChannel;
   createdAt: string;
+  messages: readonly SuggestionMessageView[];
 }>;
 
 export function createProposalView(
@@ -271,6 +290,7 @@ export function createProposalView(
     channel: CallerChannel;
     createdAt: string;
   }>,
+  messages: readonly SuggestionMessageView[] = [],
 ): CreateProposalView {
   const fallback =
     row.proposedPath === null
@@ -285,7 +305,55 @@ export function createProposalView(
     createdBy: row.createdBy,
     channel: row.channel,
     createdAt: row.createdAt,
+    messages,
   };
+}
+
+// — Proposal conversation ——————————————————————————————————————————
+
+export type AddSuggestionMessageInput = Readonly<{
+  suggestionId: number;
+  body: string;
+  createdBy: string;
+  channel: CallerChannel;
+  // MCP supplies this guard so ownership and the open-state check happen in
+  // the same transaction as the insert. A guessed proposal id is indistinct
+  // from a missing one and can never become a cross-caller write.
+  expectedCreatedBy?: string;
+}>;
+
+export type AddSuggestionMessageResult = Readonly<
+  | { ok: true; messageId: number; documentSlug: DocumentSlug }
+  | { ok: false; reason: "missing" | "not-open" }
+>;
+
+export async function addSuggestionMessageCommand(
+  ctx: ProjectCommandContext,
+  input: AddSuggestionMessageInput,
+): Promise<CommandOutcome<AddSuggestionMessageResult>> {
+  const proposal = await ctx.u.suggestions.get(input.suggestionId);
+  if (
+    proposal === undefined ||
+    (input.expectedCreatedBy !== undefined &&
+      proposal.createdBy !== input.expectedCreatedBy)
+  ) {
+    return commandOutcome({ ok: false, reason: "missing" });
+  }
+  if (proposal.status !== "open") {
+    return commandOutcome({ ok: false, reason: "not-open" });
+  }
+  const messageId = await ctx.u.suggestions.addMessage({
+    suggestionId: proposal.id,
+    body: input.body,
+    createdBy: input.createdBy,
+    channel: input.channel,
+    createdAt: ctx.now,
+  });
+  return commandOutcome({
+    ok: true,
+    messageId,
+    documentSlug: asDocumentSlug(proposal.documentSlug),
+  });
 }
 
 export type ApplyCreateProposalInput = Readonly<{

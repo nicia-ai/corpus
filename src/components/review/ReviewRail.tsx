@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { ProseDiff } from "@/components/diff/Diff";
 import { Field } from "@/components/Field";
+import { ProposalConversation } from "@/components/review/ProposalConversation";
 import { Button } from "@/components/ui/Button";
 import { cardClass } from "@/components/ui/Surface";
 import type { CallerChannel, ProjectId } from "@/ids";
@@ -115,6 +116,7 @@ function ReviewItems({
           suggestionNames[item.suggestion.createdBy] ??
           item.suggestion.createdBy
         }
+        names={suggestionNames}
         applyDisabled={applyDisabled}
         onChange={onChange}
       />
@@ -340,6 +342,7 @@ function SuggestionCard({
   item,
   baseMarkdown,
   author,
+  names,
   applyDisabled,
   onChange,
 }: Readonly<{
@@ -347,6 +350,7 @@ function SuggestionCard({
   item: Extract<ReviewItem, { kind: "suggestion" }>;
   baseMarkdown: string;
   author: string;
+  names: Readonly<Record<string, string>>;
   applyDisabled: boolean;
   onChange: () => void;
 }>): React.ReactElement {
@@ -417,6 +421,20 @@ function SuggestionCard({
           Based on an earlier version. Recreate it against the current text.
         </p>
       )}
+
+      <ProposalConversation
+        projectId={projectId}
+        proposalId={suggestion.id}
+        messages={suggestion.messages.map((message) => ({
+          id: message.id,
+          body: message.body,
+          authorLabel: names[message.createdBy] ?? message.createdBy,
+          channel: message.channel,
+          createdAt: message.createdAt,
+        }))}
+        canReply={open}
+        onChange={onChange}
+      />
 
       {open && item.applicable && (
         <>
