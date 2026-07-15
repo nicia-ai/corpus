@@ -62,3 +62,18 @@ wedge (2026-06-07). Each item has enough context to pick up cold.
   including which threads are visible and which actions remain human-only.
 - **Depends on:** behavioral demand from the agent-as-suggester beta.
 - **Blocks:** nothing. Explicitly post-validation.
+
+## Explicit lineage between revised proposals
+
+- **Decision:** Keep each proposal conversation immutable and scoped to that
+  proposal. A revised `suggest_edit` starts a fresh thread; messages are not
+  silently copied forward from settled work.
+- **What:** If beta usage shows reviewers need continuity, add an explicit
+  `supersedesProposalId` relation and render the linked proposal chain on both
+  edit and create-review history surfaces.
+- **Why:** Implicitly reusing the last proposal for a document is ambiguous
+  when several callers or concurrent proposals exist. Explicit lineage keeps
+  authorization and audit history inspectable.
+- **Depends on:** Product evidence for revised-proposal workflows and a design
+  for browsing settled create proposals.
+- **Blocks:** nothing.

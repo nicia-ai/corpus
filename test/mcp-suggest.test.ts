@@ -330,6 +330,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       colSlug("col-a"),
       (await store.collectionMembers(colSlug("col-a"))) ?? [],
       asCallerRef("apikey:agent-b"),
+      TEST_LOCATION,
     );
     expect(
       (

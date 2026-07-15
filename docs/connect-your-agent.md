@@ -147,7 +147,9 @@ messages appear in `get_proposal_result` and `await_proposal_review` as
 `role: "reviewer"` without a user id. The agent can answer with
 `reply_to_proposal`, then file a revised proposal with `suggest_edit` if the
 requested change warrants one. Only the human reviewer can settle the review;
-the reply tool neither resolves feedback nor changes canonical content.
+the reply tool neither resolves feedback nor changes canonical content. A
+revised proposal starts a new review thread; the settled predecessor remains an
+immutable audit record rather than silently carrying messages into new work.
 
 For anything beyond a small rules-style Collection, toggle **Always
 include** on for the documents the agent must always start from and

@@ -40,7 +40,10 @@ export class SuggestionRepo {
       .insert(suggestionMessage)
       .values(row)
       .returning({ id: suggestionMessage.id });
-    return r?.id ?? 0;
+    if (r === undefined) {
+      throw new Error("Suggestion message insert returned no id.");
+    }
+    return r.id;
   }
 
   messagesForSuggestions(
