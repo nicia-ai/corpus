@@ -57,12 +57,15 @@ version history.
   (per hunk for edits; create-then-attach for a proposed new document),
   never an auto-applied write. Agents propose; only humans approve.
   Review state (comments, suggestion threads) is otherwise off-MCP.
-- **CLI** — a Git-free `pull`/`push` tool (`pnpm corpus`) over a
+- **CLI** — a standalone Git-free `pull`/`push` tool
+  (`npm install -g @nicia-ai/corpus-cli`, then `corpus setup`) over a
   collection-scoped REST surface (`/api/v1/docs`), for editing documents
   from a terminal or CI with the same optimistic-concurrency contract as
   the editor. Its logic is a runtime-agnostic core (web `fetch` + an
-  injected filesystem port, zero `node:` imports), so it also runs under
-  Deno, Workers, or a WASM host. See [docs/cli.md](docs/cli.md).
+  injected filesystem port, zero `node:` imports), plus `corpus doctor` for
+  config, permissions, connectivity, and document-visibility diagnostics. The
+  core also runs under Deno, Workers, or a WASM host. See
+  [docs/cli.md](docs/cli.md).
 - **Portable bundle** — export the whole project as a deterministic,
   content-addressed bundle (web UI → Settings → Export); re-import to
   the same hash on any Corpus instance.

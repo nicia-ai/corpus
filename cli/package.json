@@ -1,0 +1,44 @@
+{
+  "name": "@nicia-ai/corpus-cli",
+  "version": "0.1.0",
+  "description": "Standalone CLI for a collection-scoped Corpus markdown store.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/core.js",
+  "types": "./dist/core.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    }
+  },
+  "bin": {
+    "corpus": "dist/corpus.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nicia-ai/corpus.git",
+    "directory": "cli"
+  }
+}

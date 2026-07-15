@@ -20,7 +20,43 @@ nothing is ever silently overwritten.
 > can only see and edit that collection's documents — never the rest of the
 > project.
 
-## Setup
+## Install and setup
+
+Install the standalone package, then run the guided setup once:
+
+```sh
+npm install --global @nicia-ai/corpus-cli
+corpus setup
+```
+
+The packaged CLI requires Node.js 22 or newer.
+
+`setup` asks for the Corpus URL and API key (the key is masked), verifies the
+connection, then writes a private `0600` config file under
+`$XDG_CONFIG_HOME/corpus/config.json` (normally
+`~/.config/corpus/config.json`). On Windows it uses
+`%LOCALAPPDATA%\\Corpus\\config.json` and relies on Windows ACLs rather than
+POSIX mode bits. Use `CORPUS_CONFIG` to choose another path.
+
+Confirm the whole local path is healthy at any time:
+
+```sh
+corpus doctor
+```
+
+Doctor checks configuration permissions, key format, working-directory
+writability, authentication, server reachability, and how many documents the
+credential can see.
+
+For a non-interactive setup (for example, a development container), inject the
+key through the environment so it does not land in shell history:
+
+```sh
+CORPUS_API_KEY="cck_…" corpus setup --url "https://corpus.example.com"
+```
+
+The CLI also accepts environment variables. They override saved configuration,
+which is convenient in CI:
 
 The CLI needs two environment variables:
 
@@ -34,10 +70,11 @@ export CORPUS_URL="https://corpus.example.com"
 export CORPUS_API_KEY="cck_…"
 ```
 
-Run it from a checkout of the repository:
+From a Corpus source checkout, `pnpm corpus` remains an equivalent development
+entry point:
 
 ```sh
-pnpm corpus <list|pull|push> …
+pnpm corpus <setup|doctor|list|pull|push> …
 ```
 
 It is a thin wrapper over the REST endpoints documented [below](#rest-api) —
@@ -51,7 +88,7 @@ List the documents in the bound collection, one per line as
 `slug`, version, and title:
 
 ```sh
-$ pnpm corpus list
+$ corpus list
 api-style-guide   v4   API Style Guide
 deploy-runbook    v2   Deploy Runbook
 ```
@@ -65,7 +102,7 @@ Download a document's current markdown to a local file (default
 `<slug>.md`):
 
 ```sh
-$ pnpm corpus pull api-style-guide
+$ corpus pull api-style-guide
 pulled api-style-guide (v4) → api-style-guide.md
 ```
 
@@ -79,7 +116,7 @@ that isn't in your collection fails with `not found`.
 Upload your local edits as a new version (default file `<slug>.md`):
 
 ```sh
-$ pnpm corpus push api-style-guide
+$ corpus push api-style-guide
 pushed api-style-guide → v5
 ```
 
@@ -88,7 +125,7 @@ from. If the document has moved on since you pulled, the push is **rejected**
 rather than clobbering the newer version:
 
 ```sh
-$ pnpm corpus push api-style-guide
+$ corpus push api-style-guide
 conflict: the document is at v6. Pull, reapply your change, and push again.
 ```
 
@@ -120,7 +157,7 @@ immediately:
 
 ```sh
 $ printf '# Onboarding\n\nWelcome…\n' > onboarding.md
-$ pnpm corpus push onboarding ./onboarding.md
+$ corpus push onboarding ./onboarding.md
 pushed onboarding → v1
 ```
 
@@ -153,9 +190,9 @@ owner-only. Revoke a key the moment it might be exposed — see
 export CORPUS_URL="https://corpus.example.com"
 export CORPUS_API_KEY="cck_…"
 
-pnpm corpus pull deploy-runbook      # → deploy-runbook.md (+ sidecar)
+corpus pull deploy-runbook           # → deploy-runbook.md (+ sidecar)
 $EDITOR deploy-runbook.md            # make your changes
-pnpm corpus push deploy-runbook      # → new version, sidecar updated
+corpus push deploy-runbook           # → new version, sidecar updated
 ```
 
 ## REST API
@@ -192,7 +229,7 @@ type Files = {
 };
 ```
 
-`pnpm corpus` is just the Node shell that wires `node:fs` + `node:process`
+The published `corpus` binary is the Node shell that wires `node:fs` + `node:process`
 to that core. To run the CLI elsewhere — Deno, Bun, a Cloudflare Worker, or
 a WASM host — supply your own `fetch` and `Files` adapter and call the same
 exported `list`/`pull`/`push`. (The test suite does exactly this: the

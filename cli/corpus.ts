@@ -1,77 +1,382 @@
-import { readFile, writeFile } from "node:fs/promises";
-import process from "node:process";
+#!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import {
+  access,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { homedir, platform } from "node:os";
+import { dirname, join } from "node:path";
+import process from "node:process";
+import { emitKeypressEvents } from "node:readline";
+import { createInterface as createPromiseInterface } from "node:readline/promises";
+
+import {
+  parseSavedConfig,
+  resolveConfig,
+  savedConfig,
+  serializeSavedConfig,
+  type SavedConfig,
+} from "./config.js";
 import {
   CliError,
   type CorpusConfig,
+  doctor,
   type Files,
   list,
   pull,
   push,
-} from "./core";
-
-// Node entry point for the Corpus CLI. All runtime-specific concerns live
-// here — environment, argv, stdout/stderr, exit, and the `node:fs` adapter
-// — so the actual list/pull/push logic stays in the portable `./core`
-// (web `fetch` + injected ports only), runnable under Deno, Workers, or a
-// WASM host with a different shell.
-//
-// Run: CORPUS_URL=… CORPUS_API_KEY=… pnpm corpus <list|pull|push> …
+} from "./core.js";
 
 function die(message: string): never {
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }
 
-const baseUrl = process.env.CORPUS_URL;
-const apiKey = process.env.CORPUS_API_KEY;
-if (baseUrl === undefined || apiKey === undefined) {
-  die("Set CORPUS_URL and CORPUS_API_KEY.");
+function configPath(): string {
+  if (process.env.CORPUS_CONFIG !== undefined) {
+    return process.env.CORPUS_CONFIG;
+  }
+  if (process.env.XDG_CONFIG_HOME !== undefined) {
+    return join(process.env.XDG_CONFIG_HOME, "corpus", "config.json");
+  }
+  if (platform() === "win32") {
+    const root =
+      process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
+    return join(root, "Corpus", "config.json");
+  }
+  return join(homedir(), ".config", "corpus", "config.json");
 }
 
-// node:fs adapter for the core's `Files` port. A missing path resolves to
-// `undefined` (the port's "absent" contract), so a missing sidecar or file
-// is data the core handles, not an exception that escapes here.
+async function readStoredConfig(
+  path: string,
+): Promise<SavedConfig | undefined> {
+  try {
+    return parseSavedConfig(await readFile(path, "utf8"));
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return undefined;
+    }
+    throw new Error(`Invalid Corpus config at ${path}. Run corpus setup.`, {
+      cause: error,
+    });
+  }
+}
+
 const files: Files = {
   readText: async (path) => {
     try {
       return await readFile(path, "utf8");
-    } catch {
-      return undefined;
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return undefined;
+      }
+      throw error;
     }
   },
   writeText: (path, data) => writeFile(path, data),
 };
 
-const cfg: CorpusConfig = { baseUrl, apiKey, fetch, files };
+function runtimeConfig(config: SavedConfig): CorpusConfig {
+  return { ...config, fetch, files };
+}
+
+async function configured(): Promise<
+  Readonly<{
+    config: SavedConfig;
+    path: string;
+  }>
+> {
+  const path = configPath();
+  const environmentComplete =
+    process.env.CORPUS_URL !== undefined &&
+    process.env.CORPUS_API_KEY !== undefined;
+  const stored = environmentComplete ? undefined : await readStoredConfig(path);
+  const config = resolveConfig(process.env, stored);
+  if (config === undefined) {
+    die(`Corpus is not configured. Run "corpus setup" (config: ${path}).`);
+  }
+  return { config, path };
+}
+
+type SetupOptions = Readonly<{ url?: string }>;
+
+function parseSetupOptions(args: readonly string[]): SetupOptions {
+  let url: string | undefined;
+  for (let index = 0; index < args.length; index += 2) {
+    const name = args[index];
+    const value = args[index + 1];
+    if (name !== "--url" || value === undefined || value.startsWith("--")) {
+      throw new Error("usage: corpus setup [--url URL]");
+    }
+    if (url !== undefined) throw new Error("--url may be passed only once.");
+    url = value;
+  }
+  return {
+    ...(url === undefined ? {} : { url }),
+  };
+}
+
+async function prompt(label: string): Promise<string> {
+  const rl = createPromiseInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    return await rl.question(label);
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptSecret(label: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(
+      "Non-interactive setup needs CORPUS_API_KEY in the environment.",
+    );
+  }
+  emitKeypressEvents(process.stdin);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdout.write(label);
+  return new Promise((resolve, reject) => {
+    let value = "";
+    const cleanup = (): void => {
+      process.stdin.off("keypress", onKeypress);
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdout.write("\n");
+    };
+    const onKeypress = (
+      text: string,
+      key: Readonly<{ name?: string; ctrl?: boolean }>,
+    ): void => {
+      if (key.ctrl === true && key.name === "c") {
+        cleanup();
+        reject(new Error("Setup cancelled."));
+        return;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        cleanup();
+        resolve(value);
+        return;
+      }
+      if (key.name === "backspace") {
+        if (value.length > 0) {
+          value = value.slice(0, -1);
+          process.stdout.write("\b \b");
+        }
+        return;
+      }
+      if (text !== "" && key.ctrl !== true) {
+        value += text;
+        process.stdout.write("•");
+      }
+    };
+    process.stdin.on("keypress", onKeypress);
+  });
+}
+
+async function writePrivateConfig(
+  path: string,
+  config: SavedConfig,
+): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = join(
+    dirname(path),
+    `.config-${String(process.pid)}-${randomUUID()}.tmp`,
+  );
+  try {
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      await handle.writeFile(serializeSavedConfig(config), "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function setup(args: readonly string[]): Promise<void> {
+  const options = parseSetupOptions(args);
+  // Setup is the repair path too: an invalid existing file should not prevent
+  // the user from replacing it with a verified configuration.
+  const current = await readStoredConfig(configPath()).catch(() => undefined);
+  const suppliedUrl =
+    options.url ??
+    process.env.CORPUS_URL ??
+    (await prompt(
+      `Corpus URL${current === undefined ? "" : ` [${current.baseUrl}]`}: `,
+    ));
+  const baseUrl =
+    suppliedUrl.trim() === "" ? (current?.baseUrl ?? "") : suppliedUrl;
+  const suppliedKey =
+    process.env.CORPUS_API_KEY ?? (await promptSecret("Corpus API key: "));
+  const apiKey =
+    suppliedKey.trim() === "" ? (current?.apiKey ?? "") : suppliedKey;
+  const config = savedConfig({ baseUrl, apiKey });
+  if (!config.apiKey.startsWith("cck_")) {
+    throw new Error("Corpus API keys start with cck_.");
+  }
+  process.stdout.write("Checking connection…\n");
+  const result = await doctor(runtimeConfig(config));
+  const path = configPath();
+  await writePrivateConfig(path, config);
+  process.stdout.write(
+    `Configured ${config.baseUrl} (${String(result.documentCount)} documents visible).\nSaved ${path}\n`,
+  );
+}
+
+async function runDoctor(): Promise<void> {
+  const { config, path } = await configured();
+  const failures: string[] = [];
+  const pass = (message: string): void => {
+    process.stdout.write(`✓ ${message}\n`);
+  };
+  const fail = (message: string): void => {
+    failures.push(message);
+    process.stdout.write(`✗ ${message}\n`);
+  };
+
+  pass(`configuration loaded (${path})`);
+  try {
+    if (platform() === "win32") {
+      await access(path, constants.R_OK);
+      pass("saved config is readable (Windows ACLs apply)");
+    } else {
+      const mode = (await stat(path)).mode & 0o777;
+      if ((mode & 0o077) === 0) pass("config permissions are private (0600)");
+      else fail(`config permissions are too broad (${mode.toString(8)})`);
+    }
+  } catch {
+    if (
+      process.env.CORPUS_URL !== undefined &&
+      process.env.CORPUS_API_KEY !== undefined
+    ) {
+      pass("credentials supplied by environment");
+    } else {
+      fail("saved config file is not readable");
+    }
+  }
+  if (config.apiKey.startsWith("cck_")) pass("API key format looks valid");
+  else fail("API key must start with cck_");
+  try {
+    await access(process.cwd(), constants.W_OK);
+    pass(`working directory is writable (${process.cwd()})`);
+  } catch {
+    fail(`working directory is not writable (${process.cwd()})`);
+  }
+  try {
+    const result = await doctor(runtimeConfig(config));
+    pass(
+      `server authenticated; ${String(result.documentCount)} documents visible`,
+    );
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+  if (failures.length > 0) {
+    die(`Doctor found ${String(failures.length)} problem(s).`);
+  }
+}
+
+async function version(): Promise<string> {
+  const packageUrl = new URL("../package.json", import.meta.url);
+  const parsed: unknown = JSON.parse(await readFile(packageUrl, "utf8"));
+  return typeof parsed === "object" && parsed !== null && "version" in parsed
+    ? String(parsed.version)
+    : "unknown";
+}
+
+function usage(): string {
+  return `usage: corpus <command> [options]
+
+Commands:
+  setup [--url URL]                  Configure and verify this machine
+  doctor                            Check config, permissions, and connectivity
+  list                              List documents in the bound collection
+  pull <slug> [path]                Download markdown + version sidecar
+  push <slug> [path]                Upload a new conflict-checked version
+
+Environment overrides: CORPUS_URL, CORPUS_API_KEY, CORPUS_CONFIG`;
+}
 
 async function main(): Promise<void> {
-  const [command, arg1, arg2] = process.argv.slice(2);
+  const [command, ...args] = process.argv.slice(2);
+  if (command === undefined) die(usage());
+  if (command === "setup") {
+    return setup(args);
+  }
+  if (command === "doctor") {
+    if (args.length > 0) die("usage: corpus doctor");
+    return runDoctor();
+  }
+  if (command === "--version" || command === "-v") {
+    if (args.length > 0) die("usage: corpus --version");
+    process.stdout.write(`${await version()}\n`);
+    return;
+  }
+  if (command === "--help" || command === "-h") {
+    if (args.length > 0) die("usage: corpus --help");
+    process.stdout.write(`${usage()}\n`);
+    return;
+  }
   switch (command) {
     case "list": {
+      if (args.length > 0) die("usage: corpus list");
+      const { config } = await configured();
+      const cfg = runtimeConfig(config);
       for (const d of await list(cfg)) {
         process.stdout.write(`${d.slug}\tv${d.docVersion}\t${d.title}\n`);
       }
       return;
     }
     case "pull": {
-      if (arg1 === undefined) die("usage: corpus pull <slug> [path]");
-      const { file, doc } = await pull(cfg, arg1, arg2);
-      process.stdout.write(`pulled ${arg1} (v${doc.docVersion}) → ${file}\n`);
+      const [slug, path] = args;
+      if (slug === undefined || args.length > 2) {
+        die("usage: corpus pull <slug> [path]");
+      }
+      const { config } = await configured();
+      const { file, doc } = await pull(runtimeConfig(config), slug, path);
+      process.stdout.write(`pulled ${slug} (v${doc.docVersion}) → ${file}\n`);
       return;
     }
     case "push": {
-      if (arg1 === undefined) die("usage: corpus push <slug> [path]");
-      const { docVersion } = await push(cfg, arg1, arg2);
-      process.stdout.write(`pushed ${arg1} → v${docVersion}\n`);
+      const [slug, path] = args;
+      if (slug === undefined || args.length > 2) {
+        die("usage: corpus push <slug> [path]");
+      }
+      const { config } = await configured();
+      const { docVersion } = await push(runtimeConfig(config), slug, path);
+      process.stdout.write(`pushed ${slug} → v${docVersion}\n`);
       return;
     }
     default:
-      die("usage: corpus <list|pull|push> [...]");
+      die(`Unknown command: ${command}\n\n${usage()}`);
   }
 }
 
-main().catch((e: unknown) => {
-  if (e instanceof CliError) die(e.message);
-  die(e instanceof Error ? e.message : String(e));
+main().catch((error: unknown) => {
+  if (error instanceof CliError) die(error.message);
+  die(error instanceof Error ? error.message : String(error));
 });
