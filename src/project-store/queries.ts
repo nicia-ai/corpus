@@ -35,6 +35,7 @@ import { compact, estimateTokens, pluralize } from "../util";
 import type {
   CollectionOutline,
   DocumentHistoryEntry,
+  DocumentHistoryMeta,
   DocumentSearchHit,
   DocumentSnapshot,
   OutlineDoc,
@@ -402,6 +403,71 @@ export async function documentHistoryProjection(
       });
     })
     .sort((a, b) => b.docVersion - a.docVersion);
+}
+
+export async function documentHistoryPageProjection(
+  u: ProjectUnit,
+  slug: DocumentSlug,
+  selectedVersion?: number,
+): Promise<
+  Readonly<{
+    history: readonly DocumentHistoryMeta[];
+    active: DocumentHistoryEntry | undefined;
+  }>
+> {
+  const rows = [...(await u.versions.documentVersions(slug))].sort(
+    (a, b) => b.docVersion - a.docVersion,
+  );
+  const retainedHashes = await u.blobs.existing(
+    rows.map((row) => row.contentHash),
+  );
+  const history = rows.map((row) =>
+    compact({
+      docVersion: row.docVersion,
+      changedAt: row.changedAt,
+      changedBy: row.changedBy,
+      diffSummary: row.diffSummary,
+      retained: retainedHashes.has(row.contentHash),
+    }),
+  );
+  const selected =
+    selectedVersion === undefined
+      ? (rows[1] ?? rows[0])
+      : rows.find((row) => row.docVersion === selectedVersion);
+  if (selected === undefined) return { history, active: undefined };
+
+  const markdown = retainedHashes.has(selected.contentHash)
+    ? await u.blobs.get(selected.contentHash)
+    : undefined;
+  return {
+    history,
+    active: compact({
+      docVersion: selected.docVersion,
+      changedAt: selected.changedAt,
+      changedBy: selected.changedBy,
+      diffSummary: selected.diffSummary,
+      markdown: markdown ?? "",
+      retained: markdown !== undefined,
+    }),
+  };
+}
+
+export async function documentHistoryVersionProjection(
+  u: ProjectUnit,
+  slug: DocumentSlug,
+  docVersion: number,
+): Promise<DocumentHistoryEntry | undefined> {
+  const row = await u.versions.documentVersion(slug, docVersion);
+  if (row === undefined) return undefined;
+  const markdown = await u.blobs.get(row.contentHash);
+  return compact({
+    docVersion: row.docVersion,
+    changedAt: row.changedAt,
+    changedBy: row.changedBy,
+    diffSummary: row.diffSummary,
+    markdown: markdown ?? "",
+    retained: markdown !== undefined,
+  });
 }
 
 export async function verifyHistoryProjection(

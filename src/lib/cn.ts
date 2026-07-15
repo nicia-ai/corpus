@@ -1,9 +1,8 @@
 import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
 
-// Conditional class composition with Tailwind conflict resolution. The one
-// place variant components merge classes — keeps later utilities winning
-// over base ones instead of fighting source order.
+// Conditional class composition only. Shared components own their variants;
+// intentional one-off utility overrides use Tailwind's explicit `!` modifier
+// instead of shipping a runtime parser for the entire Tailwind grammar.
 export function cn(...inputs: ClassValue[]): string {
-  return twMerge(clsx(inputs));
+  return clsx(inputs);
 }

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 
-import { getAuth } from "../src/auth";
+import { getAuth } from "../src/auth.server";
 import { connectControlDb } from "../src/control/db";
 import {
   DEFAULT_PROJECT_NAME,

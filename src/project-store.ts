@@ -103,6 +103,7 @@ import type {
   CollectionOutline,
   CreateInCollectionResult,
   DocumentHistoryEntry,
+  DocumentHistoryMeta,
   DocumentSearchHit,
   ImportAndLinkInput,
   ImportAndLinkResult,
@@ -134,7 +135,9 @@ import {
   collectionOutlineProjection,
   collectionStructureProjection,
   documentHistoryProjection,
+  documentHistoryPageProjection,
   getDocumentProjection,
+  documentHistoryVersionProjection,
   resolvedMembersProjection,
   listCollectionsProjection,
   listDocumentsProjection,
@@ -250,9 +253,10 @@ export type DocumentReviewSnapshot = Readonly<{
   suggestions: readonly SuggestionView[];
 }>;
 
-export type DocumentHistorySnapshot = Readonly<{
+export type DocumentHistoryPageSnapshot = Readonly<{
   doc: DocumentSnapshot | undefined;
-  history: readonly DocumentHistoryEntry[];
+  history: readonly DocumentHistoryMeta[];
+  active: DocumentHistoryEntry | undefined;
 }>;
 
 // Internal sentinel: a scoped create's bound collection vanished between
@@ -690,15 +694,27 @@ export class ProjectStore extends DurableObject<Env> {
     return { doc, blocks, comments, suggestions };
   }
 
-  async documentHistorySnapshot(
+  async documentHistoryPageSnapshot(
     slug: DocumentSlug,
-  ): Promise<DocumentHistorySnapshot> {
+    selectedVersion?: number,
+  ): Promise<DocumentHistoryPageSnapshot> {
     const u = await this.read();
-    const [doc, history] = await Promise.all([
+    const [doc, page] = await Promise.all([
       getDocumentProjection(u, slug),
-      documentHistoryProjection(u, slug),
+      documentHistoryPageProjection(u, slug, selectedVersion),
     ]);
-    return { doc, history };
+    return { doc, ...page };
+  }
+
+  async documentHistoryVersion(
+    slug: DocumentSlug,
+    docVersion: number,
+  ): Promise<DocumentHistoryEntry | undefined> {
+    return documentHistoryVersionProjection(
+      await this.read(),
+      slug,
+      docVersion,
+    );
   }
 
   async listDocuments(): Promise<

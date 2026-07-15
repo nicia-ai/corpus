@@ -29,7 +29,7 @@ export function provenanceSlug(name: string): string {
 // Better Auth owns organization + member + invitation; Nicia owns
 // `project` (one ProjectStore DO per project — a concept Better Auth has
 // no notion of). This module is the seam between the two, imported by
-// BOTH the Better Auth `organizationHooks` (src/auth.ts) and
+// BOTH the Better Auth `organizationHooks` (src/auth.server.ts) and
 // `tenancy.ts`, so neither imports the other (no cycle).
 
 // `afterCreateOrganization` hook: materialize the org's default project.

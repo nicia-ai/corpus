@@ -85,7 +85,6 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
-    "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.2",
     "unified": "^11.0.5",
     "yaml": "^2.9.0",

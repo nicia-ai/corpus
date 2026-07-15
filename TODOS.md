@@ -24,9 +24,10 @@ wedge (2026-06-07). Each item has enough context to pick up cold.
   (`broadcastChanged`). The per-doc pending count covers in-app; email
   covers the absent human — needed for a real product, not for the beta.
 - **Where to start:** The transport already exists — `sendEmail` in
-  `src/control/email.ts` (Cloudflare Email Service or Resend, selected by
-  `EMAIL_PROVIDER`/`EMAIL_FROM`/`RESEND_API_KEY` in `src/control/env.ts`),
-  already used fail-soft by invite sending in `src/lib/server/team.ts`.
+  `src/control/email.server.ts` (Cloudflare Email Service or Resend, selected by
+  `EMAIL_PROVIDER`/`EMAIL_FROM`/`RESEND_API_KEY` in
+  `src/control/env.server.ts`), already used fail-soft by invite sending in
+  `src/lib/server/team.server.ts`.
   Remaining work is the feature itself: member-address lookup via the
   control DB, a recipient policy (all org members? owners?), and a hook at
   the suggestion write's transport seam (the `/mcp` path in `src/api.ts`

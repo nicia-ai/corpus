@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Transient confirmation toast ("Saved", "Copied") auto-dismiss window.
 export const TOAST_MS = 1500;
@@ -13,21 +13,29 @@ export function useSubmit<A extends unknown[]>(
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
   const lock = useRef(false);
+  const actionRef = useRef(action);
 
-  async function run(...args: A) {
+  // Event handlers should stay referentially stable so memoized rows do not
+  // all re-render when unrelated form state changes. Refresh the action after
+  // each commit; browser events run after passive effects have flushed.
+  useEffect(() => {
+    actionRef.current = action;
+  }, [action]);
+
+  const run = useCallback(async (...args: A): Promise<void> => {
     if (lock.current) return;
     lock.current = true;
     setPending(true);
     setError(undefined);
     try {
-      await action(...args);
+      await actionRef.current(...args);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       lock.current = false;
       setPending(false);
     }
-  }
+  }, []);
 
   return { pending, error, run };
 }

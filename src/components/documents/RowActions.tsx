@@ -24,7 +24,7 @@ export function IconButton({
       title={label}
       onClick={onClick}
       className={cn(
-        "rounded-md p-1.5 text-slate-400 hover:bg-slate-100",
+        "grid size-11 place-items-center rounded-md text-slate-400 hover:bg-slate-100",
         danger === true ? "hover:text-red-600" : "hover:text-slate-700",
       )}
     >
@@ -55,14 +55,14 @@ export function InlineConfirm({
           setConfirming(false);
           onConfirm();
         }}
-        className="font-medium text-red-600 hover:underline"
+        className="min-h-11 font-medium text-red-600 hover:underline"
       >
         Delete
       </button>
       <button
         type="button"
         onClick={() => setConfirming(false)}
-        className="text-slate-500 hover:underline"
+        className="min-h-11 text-slate-500 hover:underline"
       >
         Cancel
       </button>

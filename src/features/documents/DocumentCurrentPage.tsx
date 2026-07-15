@@ -1,19 +1,11 @@
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { markdownEditorHostClass } from "@/components/markdown/host-class";
 import { CHANGE_FLASH_DURATION_MS } from "@/components/markdown/live-review";
 import type { DocRef } from "@/components/markdown/MarkdownEditor";
-import type {
-  ChangeFlash,
-  VisibleDocSnapshot,
+import {
+  DocumentEditor,
+  type ChangeFlash,
+  type VisibleDocSnapshot,
 } from "@/features/documents/DocumentEditor";
 import type { ProjectId } from "@/ids";
 import { changedBlockIndexes } from "@/lib/changed-blocks";
@@ -24,19 +16,6 @@ import type {
 } from "@/lib/server/comments";
 import type { DocSnapshot } from "@/lib/server/documents";
 import type { SuggestionsResult } from "@/lib/server/suggestions";
-
-// CodeMirror (+ live-preview + language-data) only loads when a reader first
-// enters this page — it stays out of the read path's route chunk (the
-// primary audience reads, not edits; PRODUCT.md).
-const DocumentEditor = lazy(() =>
-  import("@/features/documents/DocumentEditor").then((m) => ({
-    default: m.DocumentEditor,
-  })),
-);
-
-// Same box class the mounted editor uses (host-class.ts), so the Suspense
-// fallback can't drift out of sync with it.
-const documentEditorFallback = <div className={markdownEditorHostClass} />;
 
 // A remote change the page hasn't flashed yet. `content` carries the
 // pre-change snapshot so the flash can diff against the new head; `suggestion`
@@ -131,24 +110,22 @@ export function DocumentCurrentPage({
 
   if (doc === undefined) return null;
 
-  // Keyed by version: a successful save invalidates the loader, the new
-  // version remounts the editor with a fresh draft — no useEffect re-seeding.
+  // The editor owns the draft across loader invalidations. Its inner
+  // CodeMirror instance is version-keyed only while clean, so a loader
+  // catch-up can never remount away keystrokes typed after a save response.
   return (
-    <Suspense fallback={documentEditorFallback}>
-      <DocumentEditor
-        key={doc.docVersion}
-        doc={doc}
-        projectId={projectId}
-        blocks={blocks}
-        comments={comments}
-        suggestions={suggestions}
-        viewerId={viewerId}
-        docRefs={docRefs}
-        changeFlash={changeFlash}
-        onRemoteContentChange={queueRemoteContentFlash}
-        onRemoteSuggestionChange={queueRemoteSuggestionFlash}
-      />
-    </Suspense>
+    <DocumentEditor
+      doc={doc}
+      projectId={projectId}
+      blocks={blocks}
+      comments={comments}
+      suggestions={suggestions}
+      viewerId={viewerId}
+      docRefs={docRefs}
+      changeFlash={changeFlash}
+      onRemoteContentChange={queueRemoteContentFlash}
+      onRemoteSuggestionChange={queueRemoteSuggestionFlash}
+    />
   );
 }
 

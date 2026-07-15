@@ -47,7 +47,7 @@ export function ReviewMobileDialog({
             type="button"
             aria-label="Close review"
             onClick={() => onOpenChange(false)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"
+            className="inline-flex size-11 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"
           >
             <X className="h-4 w-4" />
           </button>

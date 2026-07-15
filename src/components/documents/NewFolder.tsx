@@ -40,7 +40,7 @@ export function NewFolder({
           if (name.trim() === "") onCancel();
         }}
         placeholder="New folder name"
-        className={fieldInputClass("py-1")}
+        className={fieldInputClass("py-1!")}
       />
     </form>
   );

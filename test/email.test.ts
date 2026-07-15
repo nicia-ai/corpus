@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type EmailMessage, sendEmail } from "../src/control/email";
-import { resolveServerEnv } from "../src/control/env";
+import { type EmailMessage, sendEmail } from "../src/control/email.server";
+import { resolveServerEnv } from "../src/control/env.server";
 
 const SECRET = "test-secret-that-is-at-least-32-chars";
 const FROM = "Corpus <noreply@example.com>";

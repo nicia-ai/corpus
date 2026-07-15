@@ -1,9 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { connectControlDb } from "@/control/db";
 import { entitlementsOf } from "@/control/entitlements";
-import { resolveUserNames } from "@/control/users";
 import { ValidationError } from "@/errors";
 import {
   asDocumentSlug,
@@ -60,6 +58,7 @@ export type DocVersionEntry = Readonly<{
   markdown: string;
   retained: boolean;
 }>;
+export type DocVersionMeta = Omit<DocVersionEntry, "markdown">;
 export type SaveResult = Readonly<
   | { ok: true; docVersion: number }
   | { ok: false; conflict: true; currentVersion: number }
@@ -152,21 +151,6 @@ export const getDocument = createServerFn({ method: "GET" })
           docVersion: d.docVersion,
           updatedAt: d.updatedAt,
         };
-  });
-
-export const getDocumentHistory = createServerFn({ method: "GET" })
-  .middleware([projectMiddleware])
-  .validator(z.object({ slug: z.string().min(1) }))
-  .handler(async ({ data, context }): Promise<DocVersionEntry[]> => {
-    const c = srv(context);
-    const entries = await storeOf(c).documentHistory(asDocumentSlug(data.slug));
-    const names = await resolveUserNames(
-      connectControlDb(c.env.DB),
-      entries.map((e) => e.changedBy),
-    );
-    return entries.map((e) =>
-      compact({ ...e, changedByName: names.get(e.changedBy) }),
-    );
   });
 
 export const saveDocument = createServerFn({ method: "POST" })

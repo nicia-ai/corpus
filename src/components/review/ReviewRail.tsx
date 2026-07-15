@@ -20,7 +20,7 @@ import {
 } from "@/lib/server/suggestions";
 import type { PresenceUser } from "@/lib/use-collab";
 
-const REVIEW_CARD_CLASS = cardClass("space-y-3 px-4 py-3");
+const REVIEW_CARD_CLASS = cardClass("space-y-3 px-4! py-3!");
 
 export type ReviewRailLayout = Readonly<{
   itemTops: Readonly<Record<string, number>>;
@@ -35,6 +35,7 @@ export function ReviewRail({
   baseMarkdown,
   presence,
   layout,
+  applyDisabled = false,
   onChange,
 }: Readonly<{
   projectId: ProjectId;
@@ -44,6 +45,7 @@ export function ReviewRail({
   baseMarkdown: string;
   presence: readonly PresenceUser[];
   layout?: ReviewRailLayout;
+  applyDisabled?: boolean;
   onChange: () => void;
 }>): React.ReactElement {
   const positionedLayout =
@@ -69,6 +71,7 @@ export function ReviewRail({
         suggestionNames={suggestionNames}
         baseMarkdown={baseMarkdown}
         layout={positionedLayout}
+        applyDisabled={applyDisabled}
         onChange={onChange}
       />
     </aside>
@@ -82,6 +85,7 @@ function ReviewItems({
   suggestionNames,
   baseMarkdown,
   layout,
+  applyDisabled,
   onChange,
 }: Readonly<{
   projectId: ProjectId;
@@ -90,6 +94,7 @@ function ReviewItems({
   suggestionNames: Readonly<Record<string, string>>;
   baseMarkdown: string;
   layout: ReviewRailLayout | undefined;
+  applyDisabled: boolean;
   onChange: () => void;
 }>): React.ReactElement {
   function renderItem(item: ReviewItem): React.ReactElement {
@@ -109,6 +114,7 @@ function ReviewItems({
           suggestionNames[item.suggestion.createdBy] ??
           item.suggestion.createdBy
         }
+        applyDisabled={applyDisabled}
         onChange={onChange}
       />
     );
@@ -234,7 +240,7 @@ function CommentCard({
             type="button"
             disabled={resolving}
             onClick={() => void resolve()}
-            className="text-sm font-medium text-slate-500 hover:text-green-700 disabled:opacity-50"
+            className="min-h-11 text-sm font-medium text-slate-500 hover:text-green-700 disabled:opacity-50"
           >
             Resolve
           </button>
@@ -272,12 +278,12 @@ function CommentCard({
             value={reply}
             onChange={(e) => setReply(e.target.value)}
             placeholder="Reply..."
-            className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-base focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+            className="min-h-11 min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-base focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
           />
           <button
             type="submit"
             disabled={replying || reply.trim() === ""}
-            className="text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
+            className="min-h-11 text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
           >
             Reply
           </button>
@@ -313,7 +319,7 @@ function ResolvedAnchorEvidence({
             type="button"
             aria-expanded={expanded}
             onClick={() => onExpandedChange(!expanded)}
-            className="font-medium text-slate-500 hover:text-slate-900"
+            className="min-h-11 font-medium text-slate-500 hover:text-slate-900"
           >
             {expanded ? "Hide change" : "Show change"}
           </button>
@@ -333,12 +339,14 @@ function SuggestionCard({
   item,
   baseMarkdown,
   author,
+  applyDisabled,
   onChange,
 }: Readonly<{
   projectId: ProjectId;
   item: Extract<ReviewItem, { kind: "suggestion" }>;
   baseMarkdown: string;
   author: string;
+  applyDisabled: boolean;
   onChange: () => void;
 }>): React.ReactElement {
   const suggestion = item.suggestion;
@@ -433,7 +441,7 @@ function SuggestionCard({
           </ul>
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              disabled={applying || acceptedCount === 0}
+              disabled={applyDisabled || applying || acceptedCount === 0}
               onClick={() => void apply()}
             >
               Apply {acceptedCount} accepted
@@ -443,6 +451,11 @@ function SuggestionCard({
             </Button>
             {applyError !== undefined && (
               <span className="text-sm text-red-600">{applyError}</span>
+            )}
+            {applyDisabled && (
+              <span className="text-sm text-slate-500">
+                Save or discard your draft before applying.
+              </span>
             )}
           </div>
         </>
@@ -531,7 +544,7 @@ function DecisionButton({
       aria-label={accept ? "Accept hunk" : "Reject hunk"}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-sm border",
+        "inline-flex size-11 items-center justify-center rounded-sm border",
         active
           ? accept
             ? "border-green-300 bg-green-50 text-green-700"

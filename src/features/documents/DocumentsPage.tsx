@@ -7,7 +7,7 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DocRow } from "@/components/documents/DocRow";
 import { FolderHeader } from "@/components/documents/FolderHeader";
@@ -78,25 +78,33 @@ export function DocumentsPage({
 }>): React.ReactElement {
   const router = useRouter();
 
-  const childFolders = new Map<DropTarget, FolderRow[]>();
-  for (const f of [...folders].sort((a, b) => a.position - b.position)) {
-    const list = childFolders.get(f.parentSlug) ?? [];
-    list.push(f);
-    childFolders.set(f.parentSlug, list);
-  }
-  const docsByFolder = new Map<DropTarget, DocListItem[]>();
-  for (const d of documents) {
-    const list = docsByFolder.get(d.folderSlug) ?? [];
-    list.push(d);
-    docsByFolder.set(d.folderSlug, list);
-  }
+  const { childFolders, docsByFolder } = useMemo(() => {
+    const nextFolders = new Map<DropTarget, FolderRow[]>();
+    for (const folder of [...folders].sort((a, b) => a.position - b.position)) {
+      const list = nextFolders.get(folder.parentSlug) ?? [];
+      list.push(folder);
+      nextFolders.set(folder.parentSlug, list);
+    }
+    const nextDocs = new Map<DropTarget, DocListItem[]>();
+    for (const document of documents) {
+      const list = nextDocs.get(document.folderSlug) ?? [];
+      list.push(document);
+      nextDocs.set(document.folderSlug, list);
+    }
+    return { childFolders: nextFolders, docsByFolder: nextDocs };
+  }, [documents, folders]);
 
   const drag = useRef<Dragged | null>(null);
   // `undefined` = nothing hovered; `null` = root container; a string =
   // that folder slug.
   const [over, setOver] = useState<DropTarget | undefined>(undefined);
   const [expanded, setExpanded] = useState<ReadonlySet<FolderSlug>>(
-    () => new Set(folders.map((f) => f.slug)),
+    () =>
+      new Set(
+        folders
+          .filter((folder) => folder.parentSlug === null)
+          .map((folder) => folder.slug),
+      ),
   );
   const [creatingIn, setCreatingIn] = useState<DropTarget | undefined>();
   const [selected, setSelected] = useState<ReadonlySet<DocumentSlug>>(
@@ -122,6 +130,16 @@ export function DocumentsPage({
   const searchSeq = useRef(0);
   const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchActive = query.trim().length >= MIN_QUERY_CHARS;
+
+  useEffect(
+    () => () => {
+      if (searchTimer.current !== undefined) {
+        clearTimeout(searchTimer.current);
+      }
+      searchSeq.current += 1;
+    },
+    [],
+  );
 
   function runSearch(q: string, seq: number): void {
     searchDocuments({ data: { projectId, query: q } })
@@ -165,7 +183,7 @@ export function DocumentsPage({
   // Document slugs in visible top-to-bottom order (collapsed folders
   // contribute nothing) — the index space shift-click ranges over.
   // Mirrors the render: a folder's subfolders precede its own documents.
-  const visibleDocOrder = ((): DocumentSlug[] => {
+  const visibleDocOrder = useMemo((): DocumentSlug[] => {
     const out: DocumentSlug[] = [];
     const walk = (parent: DropTarget): void => {
       for (const f of childFolders.get(parent) ?? []) {
@@ -175,36 +193,40 @@ export function DocumentsPage({
     };
     walk(null);
     return out;
-  })();
+  }, [childFolders, docsByFolder, expanded]);
 
-  function selectOne(slug: DocumentSlug, range: boolean) {
-    if (range && anchor.current !== null) {
-      const i = visibleDocOrder.indexOf(anchor.current);
-      const j = visibleDocOrder.indexOf(slug);
-      if (i !== -1 && j !== -1) {
-        const [lo, hi] = i < j ? [i, j] : [j, i];
-        setSelected((prev) => {
-          const next = new Set(prev);
-          for (const s of visibleDocOrder.slice(lo, hi + 1)) next.add(s);
-          return next;
-        });
-        return;
+  const selectOne = useCallback(
+    (slug: DocumentSlug, range: boolean): void => {
+      if (range && anchor.current !== null) {
+        const i = visibleDocOrder.indexOf(anchor.current);
+        const j = visibleDocOrder.indexOf(slug);
+        if (i !== -1 && j !== -1) {
+          const [lo, hi] = i < j ? [i, j] : [j, i];
+          setSelected((prev) => {
+            const next = new Set(prev);
+            for (const s of visibleDocOrder.slice(lo, hi + 1)) next.add(s);
+            return next;
+          });
+          return;
+        }
       }
-    }
-    anchor.current = slug;
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
-      return next;
-    });
-  }
+      anchor.current = slug;
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(slug)) next.delete(slug);
+        else next.add(slug);
+        return next;
+      });
+    },
+    [visibleDocOrder],
+  );
 
   const archive = useSubmit(async (slugs: readonly DocumentSlug[]) => {
     await archiveDocuments({ data: { projectId, slugs: [...slugs] } });
     setSelected(new Set());
     await router.invalidate();
   });
+  const archiveRun = archive.run;
 
   const { error, run } = useSubmit(
     async (fn: () => Promise<{ ok: boolean; reason?: FolderOpReason }>) => {
@@ -212,6 +234,21 @@ export function DocumentsPage({
       if (!r.ok) throw new Error(REASON_MESSAGE[r.reason ?? "missing"]);
       await router.invalidate();
     },
+  );
+
+  const onDocArchive = useCallback(
+    (slug: DocumentSlug): void => {
+      void archiveRun([slug]);
+    },
+    [archiveRun],
+  );
+  const onDocDragStart = useCallback((slug: DocumentSlug): void => {
+    drag.current = { kind: "doc", slug };
+  }, []);
+  const onDocRename = useCallback(
+    (slug: DocumentSlug, filename: string): Promise<void> =>
+      run(() => renameFilename({ data: { projectId, slug, filename } })),
+    [projectId, run],
   );
 
   // Commit a folder pick from the move dialog: bulk-move the selection
@@ -240,35 +277,70 @@ export function DocumentsPage({
     await router.invalidate();
   });
 
-  function toggle(slug: FolderSlug) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
+  const onFolderToggle = useCallback((slug: FolderSlug): void => {
+    setExpanded((current) => {
+      const next = new Set(current);
       if (next.has(slug)) next.delete(slug);
       else next.add(slug);
       return next;
     });
-  }
+  }, []);
+  const onFolderDragStart = useCallback((slug: FolderSlug): void => {
+    drag.current = { kind: "folder", slug };
+  }, []);
+  const onFolderDragOver = useCallback(
+    (slug: FolderSlug, event: React.DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      setOver((current) => (current === slug ? current : slug));
+    },
+    [],
+  );
+  const onFolderAddChild = useCallback((slug: FolderSlug): void => {
+    setExpanded((current) => new Set(current).add(slug));
+    setCreatingIn(slug);
+  }, []);
+  const onFolderMove = useCallback((slug: FolderSlug): void => {
+    setMove({ kind: "folder", slug });
+  }, []);
+  const onFolderRename = useCallback(
+    (slug: FolderSlug, name: string): Promise<void> =>
+      run(() => renameFolder({ data: { projectId, slug, name } })),
+    [projectId, run],
+  );
+  const onFolderDelete = useCallback(
+    (slug: FolderSlug): Promise<void> =>
+      run(() => deleteFolder({ data: { projectId, slug } })),
+    [projectId, run],
+  );
 
-  function drop(target: DropTarget) {
-    const d = drag.current;
-    drag.current = null;
-    setOver(undefined);
-    if (d === null) return;
-    if (d.kind === "folder") {
-      if (d.slug === target) return;
-      void run(() =>
-        moveFolder({
-          data: { projectId, slug: d.slug, newParentSlug: target },
-        }),
-      );
-    } else {
-      void run(() =>
-        placeDocumentInFolder({
-          data: { projectId, documentSlug: d.slug, folderSlug: target },
-        }),
-      );
-    }
-  }
+  const commitDrop = useCallback(
+    (target: DropTarget): void => {
+      const item = drag.current;
+      drag.current = null;
+      setOver(undefined);
+      if (item === null) return;
+      if (item.kind === "folder") {
+        if (item.slug === target) return;
+        void run(() =>
+          moveFolder({
+            data: { projectId, slug: item.slug, newParentSlug: target },
+          }),
+        );
+      } else {
+        void run(() =>
+          placeDocumentInFolder({
+            data: {
+              projectId,
+              documentSlug: item.slug,
+              folderSlug: target,
+            },
+          }),
+        );
+      }
+    },
+    [projectId, run],
+  );
 
   function createFolderAt(parentSlug: DropTarget) {
     return async (name: string) => {
@@ -288,27 +360,14 @@ export function DocumentsPage({
           depth={depth}
           open={isOpen}
           highlighted={over === f.slug}
-          onToggle={() => toggle(f.slug)}
-          onDragStart={() => {
-            drag.current = { kind: "folder", slug: f.slug };
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (over !== f.slug) setOver(f.slug);
-          }}
-          onDrop={() => drop(f.slug)}
-          onAddChild={() => {
-            setExpanded((p) => new Set(p).add(f.slug));
-            setCreatingIn(f.slug);
-          }}
-          onMove={() => setMove({ kind: "folder", slug: f.slug })}
-          onRename={(name) =>
-            run(() => renameFolder({ data: { projectId, slug: f.slug, name } }))
-          }
-          onDelete={() =>
-            run(() => deleteFolder({ data: { projectId, slug: f.slug } }))
-          }
+          onToggle={onFolderToggle}
+          onDragStart={onFolderDragStart}
+          onDragOver={onFolderDragOver}
+          onDrop={commitDrop}
+          onAddChild={onFolderAddChild}
+          onMove={onFolderMove}
+          onRename={onFolderRename}
+          onDelete={onFolderDelete}
         />
         {isOpen && (
           <>
@@ -327,18 +386,10 @@ export function DocumentsPage({
                 projectId={projectId}
                 depth={depth + 1}
                 selected={selected.has(d.slug)}
-                onSelect={(range) => selectOne(d.slug, range)}
-                onArchive={() => void archive.run([d.slug])}
-                onDragStart={() => {
-                  drag.current = { kind: "doc", slug: d.slug };
-                }}
-                onRename={(filename) =>
-                  run(() =>
-                    renameFilename({
-                      data: { projectId, slug: d.slug, filename },
-                    }),
-                  )
-                }
+                onSelect={selectOne}
+                onArchive={onDocArchive}
+                onDragStart={onDocDragStart}
+                onRename={onDocRename}
               />
             ))}
           </>
@@ -362,7 +413,7 @@ export function DocumentsPage({
               onClick={() => setCreatingIn(null)}
               className={buttonStyles(
                 "secondary",
-                "inline-flex items-center gap-1.5",
+                "inline-flex items-center gap-1.5!",
               )}
             >
               <FolderPlus className="size-4" />
@@ -373,7 +424,7 @@ export function DocumentsPage({
               params={{ projectId }}
               className={buttonStyles(
                 "secondary",
-                "inline-flex items-center gap-1.5",
+                "inline-flex items-center gap-1.5!",
               )}
             >
               <Upload className="size-4" />
@@ -384,7 +435,7 @@ export function DocumentsPage({
               params={{ projectId }}
               className={buttonStyles(
                 "primary",
-                "inline-flex items-center gap-1.5",
+                "inline-flex items-center gap-1.5!",
               )}
             >
               <Plus className="size-4" />
@@ -417,7 +468,7 @@ export function DocumentsPage({
             <button
               type="button"
               onClick={() => onQueryChange("")}
-              className="text-sm font-medium text-slate-500 hover:text-slate-900"
+              className="min-h-11 text-sm font-medium text-slate-500 hover:text-slate-900"
             >
               Clear
             </button>
@@ -443,7 +494,7 @@ export function DocumentsPage({
           <button
             type="button"
             onClick={() => setMove({ kind: "docs" })}
-            className="inline-flex items-center gap-1.5 font-medium text-slate-600 hover:text-slate-900"
+            className="inline-flex min-h-11 items-center gap-1.5 font-medium text-slate-600 hover:text-slate-900"
           >
             <FolderInput className="size-4" />
             Move
@@ -452,14 +503,14 @@ export function DocumentsPage({
             type="button"
             disabled={archive.pending}
             onClick={() => void archive.run([...selected])}
-            className="font-medium text-red-600 hover:underline disabled:opacity-50"
+            className="min-h-11 font-medium text-red-600 hover:underline disabled:opacity-50"
           >
             {archive.pending ? "Deleting…" : "Delete"}
           </button>
           <button
             type="button"
             onClick={() => setSelected(new Set())}
-            className="text-slate-500 hover:underline"
+            className="min-h-11 text-slate-500 hover:underline"
           >
             Clear
           </button>
@@ -502,7 +553,7 @@ export function DocumentsPage({
             e.preventDefault();
             if (over !== null) setOver(null);
           }}
-          onDrop={() => drop(null)}
+          onDrop={() => commitDrop(null)}
           className={listSurface(cn("divide-y divide-slate-200"))}
         >
           <div
@@ -513,7 +564,7 @@ export function DocumentsPage({
             }}
             onDrop={(e) => {
               e.stopPropagation();
-              drop(null);
+              commitDrop(null);
             }}
             className={cn(
               "flex items-center gap-2 px-3 py-2 text-sm",
@@ -543,18 +594,10 @@ export function DocumentsPage({
               projectId={projectId}
               depth={0}
               selected={selected.has(d.slug)}
-              onSelect={(range) => selectOne(d.slug, range)}
-              onArchive={() => void archive.run([d.slug])}
-              onDragStart={() => {
-                drag.current = { kind: "doc", slug: d.slug };
-              }}
-              onRename={(filename) =>
-                run(() =>
-                  renameFilename({
-                    data: { projectId, slug: d.slug, filename },
-                  }),
-                )
-              }
+              onSelect={selectOne}
+              onArchive={onDocArchive}
+              onDragStart={onDocDragStart}
+              onRename={onDocRename}
             />
           ))}
         </div>
@@ -588,7 +631,7 @@ function SearchResults({
         <button
           type="button"
           onClick={onRetry}
-          className="font-medium text-slate-900 hover:underline"
+          className="min-h-11 font-medium text-slate-900 hover:underline"
         >
           Retry
         </button>

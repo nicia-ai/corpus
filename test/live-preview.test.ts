@@ -83,6 +83,23 @@ const withClass = (es: Entry[], cls: string): Entry[] =>
 const widgets = (es: Entry[]): Entry[] =>
   es.filter((e) => specOf(e.deco).widget != null);
 
+function decorationSignature(es: Entry[]): readonly unknown[] {
+  return es.map(({ from, to, deco }) => {
+    const spec = specOf(deco);
+    return {
+      from,
+      to,
+      mdHide: spec.mdHide ?? false,
+      class: spec.class ?? "",
+      attributes: spec.attributes ?? {},
+      widget:
+        spec.widget === undefined
+          ? ""
+          : (spec.widget as object).constructor.name,
+    };
+  });
+}
+
 describe("live preview: headings", () => {
   it("hides the # marker and styles the line when the caret is elsewhere", () => {
     const es = preview("# Title\n\nbody", 9);
@@ -424,5 +441,89 @@ describe("live preview: incremental selection updates", () => {
     expect(
       withClass(entries(state.field(livePreviewField)), "cm-md-link"),
     ).toHaveLength(1);
+  });
+});
+
+describe("live preview: incremental document updates", () => {
+  it("rebuilds the edited block without dropping untouched decorations", () => {
+    const doc = "# First\n\nbody\n\n## Last";
+    const body = doc.indexOf("body");
+    let state = EditorState.create({
+      doc,
+      selection: EditorSelection.single(body),
+      extensions: [markdown({ base: markdownLanguage }), livePreview()],
+    });
+    state = state.update({ effects: [setEditorFocused.of(true)] }).state;
+
+    state = state.update({ changes: { from: body, insert: "### " } }).state;
+    const field = entries(state.field(livePreviewField));
+
+    expect(withClass(field, "cm-md-h1")).toHaveLength(1);
+    expect(withClass(field, "cm-md-h2")).toHaveLength(1);
+    expect(withClass(field, "cm-md-h3")).toHaveLength(1);
+  });
+
+  it("rebuilds every block exposed when one old fenced block splits", () => {
+    const doc = "```\n# One\n\n## Two\n\n### Three\n```";
+    let state = EditorState.create({
+      doc,
+      extensions: [markdown({ base: markdownLanguage }), livePreview()],
+    });
+    state = state.update({
+      changes: [
+        { from: 0, to: 3 },
+        { from: doc.length - 3, to: doc.length },
+      ],
+    }).state;
+
+    const field = entries(state.field(livePreviewField));
+    expect(withClass(field, "cm-md-h1")).toHaveLength(1);
+    expect(withClass(field, "cm-md-h2")).toHaveLength(1);
+    expect(withClass(field, "cm-md-h3")).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      name: "joining adjacent blocks",
+      doc: "# One\n\n## Two",
+      changes: [{ from: 5, to: 6 }],
+    },
+    {
+      name: "inserting frontmatter",
+      doc: "# Title\n\nbody",
+      changes: [{ from: 0, insert: "---\nteam: docs\n---\n" }],
+    },
+    {
+      name: "removing frontmatter",
+      doc: "---\nteam: docs\n---\n# Title",
+      changes: [{ from: 0, to: 19 }],
+    },
+    {
+      name: "editing a link target",
+      doc: "See [docs](old/path) now",
+      changes: [{ from: 11, to: 19, insert: "new/path" }],
+    },
+    {
+      name: "deleting the final block",
+      doc: "# Keep\n\n## Remove",
+      changes: [{ from: 8, to: 17 }],
+    },
+  ])("matches a fresh render after $name", ({ doc, changes }) => {
+    let state = EditorState.create({
+      doc,
+      selection: EditorSelection.single(doc.length),
+      extensions: [markdown({ base: markdownLanguage }), livePreview()],
+    });
+    state = state.update({ effects: [setEditorFocused.of(true)] }).state;
+    state = state.update({ changes }).state;
+
+    const incremental = decorationSignature(
+      entries(state.field(livePreviewField)),
+    );
+    const selection = state.selection.main;
+    const fresh = decorationSignature(
+      preview(state.doc.toString(), selection.anchor, selection.head, true),
+    );
+    expect(incremental).toEqual(fresh);
   });
 });

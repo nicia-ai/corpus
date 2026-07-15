@@ -4,11 +4,12 @@ import {
   redirect,
   useMatches,
 } from "@tanstack/react-router";
-import { Menu } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Menu, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { AccountCard } from "@/components/shell/AccountCard";
 import { SidebarNav } from "@/components/shell/SidebarNav";
+import { useDialogFocusTrap } from "@/components/ui/dialog-focus";
 import { Wordmark } from "@/components/ui/Wordmark";
 import { OrgProjectSwitcher } from "@/features/shell/OrgProjectSwitcher";
 import { asProjectId } from "@/ids";
@@ -38,6 +39,12 @@ function ProjectLayout() {
   const { orgId, orgName } = shell.current;
   // Mobile-only off-canvas drawer state; md+ keeps the sidebar in flow.
   const [navOpen, setNavOpen] = useState(false);
+  const navCloseRef = useRef<HTMLButtonElement>(null);
+  const mobileNavRef = useDialogFocusTrap({
+    open: navOpen,
+    onClose: () => setNavOpen(false),
+    initialFocus: navCloseRef,
+  });
 
   // Per-page ground: data-dense pages keep the slate-50 desk so their white
   // cards read; the single-document surface (read/edit AND the new-document
@@ -55,55 +62,94 @@ function ProjectLayout() {
     setOrganization({ id: orgId, name: orgName });
   }, [orgId, orgName]);
 
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const closeAtDesktop = (event: MediaQueryListEvent): void => {
+      if (event.matches) setNavOpen(false);
+    };
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    desktop.addEventListener("change", closeAtDesktop);
+    return () => {
+      desktop.removeEventListener("change", closeAtDesktop);
+      document.body.style.overflow = previous;
+    };
+  }, [navOpen]);
+
+  const sidebarContent = (onNavigate?: () => void): React.ReactNode => (
+    <>
+      <OrgProjectSwitcher shell={shell} projectId={projectId} />
+      <SidebarNav
+        projectId={projectId}
+        isOwner={isOwner}
+        {...(onNavigate === undefined ? {} : { onNavigate })}
+      />
+      <div className="mt-auto">
+        <AccountCard
+          user={shell.user}
+          support={shell.support}
+          docs={shell.docs}
+        />
+      </div>
+    </>
+  );
+
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      {/* The mobile bar is the burger only — the wordmark lives inside
-          the sidebar (and the open drawer reveals it), so we don't show
-          it twice on phones. */}
+      {/* Keep the compact brand beside the mobile trigger. The drawer repeats
+          it inside the focused dialog surface while the bar sits behind the
+          modal backdrop. */}
       <div className="flex items-center gap-2.5 border-b border-slate-200 bg-white px-4 py-3 md:hidden">
         <button
           type="button"
           aria-label="Open navigation"
           aria-expanded={navOpen}
-          aria-controls="primary-sidebar"
+          aria-controls="mobile-primary-sidebar"
           onClick={() => setNavOpen(true)}
-          className="grid size-9 place-items-center rounded-md text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          className="grid size-11 place-items-center rounded-md text-slate-600 hover:bg-slate-50 hover:text-slate-900"
         >
           <Menu className="size-5" />
         </button>
         <Wordmark />
       </div>
       {navOpen && (
-        <button
-          type="button"
-          aria-label="Close navigation"
-          onClick={() => setNavOpen(false)}
-          className="fixed inset-0 z-40 bg-slate-900/40 md:hidden"
-        />
+        <div className="fixed inset-0 z-40 md:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setNavOpen(false)}
+            className="absolute inset-0 bg-slate-900/40"
+          />
+          <aside
+            ref={mobileNavRef}
+            id="mobile-primary-sidebar"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Primary navigation"
+            className="relative z-10 flex h-full w-72 max-w-[calc(100vw-3rem)] flex-col border-r border-slate-200 bg-slate-100 px-3 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-sm"
+          >
+            <div className="mb-7 flex items-center justify-between gap-3 px-2">
+              <Wordmark />
+              <button
+                ref={navCloseRef}
+                type="button"
+                aria-label="Close navigation"
+                onClick={() => setNavOpen(false)}
+                className="grid size-11 place-items-center rounded-md text-slate-600 hover:bg-slate-200 hover:text-slate-900"
+              >
+                <X className="size-5" aria-hidden="true" />
+              </button>
+            </div>
+            {sidebarContent(() => setNavOpen(false))}
+          </aside>
+        </div>
       )}
-      <aside
-        id="primary-sidebar"
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-slate-100 px-3 py-5 transition-transform duration-200 ease-out motion-reduce:transition-none md:static md:z-auto md:w-48 md:shrink-0 md:translate-x-0",
-          navOpen ? "translate-x-0" : "-translate-x-full",
-        )}
-      >
+      <aside className="hidden w-48 shrink-0 flex-col border-r border-slate-200 bg-slate-100 px-3 py-5 md:flex">
         <div className="mb-7 px-2">
           <Wordmark />
         </div>
-        <OrgProjectSwitcher shell={shell} projectId={projectId} />
-        <SidebarNav
-          projectId={projectId}
-          isOwner={isOwner}
-          onNavigate={() => setNavOpen(false)}
-        />
-        <div className="mt-auto">
-          <AccountCard
-            user={shell.user}
-            support={shell.support}
-            docs={shell.docs}
-          />
-        </div>
+        {sidebarContent()}
       </aside>
       <main
         className={cn(

@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { resolveServerEnv } from "@/control/env";
+import { resolveServerEnv } from "@/control/env.server";
 import type { AnalyticsConfig } from "@/lib/analytics";
 import { assertServerContext as srv } from "@/lib/server-context";
 

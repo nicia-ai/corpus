@@ -255,8 +255,8 @@ export function DocumentUploader(
           void collectFromDataTransfer(e.dataTransfer).then(ingest);
         }}
         className={cardClass(
-          `flex flex-col items-center gap-4 border-dashed py-12 text-center ${
-            dragging ? "border-blue-600 bg-blue-50" : "border-slate-300"
+          `flex flex-col items-center gap-4 border-dashed py-12! text-center ${
+            dragging ? "border-blue-600! bg-blue-50!" : "border-slate-300!"
           }`,
         )}
       >
@@ -271,7 +271,7 @@ export function DocumentUploader(
           <Button
             variant="secondary"
             onClick={() => dirRef.current?.click()}
-            className="inline-flex items-center gap-1.5"
+            className="inline-flex items-center gap-1.5!"
           >
             <FolderUp className="size-4" />
             Choose folder
@@ -478,7 +478,7 @@ function DestinationPicker({
             value={newName}
             onChange={(e) => onNewName(e.target.value)}
             placeholder="Folder name"
-            className={fieldInputClass("mt-2 ml-6 w-[calc(100%-1.5rem)]")}
+            className={fieldInputClass("mt-2 ml-6 w-[calc(100%-1.5rem)]!")}
           />
         )}
       </div>
@@ -558,7 +558,7 @@ function LinkPicker({
           value={value.name}
           onChange={(e) => onChange({ mode: "new", name: e.target.value })}
           placeholder="Collection name"
-          className={fieldInputClass("ml-6 w-[calc(100%-1.5rem)]")}
+          className={fieldInputClass("ml-6 w-[calc(100%-1.5rem)]!")}
         />
       )}
       <label className="flex items-center gap-2 text-base text-slate-700">
@@ -588,7 +588,7 @@ function LinkPicker({
               slug: asCollectionSlug(e.target.value),
             })
           }
-          className={fieldInputClass("ml-6 w-[calc(100%-1.5rem)]")}
+          className={fieldInputClass("ml-6 w-[calc(100%-1.5rem)]!")}
         >
           {collections.map((c) => (
             <option key={c.slug} value={c.slug}>

@@ -24,7 +24,7 @@ import {
   revokeInvitation,
   type Role,
   type TeamMember,
-} from "@/lib/server/team";
+} from "@/lib/server/team.functions";
 
 function RoleSelect({
   value,
@@ -200,7 +200,7 @@ function MemberRow({
               }),
             )
           }
-          className="shrink-0 rounded-md px-2 py-1 text-sm text-slate-400 hover:bg-slate-50 hover:text-amber-700 disabled:opacity-50"
+          className="min-h-11 shrink-0 rounded-md px-2 py-1 text-sm text-slate-400 hover:bg-slate-50 hover:text-amber-700 disabled:opacity-50"
         >
           Remove
         </button>
@@ -305,7 +305,7 @@ function InviteRow({
         type="button"
         disabled={pending}
         onClick={() => void run()}
-        className="shrink-0 rounded-md px-2 py-1 text-sm text-slate-400 hover:bg-slate-50 hover:text-amber-700 disabled:opacity-50"
+        className="min-h-11 shrink-0 rounded-md px-2 py-1 text-sm text-slate-400 hover:bg-slate-50 hover:text-amber-700 disabled:opacity-50"
       >
         Revoke
       </button>

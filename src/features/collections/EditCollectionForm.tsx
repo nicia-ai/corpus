@@ -143,7 +143,7 @@ export function EditCollectionForm({
             aria-invalid={!budget.ok}
             aria-describedby={budget.ok ? helpId : `${errorId} ${helpId}`}
             className={cn(
-              fieldInputClass("w-40 tabular-nums"),
+              fieldInputClass("w-40! tabular-nums"),
               !budget.ok && "border-red-400 bg-red-50",
             )}
           />

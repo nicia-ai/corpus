@@ -25,7 +25,7 @@ export function CopyButton({
         void navigator.clipboard.writeText(value).then(flash);
       }}
       className={cn(
-        "shrink-0 rounded-md border border-slate-200 bg-white p-1.5 text-slate-400 hover:text-slate-900",
+        "grid size-11 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-slate-400 hover:text-slate-900",
         className,
       )}
     >

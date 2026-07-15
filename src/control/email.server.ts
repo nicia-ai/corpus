@@ -1,4 +1,4 @@
-import { resolveServerEnv, type EmailConfig } from "./env";
+import { resolveServerEnv, type EmailConfig } from "./env.server";
 
 export type EmailSendFailureReason = "not-configured" | "send-failed";
 

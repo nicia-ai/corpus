@@ -10,7 +10,7 @@ import { admin, jwt, organization } from "better-auth/plugins";
 import { resolveConnection } from "./control/connection-resolution";
 import { connectControlDb } from "./control/db";
 import { entitlementsOf, QuotaExceededError } from "./control/entitlements";
-import { resolveServerEnv, type ServerEnv } from "./control/env";
+import { resolveServerEnv, type ServerEnv } from "./control/env.server";
 import { connectionClaimKey, readSelection } from "./control/oauth-selection";
 import {
   bumpOrgProjectsEpoch,

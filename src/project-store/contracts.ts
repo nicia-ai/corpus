@@ -74,6 +74,14 @@ export type DocumentHistoryEntry = Readonly<{
   retained: boolean;
 }>;
 
+export type DocumentHistoryMeta = Readonly<{
+  docVersion: number;
+  changedAt: string;
+  changedBy: string;
+  diffSummary?: string;
+  retained: boolean;
+}>;
+
 export type ReapResult = Readonly<{
   versionsDeleted: number;
   eventsDeleted: number;

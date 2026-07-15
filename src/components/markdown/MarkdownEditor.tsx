@@ -7,7 +7,12 @@ import {
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { type Diagnostic, linter } from "@codemirror/lint";
-import { Compartment, type Extension, EditorState } from "@codemirror/state";
+import {
+  Compartment,
+  type Extension,
+  EditorState,
+  Text,
+} from "@codemirror/state";
 import {
   EditorView,
   highlightActiveLine,
@@ -15,11 +20,22 @@ import {
   placeholder,
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import type { ReviewRailLayout } from "@/components/review/ReviewRail";
 import { hrefToDocSlug, isExternalHref } from "@/lib/doc-href";
-import { scanWikilinks, splitWikiTarget } from "@/store/domain/links";
+import {
+  scanWikilinks,
+  splitWikiTarget,
+  type WikiMatch,
+} from "@/store/domain/links";
 import { resolveWikiPath } from "@/store/domain/paths";
 
 import { frontmatter } from "./block-widgets";
@@ -40,6 +56,9 @@ import {
 } from "./live-review";
 import { Markdown } from "./Markdown";
 import { wikiLinkResolver } from "./wikilink-facet";
+
+const useClientLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 // Source-of-truth markdown editor: CodeMirror with Obsidian-style live preview
 // (see ./live-preview), so the edit surface reads as the rendered document —
@@ -374,6 +393,13 @@ type Props = Readonly<{
   // Editing props (omit for a read-only view): onChange fires on edits;
   // docRefs/selfSlug feed the broken-link linter and wikilink resolution.
   onChange?: (next: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  editorRef?: React.Ref<MarkdownEditorHandle> | undefined;
+  syncValue?: boolean;
+  // The persisted body to compare edits against. Usually this is `value`, but
+  // conflict recovery can seed the editor with the user's draft while the
+  // clean baseline has advanced to the other writer's version.
+  cleanValue?: string;
   docRefs?: readonly DocRef[];
   selfSlug?: string;
   // Render the document but disable editing (history / read views). Skips the
@@ -404,9 +430,19 @@ type Props = Readonly<{
   ) => React.ReactNode;
 }>;
 
+export type MarkdownEditorHandle = Readonly<{
+  getValue: () => string;
+  setValue: (next: string) => void;
+  setCleanValue: (next: string) => void;
+}>;
+
 export function MarkdownEditor({
   value,
   onChange,
+  onDirtyChange,
+  editorRef,
+  syncValue = true,
+  cleanValue = value,
   docRefs = NO_DOCS,
   selfSlug = "",
   readOnly,
@@ -423,11 +459,12 @@ export function MarkdownEditor({
 }: Props): React.ReactElement {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(null);
+  const cleanDoc = useRef<Text | undefined>(undefined);
   // The active selection drives the inline Comment/Suggest popover (review mode).
   const [reviewSelection, setReviewSelection] = useState<ReviewSelection>();
-  // CodeMirror mounts client-side in the effect below; until it does (incl.
-  // SSR), render the rendered Markdown so first paint shows the document rather
-  // than an empty box, then swap to the live editor.
+  // SSR renders the document as Markdown. On client navigation, CodeMirror
+  // replaces that fallback in a layout effect so the browser never paints two
+  // different document geometries in succession.
   const [mounted, setMounted] = useState(false);
   // Linter inputs change with route data, not per keystroke; a compartment
   // lets us reconfigure the rule without tearing down the editor. The latest
@@ -436,17 +473,37 @@ export function MarkdownEditor({
   const wikiC = useRef(new Compartment());
   const contentAttrsC = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
+  const onDirtyChangeRef = useRef(onDirtyChange);
   const onBrokenRef = useRef(onBrokenChange);
   const onFollowLinkRef = useRef(onFollowLink);
   const onSaveRef = useRef(onSave);
   const onReviewLayoutRef = useRef(onReviewLayoutChange);
   useEffect(() => {
     onChangeRef.current = onChange;
+    onDirtyChangeRef.current = onDirtyChange;
     onBrokenRef.current = onBrokenChange;
     onFollowLinkRef.current = onFollowLink;
     onSaveRef.current = onSave;
     onReviewLayoutRef.current = onReviewLayoutChange;
   });
+
+  useImperativeHandle(
+    editorRef,
+    () => ({
+      getValue: () => view.current?.state.doc.toString() ?? value,
+      setValue: (next) => {
+        const cm = view.current;
+        if (cm === null || next === cm.state.doc.toString()) return;
+        cm.dispatch({
+          changes: { from: 0, to: cm.state.doc.length, insert: next },
+        });
+      },
+      setCleanValue: (next) => {
+        cleanDoc.current = Text.of(next.split("\n"));
+      },
+    }),
+    [value],
+  );
 
   // Close the popover after a review action (or cancel). The text selection is
   // left as-is; the next selection gesture re-evaluates it.
@@ -460,6 +517,20 @@ export function MarkdownEditor({
     wiki: WikiResolve | undefined,
   ) {
     const known = new Set(refs.map((d) => d.slug));
+    // Cache the position-independent regex result by line text. CodeMirror's
+    // document is a persistent tree, but flattening it with toString() after
+    // every editing pause threw that advantage away. Wikilinks cannot cross a
+    // newline, so unchanged lines can reuse their scan while context checks
+    // still run at their current absolute positions.
+    const wikiMatchesByLine = new Map<string, readonly WikiMatch[]>();
+    const wikiMatches = (text: string): readonly WikiMatch[] => {
+      const cached = wikiMatchesByLine.get(text);
+      if (cached !== undefined) return cached;
+      const matches = scanWikilinks(text);
+      if (wikiMatchesByLine.size >= 2_000) wikiMatchesByLine.clear();
+      wikiMatchesByLine.set(text, matches);
+      return matches;
+    };
     return linter(
       (v) => {
         const diags: Diagnostic[] = [];
@@ -485,17 +556,26 @@ export function MarkdownEditor({
         });
         if (wiki !== undefined) {
           const fm = frontmatter(v.state);
-          for (const m of scanWikilinks(v.state.doc.toString())) {
-            if (fm && m.from < fm.to) continue;
-            if (inCodeContext(v.state, m.from + 2)) continue;
-            const { target } = splitWikiTarget(m.inner);
-            if (target !== "" && wiki(target) === undefined) {
-              diags.push({
-                from: m.from,
-                to: m.to,
-                severity: "warning",
-                message: `No document matches [[${target}]] in this project`,
-              });
+          for (
+            let lineNumber = 1;
+            lineNumber <= v.state.doc.lines;
+            lineNumber += 1
+          ) {
+            const line = v.state.doc.line(lineNumber);
+            for (const m of wikiMatches(line.text)) {
+              const from = line.from + m.from;
+              const to = line.from + m.to;
+              if (fm && from < fm.to) continue;
+              if (inCodeContext(v.state, from + 2)) continue;
+              const { target } = splitWikiTarget(m.inner);
+              if (target !== "" && wiki(target) === undefined) {
+                diags.push({
+                  from,
+                  to,
+                  severity: "warning",
+                  message: `No document matches [[${target}]] in this project`,
+                });
+              }
             }
           }
         }
@@ -507,8 +587,10 @@ export function MarkdownEditor({
   }
 
   // Mount once (DOM widget lifecycle — not data loading). CodeMirror touches
-  // the DOM, so it constructs only client-side, inside the effect.
-  useEffect(() => {
+  // the DOM, so it constructs only client-side. The layout effect keeps the
+  // rendered-Markdown fallback useful for SSR without flashing it during a
+  // client-side route transition.
+  useClientLayoutEffect(() => {
     const parent = host.current;
     if (parent === null) return;
     // A read-only view (history) renders the document but disables editing;
@@ -517,103 +599,109 @@ export function MarkdownEditor({
     // to the editing surface only ("the rendered read view and version
     // history are NOT highlighted"), so codeHighlight is gated below.
     const editing = readOnly !== true;
+    const state = EditorState.create({
+      doc: value,
+      extensions: [
+        ...(editing ? [history()] : []),
+        // Save binding first so it wins over any default Mod-s mapping.
+        keymap.of([
+          ...(editing
+            ? [
+                {
+                  key: "Mod-s",
+                  preventDefault: true,
+                  run: () => {
+                    onSaveRef.current?.();
+                    return true;
+                  },
+                },
+              ]
+            : []),
+          ...defaultKeymap,
+          ...historyKeymap,
+        ]),
+        // GFM base + nested language parsing for fenced code, so a ```ts
+        // block highlights per its language (codeLanguages lazy-loads the
+        // grammar; codeHighlight colors the tokens — editing-only, below).
+        markdown({ base: markdownLanguage, codeLanguages: languages }),
+        syntaxHighlighting(mdHighlight),
+        livePreview(),
+        EditorView.lineWrapping,
+        // Editing-only: keyboard-focus locus (active line is styled only when
+        // focused — see designTheme), placeholder, the broken-link linter, and
+        // code-token syntax highlighting (DESIGN.md: read view/history stay
+        // plain — the editor is the live surface). No lintGutter(): the empty
+        // gutter is a code-IDE artifact on a prose surface; broken links warn
+        // inline (wavy underline + count).
+        ...(editing
+          ? [
+              highlightActiveLine(),
+              placeholder("Start writing… markdown renders as you type"),
+              linterC.current.of(
+                refLinter(
+                  docRefs,
+                  selfSlug,
+                  wikiResolverFor(docRefs, selfSlug),
+                ),
+              ),
+              syntaxHighlighting(codeHighlight),
+            ]
+          : []),
+        // Wikilink resolution rides its own compartment (read views
+        // render wikilinks too, so it mounts regardless of `editing`).
+        wikiC.current.of(wikiFacetExtension(docRefs, selfSlug)),
+        // Read-only: a plain click follows a rendered link (nothing to edit).
+        // Editing: require Cmd/Ctrl so a plain click can place the caret.
+        EditorView.domEventHandlers({
+          mousedown: (event) => {
+            if (editing && !event.metaKey && !event.ctrlKey) return false;
+            const el =
+              event.target instanceof HTMLElement
+                ? event.target.closest("[data-href]")
+                : null;
+            const href = el?.getAttribute("data-href") ?? null;
+            if (href === null) return false;
+            event.preventDefault();
+            onFollowLinkRef.current?.(href);
+            return true;
+          },
+        }),
+        // Always mount the compartment, even when both props start
+        // undefined (an empty attrs object then) — reconfiguring a
+        // compartment that was never part of the base config is a silent
+        // no-op in @codemirror/state, which would strand a later
+        // `ariaDescribedBy` (e.g. a validation error that only appears
+        // after a failed submit) with no way to reach the DOM.
+        contentAttrsC.current.of(contentAttributes(ariaLabel, ariaDescribedBy)),
+        ...(review === true
+          ? [
+              liveReview({
+                onSelect: setReviewSelection,
+                onLayout: (layout) => onReviewLayoutRef.current?.(layout),
+                initialMarks: reviewMarks,
+              }),
+            ]
+          : []),
+        ...(editing
+          ? [
+              EditorView.updateListener.of((u) => {
+                if (!u.docChanged) return;
+                onDirtyChangeRef.current?.(
+                  !u.state.doc.eq(cleanDoc.current ?? u.startState.doc),
+                );
+                // Avoid allocating the whole document unless a controlled
+                // caller explicitly needs the new string.
+                onChangeRef.current?.(u.state.doc.toString());
+              }),
+            ]
+          : [EditorState.readOnly.of(true), EditorView.editable.of(false)]),
+        designTheme,
+      ],
+    });
+    cleanDoc.current = Text.of(cleanValue.split("\n"));
     const cm = new EditorView({
       parent,
-      state: EditorState.create({
-        doc: value,
-        extensions: [
-          ...(editing ? [history()] : []),
-          // Save binding first so it wins over any default Mod-s mapping.
-          keymap.of([
-            ...(editing
-              ? [
-                  {
-                    key: "Mod-s",
-                    preventDefault: true,
-                    run: () => {
-                      onSaveRef.current?.();
-                      return true;
-                    },
-                  },
-                ]
-              : []),
-            ...defaultKeymap,
-            ...historyKeymap,
-          ]),
-          // GFM base + nested language parsing for fenced code, so a ```ts
-          // block highlights per its language (codeLanguages lazy-loads the
-          // grammar; codeHighlight colors the tokens — editing-only, below).
-          markdown({ base: markdownLanguage, codeLanguages: languages }),
-          syntaxHighlighting(mdHighlight),
-          livePreview(),
-          EditorView.lineWrapping,
-          // Editing-only: keyboard-focus locus (active line is styled only when
-          // focused — see designTheme), placeholder, the broken-link linter, and
-          // code-token syntax highlighting (DESIGN.md: read view/history stay
-          // plain — the editor is the live surface). No lintGutter(): the empty
-          // gutter is a code-IDE artifact on a prose surface; broken links warn
-          // inline (wavy underline + count).
-          ...(editing
-            ? [
-                highlightActiveLine(),
-                placeholder("Start writing… markdown renders as you type"),
-                linterC.current.of(
-                  refLinter(
-                    docRefs,
-                    selfSlug,
-                    wikiResolverFor(docRefs, selfSlug),
-                  ),
-                ),
-                syntaxHighlighting(codeHighlight),
-              ]
-            : []),
-          // Wikilink resolution rides its own compartment (read views
-          // render wikilinks too, so it mounts regardless of `editing`).
-          wikiC.current.of(wikiFacetExtension(docRefs, selfSlug)),
-          // Read-only: a plain click follows a rendered link (nothing to edit).
-          // Editing: require Cmd/Ctrl so a plain click can place the caret.
-          EditorView.domEventHandlers({
-            mousedown: (event) => {
-              if (editing && !event.metaKey && !event.ctrlKey) return false;
-              const el =
-                event.target instanceof HTMLElement
-                  ? event.target.closest("[data-href]")
-                  : null;
-              const href = el?.getAttribute("data-href") ?? null;
-              if (href === null) return false;
-              event.preventDefault();
-              onFollowLinkRef.current?.(href);
-              return true;
-            },
-          }),
-          // Always mount the compartment, even when both props start
-          // undefined (an empty attrs object then) — reconfiguring a
-          // compartment that was never part of the base config is a silent
-          // no-op in @codemirror/state, which would strand a later
-          // `ariaDescribedBy` (e.g. a validation error that only appears
-          // after a failed submit) with no way to reach the DOM.
-          contentAttrsC.current.of(
-            contentAttributes(ariaLabel, ariaDescribedBy),
-          ),
-          ...(review === true
-            ? [
-                liveReview({
-                  onSelect: setReviewSelection,
-                  onLayout: (layout) => onReviewLayoutRef.current?.(layout),
-                }),
-              ]
-            : []),
-          ...(editing
-            ? [
-                EditorView.updateListener.of((u) => {
-                  if (u.docChanged)
-                    onChangeRef.current?.(u.state.doc.toString());
-                }),
-              ]
-            : [EditorState.readOnly.of(true), EditorView.editable.of(false)]),
-          designTheme,
-        ],
-      }),
+      state,
     });
     view.current = cm;
     setMounted(true);
@@ -621,19 +709,18 @@ export function MarkdownEditor({
       cm.destroy();
     };
     // Construct once; value/slug syncing is handled by the effects below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // External value changes (conflict resolution rewrites the draft) — sync
   // without clobbering the user's cursor when it already matches.
   useEffect(() => {
     const cm = view.current;
-    if (cm && value !== cm.state.doc.toString()) {
+    if (syncValue && cm && value !== cm.state.doc.toString()) {
       cm.dispatch({
         changes: { from: 0, to: cm.state.doc.length, insert: value },
       });
     }
-  }, [value]);
+  }, [syncValue, value]);
 
   useEffect(() => {
     const effects = [

@@ -8,7 +8,7 @@ import {
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
-import { type ConfigEnv, defineConfig } from "vitest/config";
+import { configDefaults, type ConfigEnv, defineConfig } from "vitest/config";
 
 // One Vite config for dev, build, and test. vitest 4 + pool-workers 0.16
 // runs the pool as a Vite plugin (`cloudflareTest`), and the worker under
@@ -52,7 +52,15 @@ export default defineConfig(async (configEnv: ConfigEnv) => {
       ...runtimePlugins,
     ],
     ...(isVitest
-      ? { test: { setupFiles: ["./test/apply-migrations.ts"] } }
+      ? {
+          test: {
+            setupFiles: ["./test/apply-migrations.ts"],
+            // Local agent worktrees live below this checkout and may have
+            // their own dependencies/commits. They are not part of this
+            // project instance and must never be collected by `pnpm check`.
+            exclude: [...configDefaults.exclude, ".claude/worktrees/**"],
+          },
+        }
       : {}),
   };
 });

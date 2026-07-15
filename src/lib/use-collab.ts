@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 import type { ProjectId } from "@/ids";
 import {
@@ -21,12 +21,10 @@ export function useCollab(
   onChanged: (change: RealtimeChange | undefined) => void,
 ): readonly PresenceUser[] {
   const [presence, setPresence] = useState<readonly PresenceUser[]>([]);
-  // Keep the latest callback without tearing down the socket each render
-  // (synced in an effect, never written during render).
-  const onChangedRef = useRef(onChanged);
-  useEffect(() => {
-    onChangedRef.current = onChanged;
-  });
+  // Read the latest caller state without reconnecting the socket. An Effect
+  // Event updates with the commit, avoiding the passive-effect lag of a
+  // hand-rolled callback ref when a socket message races a render.
+  const onChangedEvent = useEffectEvent(onChanged);
 
   useEffect(() => {
     let closed = false;
@@ -54,7 +52,7 @@ export function useCollab(
         const parsed = ServerMessage.safeParse(raw);
         if (!parsed.success) return;
         if (parsed.data.type === "presence") setPresence(parsed.data.users);
-        else onChangedRef.current(parsed.data.change);
+        else onChangedEvent(parsed.data.change);
       };
       ws.onclose = () => {
         if (!closed) retry = setTimeout(connect, RETRY_MS);
