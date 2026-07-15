@@ -1,4 +1,10 @@
-import { asDocumentSlug, type CallerRef, type CollectionSlug } from "./ids";
+import {
+  asDocumentSlug,
+  asProjectId,
+  type CallerRef,
+  type CollectionSlug,
+  type ProjectId,
+} from "./ids";
 import type { McpExecutor } from "./mcp";
 import { compact } from "./util";
 
@@ -17,18 +23,23 @@ import { compact } from "./util";
 // truly unknown Collection.
 
 // `inner` is the raw ProjectStore DO stub — it doesn't carry the
-// per-request `callerRef`, so it's typed as `Omit<McpExecutor,
-// "callerRef">` to make that explicit. The returned executor fills the
-// field in from the per-request argument.
+// per-request identity/route context, so those fields are omitted here and
+// filled from closure-bound arguments on the returned executor.
 export function scopedExecutor(
-  inner: Omit<McpExecutor, "callerRef">,
+  inner: Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId">,
   boundSlug: CollectionSlug,
   members: readonly string[],
   callerRef: CallerRef,
+  location: Readonly<{ baseUrl: string; projectId: ProjectId }> = {
+    baseUrl: "http://localhost:8787",
+    projectId: asProjectId("test-project"),
+  },
 ): McpExecutor {
   const memberSet = new Set<string>(members);
   return {
     callerRef,
+    baseUrl: location.baseUrl,
+    projectId: location.projectId,
     // Only the bound Collection is reachable. The inner DO returns the
     // builder-side `CollectionMeta` (which carries authoring-only fields
     // like `alwaysIncludeBudgetTokens`); project it down to the MCP port

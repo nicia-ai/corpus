@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asCallerRef } from "../src/ids";
+import { asCallerRef, asProjectId } from "../src/ids";
 import { handleMcp, type McpExecutor, RpcSchema } from "../src/mcp";
 
 // handleMcp depends only on the narrow McpExecutor port, so the
@@ -19,6 +19,8 @@ function executor(): McpExecutor {
   };
   return {
     callerRef: asCallerRef("apikey:test"),
+    baseUrl: "http://localhost:8787",
+    projectId: asProjectId("test-project"),
     recordRead: () => Promise.resolve(),
     suggestEdit: unused,
     suggestCreate: unused,

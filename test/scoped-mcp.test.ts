@@ -28,7 +28,7 @@ import {
 // — scopedExecutor unit tests — pure filtering against a stub
 //   McpExecutor, no DO. Verifies the read-side scope rules.
 
-function stubExec(): Omit<McpExecutor, "callerRef"> {
+function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
   return {
     listCollections: () =>
       Promise.resolve([

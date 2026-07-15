@@ -384,7 +384,7 @@ function SuggestionCard({
   const open = suggestion.status === "open";
 
   return (
-    <article className={REVIEW_CARD_CLASS}>
+    <article data-proposal-id={suggestion.id} className={REVIEW_CARD_CLASS}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 text-base">
           <div className="flex min-w-0 items-center gap-2">

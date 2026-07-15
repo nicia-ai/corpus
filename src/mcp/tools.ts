@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { asCollectionSlug, asDocumentSlug } from "../ids";
+import type { ProposalResult } from "../project-store/commands/suggestions";
 import { parseFrontmatter } from "../store/domain/frontmatter";
 import { CREATE_PROPOSAL_BASE_VERSION } from "../store/domain/suggestion";
 import { compact } from "../util";
@@ -22,6 +23,34 @@ const SuggestEditArgs = z.object({
 const GetProposalResultArgs = z.object({
   proposalId: z.number().int().positive(),
 });
+
+const AwaitProposalReviewArgs = GetProposalResultArgs.extend({
+  timeoutSeconds: z.number().int().min(0).max(25).default(25),
+});
+
+// One-second cadence keeps handoffs responsive while bounding a maximum wait
+// to 25 read-only status checks.
+const REVIEW_POLL_MS = 1000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type FoundProposalResult = Extract<ProposalResult, { found: true }>;
+
+function proposalReviewUrl(
+  exec: McpExecutor,
+  result: Pick<FoundProposalResult, "proposalId" | "kind" | "documentSlug">,
+): string {
+  const projectId = encodeURIComponent(exec.projectId);
+  const reviewPath =
+    result.kind === "create"
+      ? `/p/${projectId}/documents`
+      : `/p/${projectId}/documents/${encodeURIComponent(result.documentSlug)}`;
+  const reviewUrl = new URL(reviewPath, `${exec.baseUrl}/`);
+  reviewUrl.hash = `proposal-${String(result.proposalId)}`;
+  return reviewUrl.toString();
+}
 
 // Create-proposals mint a NEW identifier, so unlike reads/edits (which
 // accept whatever slug already exists) the proposed slug is format-checked
@@ -69,6 +98,11 @@ async function proposeCreate(
           suggestionId: res.suggestionId,
           created: true,
           slug: res.slug,
+          reviewUrl: proposalReviewUrl(exec, {
+            proposalId: res.suggestionId,
+            kind: "create",
+            documentSlug: res.slug,
+          }),
           note: "new-document proposal filed; a human reviews and applies it",
         }),
       ),
@@ -184,8 +218,52 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       fields.data.proposalId,
     );
     return result.found
-      ? ok(id, textContent(JSON.stringify(result)))
+      ? ok(
+          id,
+          textContent(
+            JSON.stringify({
+              ...result,
+              reviewUrl: proposalReviewUrl(exec, result),
+            }),
+          ),
+        )
       : err(id, ERR.NOT_FOUND, "unknown proposal");
+  },
+
+  await_proposal_review: async ({ id, exec, params }) => {
+    const fields = AwaitProposalReviewArgs.safeParse(params);
+    if (!fields.success) {
+      return err(
+        id,
+        ERR.INVALID_PARAMS,
+        "await_proposal_review needs a positive integer proposalId and optional timeoutSeconds from 0 to 25",
+      );
+    }
+    const deadline = Date.now() + fields.data.timeoutSeconds * 1000;
+    let result = await exec.proposalResult(
+      exec.callerRef,
+      fields.data.proposalId,
+    );
+    while (result.found && result.outcome === "open") {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      await delay(Math.min(REVIEW_POLL_MS, remainingMs));
+      result = await exec.proposalResult(
+        exec.callerRef,
+        fields.data.proposalId,
+      );
+    }
+    if (!result.found) return err(id, ERR.NOT_FOUND, "unknown proposal");
+    return ok(
+      id,
+      textContent(
+        JSON.stringify({
+          ...result,
+          reviewUrl: proposalReviewUrl(exec, result),
+          timedOut: result.outcome === "open",
+        }),
+      ),
+    );
   },
 
   suggest_edit: async ({ id, exec, params }) => {
@@ -228,6 +306,11 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
           JSON.stringify({
             suggestionId: res.suggestionId,
             hunkCount: res.hunkCount,
+            reviewUrl: proposalReviewUrl(exec, {
+              proposalId: res.suggestionId,
+              kind: "edit",
+              documentSlug: requested.slug,
+            }),
           }),
         ),
       );

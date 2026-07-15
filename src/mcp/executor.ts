@@ -1,4 +1,9 @@
-import type { CallerRef, CollectionSlug, DocumentSlug } from "../ids";
+import type {
+  CallerRef,
+  CollectionSlug,
+  DocumentSlug,
+  ProjectId,
+} from "../ids";
 import type {
   CreateDocProposalResult,
   CreateSuggestionResult,
@@ -13,6 +18,8 @@ import type { VerifyResult } from "../store/domain/verify";
 // attribute reads to a stable caller in the durable event stream.
 export type McpExecutor = Readonly<{
   callerRef: CallerRef;
+  baseUrl: string;
+  projectId: ProjectId;
   listCollections: () => Promise<
     readonly {
       slug: string;

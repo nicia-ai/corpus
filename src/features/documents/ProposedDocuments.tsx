@@ -80,7 +80,10 @@ function ProposalCard({
   const acting = applying || rejecting;
 
   return (
-    <article className={cardClass("space-y-3 px-4! py-3!")}>
+    <article
+      id={`proposal-${String(proposal.id)}`}
+      className={cardClass("space-y-3 px-4! py-3!")}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <FilePlus2 aria-hidden className="h-4 w-4 shrink-0 text-green-700" />
         <span className="min-w-0 truncate font-medium text-slate-900">

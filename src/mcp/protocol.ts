@@ -69,6 +69,26 @@ export const TOOLS = [
     },
   },
   {
+    name: "await_proposal_review",
+    description:
+      "Wait briefly for a human decision on one proposal created by this caller. Hand the reviewUrl returned by suggest_edit to the reviewer first, then call this tool. It returns as soon as the proposal is applied, partially applied, rejected, or stale; after at most 25 seconds it returns the still-open result with timedOut:true so the caller can wait again.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: {
+          type: "number",
+          description: "The suggestionId returned by suggest_edit.",
+        },
+        timeoutSeconds: {
+          type: "number",
+          description:
+            "How long to wait before returning an open result (0-25 seconds; default 25).",
+        },
+      },
+      required: ["proposalId"],
+    },
+  },
+  {
     name: "suggest_edit",
     description:
       "Propose an edit to a document in the bound Collection — or a NEW document — as a reviewable suggestion. Nothing is EVER auto-applied: a human accepts or rejects it. To edit: read the document first, then pass its `slug` (or Corpus `path`), the full `proposedMarkdown` body, and the `baseDocVersion` you read; if the document has moved on since, you get a conflict and must re-read. To propose a new document: pass a slug or Corpus path that doesn't exist yet with `baseDocVersion: 0` and the full body; when a human applies it, the document is created and joins this Collection.",
