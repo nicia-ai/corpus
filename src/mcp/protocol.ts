@@ -76,11 +76,15 @@ export const TOOLS = [
       type: "object",
       properties: {
         proposalId: {
-          type: "number",
+          type: "integer",
+          minimum: 1,
           description: "The suggestionId returned by suggest_edit.",
         },
         timeoutSeconds: {
-          type: "number",
+          type: "integer",
+          minimum: 0,
+          maximum: 25,
+          default: 25,
           description:
             "How long to wait before returning an open result (0-25 seconds; default 25).",
         },

@@ -40,8 +40,14 @@ type FoundProposalResult = Extract<ProposalResult, { found: true }>;
 
 function proposalReviewUrl(
   exec: McpExecutor,
-  result: Pick<FoundProposalResult, "proposalId" | "kind" | "documentSlug">,
-): string {
+  result: Pick<
+    FoundProposalResult,
+    "proposalId" | "kind" | "documentSlug" | "outcome"
+  >,
+): string | undefined {
+  if (result.kind === "create" && result.outcome !== "open") {
+    return undefined;
+  }
   const projectId = encodeURIComponent(exec.projectId);
   const reviewPath =
     result.kind === "create"
@@ -102,6 +108,7 @@ async function proposeCreate(
             proposalId: res.suggestionId,
             kind: "create",
             documentSlug: res.slug,
+            outcome: "open",
           }),
           note: "new-document proposal filed; a human reviews and applies it",
         }),
@@ -310,6 +317,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
               proposalId: res.suggestionId,
               kind: "edit",
               documentSlug: requested.slug,
+              outcome: "open",
             }),
           }),
         ),

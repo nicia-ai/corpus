@@ -472,10 +472,12 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     ).toMatchObject({
       kind: "create",
       outcome: "applied",
-      reviewUrl: expectedReviewUrl(proposalId),
       resultingDocVersion: 1,
       reviewerNote: "Useful addition.",
     });
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).not.toHaveProperty("reviewUrl");
   });
 
   it("baseDocVersion 0 with a fresh Corpus path derives the slug like the import path", async () => {
@@ -561,6 +563,18 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     expect(resultTool?.inputSchema?.properties?.proposalId).toMatchObject({
       type: "integer",
       minimum: 1,
+    });
+    const waitTool = res.result.tools.find(
+      (candidate) => candidate.name === "await_proposal_review",
+    );
+    expect(waitTool?.inputSchema?.properties).toMatchObject({
+      proposalId: { type: "integer", minimum: 1 },
+      timeoutSeconds: {
+        type: "integer",
+        minimum: 0,
+        maximum: 25,
+        default: 25,
+      },
     });
   });
 });
