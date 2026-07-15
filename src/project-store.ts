@@ -165,7 +165,10 @@ import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
 import type { RetentionPolicy } from "./store/domain/retention";
 import { deriveSearchText } from "./store/domain/search";
-import { isCreateProposal } from "./store/domain/suggestion";
+import {
+  computeProposalOutcome,
+  isCreateProposal,
+} from "./store/domain/suggestion";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
 import type { GraphHandle } from "./store/handle";
@@ -1336,8 +1339,10 @@ export class ProjectStore extends DurableObject<Env> {
       return { found: false };
     }
     const hunks = await u.suggestions.hunksFor(proposal.id);
+    // These are the hunks applied to the resulting document, not provisional
+    // marks on a still-open review. Keep them empty until application commits.
     const acceptedHunks = hunks
-      .filter((h) => h.decision === "accepted")
+      .filter((h) => proposal.status === "applied" && h.decision === "accepted")
       .map((h) => ({
         id: h.id,
         ordinal: h.ordinal,
@@ -1347,12 +1352,7 @@ export class ProjectStore extends DurableObject<Env> {
         proposedText: h.proposedText,
         decision: h.decision,
       }));
-    const outcome =
-      proposal.status === "applied" &&
-      hunks.length > 0 &&
-      acceptedHunks.length < hunks.length
-        ? ("partially_applied" as const)
-        : proposal.status;
+    const outcome = computeProposalOutcome(proposal.status, hunks);
     return compact({
       found: true as const,
       proposalId: proposal.id,
