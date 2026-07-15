@@ -2,6 +2,7 @@ import type { CallerRef, CollectionSlug, DocumentSlug } from "../ids";
 import type {
   CreateDocProposalResult,
   CreateSuggestionResult,
+  ProposalResult,
   SuggestCreateInput,
 } from "../project-store/commands/suggestions";
 import type { CollectionDelivery } from "../store/domain/collection-expand";
@@ -101,4 +102,10 @@ export type McpExecutor = Readonly<{
     callerRef: CallerRef,
     input: SuggestCreateInput,
   ) => Promise<CreateDocProposalResult>;
+  // Only the exact callerRef that created a proposal can retrieve its
+  // result. The scoped executor pins identity and the DO re-checks ownership.
+  proposalResult: (
+    callerRef: CallerRef,
+    proposalId: number,
+  ) => Promise<ProposalResult>;
 }>;

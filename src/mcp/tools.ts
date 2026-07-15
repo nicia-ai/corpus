@@ -19,6 +19,10 @@ const SuggestEditArgs = z.object({
   baseDocVersion: z.number().int().nonnegative(),
 });
 
+const GetProposalResultArgs = z.object({
+  proposalId: z.number().int().positive(),
+});
+
 // Create-proposals mint a NEW identifier, so unlike reads/edits (which
 // accept whatever slug already exists) the proposed slug is format-checked
 // at the boundary: the normalizeSlug alphabet — lowercase alphanumerics
@@ -164,6 +168,24 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       raw === "" ? undefined : asDocumentSlug(raw),
     );
     return ok(id, textContent(JSON.stringify(result)));
+  },
+
+  get_proposal_result: async ({ id, exec, params }) => {
+    const fields = GetProposalResultArgs.safeParse(params);
+    if (!fields.success) {
+      return err(
+        id,
+        ERR.INVALID_PARAMS,
+        "get_proposal_result needs a positive integer proposalId",
+      );
+    }
+    const result = await exec.proposalResult(
+      exec.callerRef,
+      fields.data.proposalId,
+    );
+    return result.found
+      ? ok(id, textContent(JSON.stringify(result)))
+      : err(id, ERR.NOT_FOUND, "unknown proposal");
   },
 
   suggest_edit: async ({ id, exec, params }) => {

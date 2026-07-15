@@ -7,6 +7,7 @@ import { resolveAuthorLabels } from "@/control/users";
 import { asDocumentSlug } from "@/ids";
 import type { CallerChannel } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
+import { reviewerNoteSchema } from "@/lib/reviewer-note";
 import { changedBy, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
 import type {
@@ -15,7 +16,12 @@ import type {
   CreateSuggestionResult,
   SuggestionView,
 } from "@/project-store/commands/suggestions";
-import { utf8Bytes } from "@/util";
+import { compact, utf8Bytes } from "@/util";
+
+const ReviewDecisionInput = z.object({
+  suggestionId: z.number().int(),
+  reviewerNote: reviewerNoteSchema.optional(),
+});
 
 export type {
   ApplyCreateProposalResult,
@@ -84,13 +90,16 @@ export const setHunkDecision = createServerFn({ method: "POST" })
 
 export const applySuggestion = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ suggestionId: z.number().int() }))
+  .validator(ReviewDecisionInput)
   .handler(async ({ data, context }): Promise<ApplySuggestionResult> => {
     const c = srv(context);
-    return storeOf(c).applySuggestion({
-      suggestionId: data.suggestionId,
-      appliedBy: changedBy(c),
-    });
+    return storeOf(c).applySuggestion(
+      compact({
+        suggestionId: data.suggestionId,
+        appliedBy: changedBy(c),
+        reviewerNote: data.reviewerNote,
+      }),
+    );
   });
 
 // A pending agent-proposed NEW document, with the author resolved to a
@@ -131,7 +140,7 @@ export const listCreateProposals = createServerFn({ method: "GET" })
 
 export const applyCreateProposal = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ suggestionId: z.number().int() }))
+  .validator(ReviewDecisionInput)
   .handler(async ({ data, context }): Promise<ApplyCreateProposalResult> => {
     const c = srv(context);
     // Apply CREATES canonical markdown, so it owes the same quota check
@@ -151,19 +160,25 @@ export const applyCreateProposal = createServerFn({ method: "POST" })
         bytes: utf8Bytes(proposal.proposedMarkdown),
       });
     }
-    return storeOf(c).applyCreateProposal({
-      suggestionId: data.suggestionId,
-      appliedBy: changedBy(c),
-    });
+    return storeOf(c).applyCreateProposal(
+      compact({
+        suggestionId: data.suggestionId,
+        appliedBy: changedBy(c),
+        reviewerNote: data.reviewerNote,
+      }),
+    );
   });
 
 export const rejectSuggestion = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ suggestionId: z.number().int() }))
+  .validator(ReviewDecisionInput)
   .handler(async ({ data, context }): Promise<Readonly<{ ok: boolean }>> => {
     const c = srv(context);
-    return storeOf(c).rejectSuggestion({
-      suggestionId: data.suggestionId,
-      rejectedBy: changedBy(c),
-    });
+    return storeOf(c).rejectSuggestion(
+      compact({
+        suggestionId: data.suggestionId,
+        rejectedBy: changedBy(c),
+        reviewerNote: data.reviewerNote,
+      }),
+    );
   });

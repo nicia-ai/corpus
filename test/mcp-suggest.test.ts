@@ -64,13 +64,14 @@ async function setup(): Promise<{
 function call(
   exec: ReturnType<typeof scopedExecutor>,
   args: Record<string, unknown>,
+  name = "suggest_edit",
 ): Promise<RpcResponse> {
   return handleMcp(
     RpcSchema.parse({
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "suggest_edit", arguments: args },
+      params: { name, arguments: args },
     }),
     exec,
   ) as Promise<RpcResponse>;
@@ -103,6 +104,157 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     // recorded as `mcp` at write time (not inferred from the credential).
     expect(list[0]?.createdBy).toBe("apikey:agent-a");
     expect(list[0]?.channel).toBe("mcp");
+  });
+
+  it("returns only the originating caller's durable open and partial-apply outcomes", async () => {
+    const { store, exec } = await setup();
+    const proposed = await call(exec, {
+      slug: "doc-a",
+      proposedMarkdown: "alpha changed\n\nbeta two\n\ngamma added",
+      baseDocVersion: 1,
+    });
+    const proposalId = resultJson(proposed).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toEqual({
+      found: true,
+      proposalId,
+      kind: "edit",
+      documentSlug: "doc-a",
+      baseDocVersion: 1,
+      outcome: "open",
+      acceptedHunks: [],
+    });
+
+    const suggestion = (await store.listSuggestions(docSlug("doc-a")))[0];
+    if (suggestion === undefined || suggestion.hunks.length < 2) {
+      throw new Error("expected a multi-hunk proposal");
+    }
+    for (const [index, hunk] of suggestion.hunks.entries()) {
+      await store.setHunkDecision({
+        hunkId: hunk.id,
+        decision: index === 0 ? "accepted" : "rejected",
+      });
+    }
+    expect(
+      await store.applySuggestion({
+        suggestionId: proposalId,
+        appliedBy: "alice",
+        reviewerNote: "Kept the focused part; the rest is too broad.",
+      }),
+    ).toMatchObject({ ok: true, docVersion: 2 });
+
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({
+      outcome: "partially_applied",
+      resultingDocVersion: 2,
+      reviewerNote: "Kept the focused part; the rest is too broad.",
+      acceptedHunks: [{ decision: "accepted" }],
+    });
+
+    const other = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      asCallerRef("apikey:agent-b"),
+    );
+    expect(
+      (await call(other, { proposalId }, "get_proposal_result")).error,
+    )?.toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
+  });
+
+  it("reports a fully accepted edit as applied with the exact public result shape", async () => {
+    const { store, exec } = await setup();
+    const proposalId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nfully accepted`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+    const hunk = (await store.listSuggestions(docSlug("doc-a")))[0]?.hunks[0];
+    if (hunk === undefined) throw new Error("missing proposal hunk");
+    await store.setHunkDecision({
+      hunkId: hunk.id,
+      decision: "accepted",
+    });
+    await store.applySuggestion({
+      suggestionId: proposalId,
+      appliedBy: "alice",
+    });
+
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toEqual({
+      found: true,
+      proposalId,
+      kind: "edit",
+      documentSlug: "doc-a",
+      baseDocVersion: 1,
+      outcome: "applied",
+      resultingDocVersion: 2,
+      resolvedAt: expect.any(String),
+      acceptedHunks: [{ ...hunk, decision: "accepted" }],
+    });
+  });
+
+  it("reports rejected and stale terminal outcomes", async () => {
+    const { store, exec } = await setup();
+    const rejectedId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nrejected addition`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    const staleId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nstale addition`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof rejectedId !== "number" || typeof staleId !== "number") {
+      throw new Error("missing proposal ids");
+    }
+    await store.rejectSuggestion({
+      suggestionId: rejectedId,
+      rejectedBy: "alice",
+      reviewerNote: "Not aligned with the collection.",
+    });
+    const staleHunk = (await store.listSuggestions(docSlug("doc-a")))
+      .find((suggestion) => suggestion.id === staleId)
+      ?.hunks.at(0);
+    if (staleHunk === undefined) throw new Error("missing stale hunk");
+    await store.setHunkDecision({
+      hunkId: staleHunk.id,
+      decision: "accepted",
+    });
+    await store.saveDocument({
+      slug: docSlug("doc-a"),
+      markdown: `${DOC_A}\n\nnew canonical head`,
+      clientVersion: 1,
+      changedBy: "alice",
+    });
+    await store.applySuggestion({ suggestionId: staleId, appliedBy: "alice" });
+
+    expect(
+      resultJson(
+        await call(exec, { proposalId: rejectedId }, "get_proposal_result"),
+      ),
+    ).toMatchObject({
+      outcome: "rejected",
+      reviewerNote: "Not aligned with the collection.",
+    });
+    expect(
+      resultJson(
+        await call(exec, { proposalId: staleId }, "get_proposal_result"),
+      ),
+    ).toMatchObject({ outcome: "stale" });
   });
 
   it("CRITICAL: an agent bound to Collection A cannot suggest against a doc in Collection B", async () => {
@@ -190,6 +342,24 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     });
     // Nothing was created — the proposal is review state, not a document.
     expect(await store.getDocument(docSlug("brand-new"))).toBeUndefined();
+
+    const proposalId = json.suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+    expect(
+      await store.applyCreateProposal({
+        suggestionId: proposalId,
+        appliedBy: "alice",
+        reviewerNote: "Useful addition.",
+      }),
+    ).toMatchObject({ ok: true, docVersion: 1 });
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({
+      kind: "create",
+      outcome: "applied",
+      resultingDocVersion: 1,
+      reviewerNote: "Useful addition.",
+    });
   });
 
   it("baseDocVersion 0 with a fresh Corpus path derives the slug like the import path", async () => {

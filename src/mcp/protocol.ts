@@ -53,6 +53,21 @@ export const TOOLS = [
       "Verify the content-addressed version chain. Pass `documentSlug` to verify one document; omitted = verify every document in the Collection this connection is bound to.",
   },
   {
+    name: "get_proposal_result",
+    description:
+      "Get the human review outcome for one proposal created by this caller identity. Returns open, applied, partially_applied, rejected, or stale; applied hunks, resulting document version, and an optional reviewer note are included when available. Other callers' proposals are never visible.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: {
+          type: "number",
+          description: "The suggestionId returned by suggest_edit.",
+        },
+      },
+      required: ["proposalId"],
+    },
+  },
+  {
     name: "suggest_edit",
     description:
       "Propose an edit to a document in the bound Collection — or a NEW document — as a reviewable suggestion. Nothing is EVER auto-applied: a human accepts or rejects it. To edit: read the document first, then pass its `slug` (or Corpus `path`), the full `proposedMarkdown` body, and the `baseDocVersion` you read; if the document has moved on since, you get a conflict and must re-read. To propose a new document: pass a slug or Corpus path that doesn't exist yet with `baseDocVersion: 0` and the full body; when a human applies it, the document is created and joins this Collection.",

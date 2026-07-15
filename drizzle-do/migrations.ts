@@ -46,6 +46,12 @@ export const ledgerMigrations: LedgerMigrationBundle = {
         "when": 1783986713510,
         "tag": "0004_stiff_rhodey",
         "breakpoints": true
+      },
+      {
+        "idx": 5,
+        "when": 1784151610362,
+        "tag": "0005_messy_mauler",
+        "breakpoints": true
       }
     ]
   },
@@ -54,6 +60,7 @@ export const ledgerMigrations: LedgerMigrationBundle = {
     "m0001": "CREATE TABLE `comment` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`thread_id` integer NOT NULL,\n\t`body` text NOT NULL,\n\t`created_by` text NOT NULL,\n\t`created_at` text NOT NULL\n);\n--> statement-breakpoint\nCREATE INDEX `comment_thread_id` ON `comment` (`thread_id`);--> statement-breakpoint\nCREATE TABLE `comment_thread` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`document_slug` text NOT NULL,\n\t`anchor_block_id` text NOT NULL,\n\t`anchor_start` integer NOT NULL,\n\t`anchor_end` integer NOT NULL,\n\t`quote_prefix` text NOT NULL,\n\t`quote_exact` text NOT NULL,\n\t`quote_suffix` text NOT NULL,\n\t`status` text NOT NULL,\n\t`created_by` text NOT NULL,\n\t`created_at` text NOT NULL,\n\t`resolved_by` text,\n\t`resolved_at` text,\n\tCONSTRAINT \"comment_thread_status_valid\" CHECK(status in ('open', 'resolved', 'orphaned'))\n);\n--> statement-breakpoint\nCREATE INDEX `comment_thread_doc` ON `comment_thread` (`document_slug`);--> statement-breakpoint\nCREATE TABLE `document_block_map` (\n\t`document_slug` text NOT NULL,\n\t`doc_version` integer NOT NULL,\n\t`parser_version` integer NOT NULL,\n\t`blocks` text NOT NULL,\n\tPRIMARY KEY(`document_slug`, `doc_version`)\n);\n--> statement-breakpoint\nCREATE TABLE `document_block_seq` (\n\t`document_slug` text PRIMARY KEY NOT NULL,\n\t`next` integer DEFAULT 0 NOT NULL\n);\n",
     "m0002": "CREATE TABLE `suggestion` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`document_slug` text NOT NULL,\n\t`base_doc_version` integer NOT NULL,\n\t`proposed_markdown` text NOT NULL,\n\t`status` text NOT NULL,\n\t`created_by` text NOT NULL,\n\t`created_at` text NOT NULL,\n\t`resolved_by` text,\n\t`resolved_at` text,\n\tCONSTRAINT \"suggestion_status_valid\" CHECK(status in ('open', 'applied', 'rejected', 'stale'))\n);\n--> statement-breakpoint\nCREATE INDEX `suggestion_doc` ON `suggestion` (`document_slug`);--> statement-breakpoint\nCREATE TABLE `suggestion_hunk` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`suggestion_id` integer NOT NULL,\n\t`ordinal` integer NOT NULL,\n\t`op` text NOT NULL,\n\t`base_start` integer NOT NULL,\n\t`base_end` integer NOT NULL,\n\t`proposed_text` text NOT NULL,\n\t`decision` text NOT NULL,\n\tCONSTRAINT \"suggestion_hunk_op_valid\" CHECK(op in ('replace', 'insert', 'delete')),\n\tCONSTRAINT \"suggestion_hunk_decision_valid\" CHECK(decision in ('pending', 'accepted', 'rejected'))\n);\n--> statement-breakpoint\nCREATE INDEX `suggestion_hunk_suggestion` ON `suggestion_hunk` (`suggestion_id`);",
     "m0003": "ALTER TABLE `suggestion` ADD `channel` text DEFAULT 'web' NOT NULL;",
-    "m0004": "ALTER TABLE `suggestion` ADD `proposed_path` text;--> statement-breakpoint\nALTER TABLE `suggestion` ADD `origin_collection_slug` text;"
+    "m0004": "ALTER TABLE `suggestion` ADD `proposed_path` text;--> statement-breakpoint\nALTER TABLE `suggestion` ADD `origin_collection_slug` text;",
+    "m0005": "ALTER TABLE `suggestion` ADD `result_doc_version` integer;--> statement-breakpoint\nALTER TABLE `suggestion` ADD `reviewer_note` text;"
   }
 };

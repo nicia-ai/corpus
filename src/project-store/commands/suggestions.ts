@@ -60,8 +60,28 @@ export type SuggestionView = Readonly<{
   // next to the author, recorded truth rather than inferred from createdBy.
   channel: CallerChannel;
   createdAt: string;
+  reviewerNote: string | null;
   hunks: readonly SuggestionHunkView[];
 }>;
+
+export type ProposalOutcome =
+  "open" | "applied" | "partially_applied" | "rejected" | "stale";
+
+export type ProposalResult = Readonly<
+  | { found: false }
+  | {
+      found: true;
+      proposalId: number;
+      kind: "edit" | "create";
+      documentSlug: string;
+      baseDocVersion: number;
+      outcome: ProposalOutcome;
+      resultingDocVersion?: number;
+      reviewerNote?: string;
+      resolvedAt?: string;
+      acceptedHunks: readonly SuggestionHunkView[];
+    }
+>;
 
 const toHunk = (h: SuggestionHunkRow): Hunk => ({
   ordinal: h.ordinal,
@@ -271,6 +291,7 @@ export function createProposalView(
 export type ApplyCreateProposalInput = Readonly<{
   suggestionId: number;
   appliedBy: string;
+  reviewerNote?: string;
 }>;
 
 export type ApplyCreateProposalResult = Readonly<
@@ -371,7 +392,16 @@ export async function applyCreateProposalCommand(
   }
   // saveDocumentCommand staled every open proposal for this slug
   // (including this one); resolve() then records THIS one's true outcome.
-  await ctx.u.suggestions.resolve(s.id, "applied", input.appliedBy, ctx.now);
+  await ctx.u.suggestions.resolve({
+    id: s.id,
+    status: "applied",
+    resolvedBy: input.appliedBy,
+    resolvedAt: ctx.now,
+    resultDocVersion: saved.result.docVersion,
+    ...(input.reviewerNote === undefined
+      ? {}
+      : { reviewerNote: input.reviewerNote }),
+  });
   return {
     result: {
       ok: true,
@@ -409,6 +439,7 @@ export async function setHunkDecisionCommand(
 export type ApplySuggestionInput = Readonly<{
   suggestionId: number;
   appliedBy: string;
+  reviewerNote?: string;
 }>;
 
 export type ApplySuggestionResult = Readonly<
@@ -466,7 +497,16 @@ export async function applySuggestionCommand(
     // version back to the suggestion (and the agent/human that proposed it).
     appliedFrom: { suggestionId: s.id, by: s.createdBy, channel: s.channel },
   });
-  await ctx.u.suggestions.resolve(s.id, "applied", input.appliedBy, ctx.now);
+  await ctx.u.suggestions.resolve({
+    id: s.id,
+    status: "applied",
+    resolvedBy: input.appliedBy,
+    resolvedAt: ctx.now,
+    resultDocVersion: saved.result.docVersion,
+    ...(input.reviewerNote === undefined
+      ? {}
+      : { reviewerNote: input.reviewerNote }),
+  });
   // The head just advanced, so every other open suggestion on this doc is now
   // off-base — mark them stale eagerly instead of leaving them "open" until
   // someone next tries to apply them (which is when the UI would otherwise
@@ -485,6 +525,7 @@ export async function applySuggestionCommand(
 export type RejectSuggestionInput = Readonly<{
   suggestionId: number;
   rejectedBy: string;
+  reviewerNote?: string;
 }>;
 
 // Reject is a terminal transition out of `open`; a suggestion already
@@ -498,12 +539,15 @@ export async function rejectSuggestionCommand(
 > {
   const s = await ctx.u.suggestions.get(input.suggestionId);
   if (s?.status !== "open") return commandOutcome({ ok: false });
-  await ctx.u.suggestions.resolve(
-    input.suggestionId,
-    "rejected",
-    input.rejectedBy,
-    ctx.now,
-  );
+  await ctx.u.suggestions.resolve({
+    id: input.suggestionId,
+    status: "rejected",
+    resolvedBy: input.rejectedBy,
+    resolvedAt: ctx.now,
+    ...(input.reviewerNote === undefined
+      ? {}
+      : { reviewerNote: input.reviewerNote }),
+  });
   return commandOutcome({
     ok: true,
     documentSlug: asDocumentSlug(s.documentSlug),

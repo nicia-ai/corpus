@@ -93,6 +93,7 @@ import {
   type CreateSuggestionInput,
   type CreateSuggestionResult,
   rejectSuggestionCommand,
+  type ProposalResult,
   type RejectSuggestionInput,
   setHunkDecisionCommand,
   type SetHunkDecisionInput,
@@ -1322,6 +1323,52 @@ export class ProjectStore extends DurableObject<Env> {
     );
   }
 
+  // Caller-scoped proposal result for MCP. Ownership is checked again in
+  // the DO (in addition to scopedExecutor's closure-bound identity) so a
+  // guessed id never reveals another caller's review state.
+  async proposalResult(
+    callerRef: CallerRef,
+    proposalId: number,
+  ): Promise<ProposalResult> {
+    const u = await this.read();
+    const proposal = await u.suggestions.get(proposalId);
+    if (proposal?.createdBy !== callerRef) {
+      return { found: false };
+    }
+    const hunks = await u.suggestions.hunksFor(proposal.id);
+    const acceptedHunks = hunks
+      .filter((h) => h.decision === "accepted")
+      .map((h) => ({
+        id: h.id,
+        ordinal: h.ordinal,
+        op: h.op,
+        baseStart: h.baseStart,
+        baseEnd: h.baseEnd,
+        proposedText: h.proposedText,
+        decision: h.decision,
+      }));
+    const outcome =
+      proposal.status === "applied" &&
+      hunks.length > 0 &&
+      acceptedHunks.length < hunks.length
+        ? ("partially_applied" as const)
+        : proposal.status;
+    return compact({
+      found: true as const,
+      proposalId: proposal.id,
+      kind: isCreateProposal(proposal)
+        ? ("create" as const)
+        : ("edit" as const),
+      documentSlug: proposal.documentSlug,
+      baseDocVersion: proposal.baseDocVersion,
+      outcome,
+      resultingDocVersion: proposal.resultDocVersion ?? undefined,
+      reviewerNote: proposal.reviewerNote ?? undefined,
+      resolvedAt: proposal.resolvedAt ?? undefined,
+      acceptedHunks,
+    });
+  }
+
   // Open create-proposals for the review surface (humans only — never
   // reachable through the McpExecutor port).
   async listCreateProposals(): Promise<readonly CreateProposalView[]> {
@@ -1386,6 +1433,7 @@ export class ProjectStore extends DurableObject<Env> {
       createdBy: s.createdBy,
       channel: s.channel,
       createdAt: s.createdAt,
+      reviewerNote: s.reviewerNote,
       hunks: hunks
         .filter((h) => h.suggestionId === s.id)
         .map((h) => ({
