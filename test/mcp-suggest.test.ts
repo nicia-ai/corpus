@@ -153,6 +153,9 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       });
     }
     expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({ outcome: "open", acceptedHunks: [] });
+    expect(
       await store.applySuggestion({
         suggestionId: proposalId,
         appliedBy: "alice",
@@ -177,7 +180,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     );
     expect(
       (await call(other, { proposalId }, "get_proposal_result")).error,
-    )?.toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
+    ).toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
   });
 
   it("keeps proposals private between OAuth Connections owned by the same user", async () => {
@@ -207,7 +210,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
 
     expect(
       (await call(second, { proposalId }, "get_proposal_result")).error,
-    )?.toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
+    ).toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
   });
 
   it("reports a fully accepted edit as applied with the exact public result shape", async () => {

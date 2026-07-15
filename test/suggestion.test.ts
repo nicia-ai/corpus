@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { applyHunks, diffToHunks } from "../src/store/domain/suggestion";
+import {
+  applyHunks,
+  computeProposalOutcome,
+  diffToHunks,
+} from "../src/store/domain/suggestion";
 
 const norm = (s: string): string =>
   s
@@ -68,5 +72,25 @@ describe("diffToHunks / applyHunks", () => {
     const out = applyHunks(base, diffToHunks(base, proposed));
     expect(out).toContain("const a = 1;\n\n\nconst b = 2;");
     expect(out).toContain("new tail");
+  });
+});
+
+describe("computeProposalOutcome", () => {
+  it("derives partial application only from an applied mixed decision set", () => {
+    expect(
+      computeProposalOutcome("applied", [
+        { decision: "accepted" },
+        { decision: "rejected" },
+      ]),
+    ).toBe("partially_applied");
+    expect(computeProposalOutcome("applied", [{ decision: "accepted" }])).toBe(
+      "applied",
+    );
+    expect(
+      computeProposalOutcome("open", [
+        { decision: "accepted" },
+        { decision: "rejected" },
+      ]),
+    ).toBe("open");
   });
 });
