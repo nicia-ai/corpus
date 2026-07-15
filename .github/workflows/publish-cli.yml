@@ -9,8 +9,35 @@ permissions:
   id-token: write
 
 jobs:
+  verify-package:
+    if: startsWith(github.event.release.tag_name, 'cli-v')
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm cli:build
+
+      - run: pnpm cli:check
+
   publish:
     if: startsWith(github.event.release.tag_name, 'cli-v')
+    needs: verify-package
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

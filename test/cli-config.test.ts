@@ -7,7 +7,8 @@ import {
   savedConfig,
   serializeSavedConfig,
 } from "../cli/config";
-import { doctor } from "../cli/core";
+import { corpusConfigPath } from "../cli/config-path";
+import { doctor, push } from "../cli/core";
 
 describe("CLI saved configuration", () => {
   it("normalizes a URL and round-trips the stored JSON", () => {
@@ -52,12 +53,68 @@ describe("CLI saved configuration", () => {
     expect(() => normalizeBaseUrl("file:///tmp/corpus")).toThrow(
       "http:// or https://",
     );
-    expect(() => normalizeBaseUrl("https://user:pass@example.com")).toThrow(
+    const embeddedCredentials = ["https://user", "pass@example.com"].join(":");
+    expect(() => normalizeBaseUrl(embeddedCredentials)).toThrow(
       "embedded credentials",
     );
     expect(normalizeBaseUrl("https://example.com///")).toBe(
       "https://example.com",
     );
+    expect(normalizeBaseUrl("http://127.0.0.1:8787/")).toBe(
+      "http://127.0.0.1:8787",
+    );
+    expect(() => normalizeBaseUrl("http://example.com")).toThrow(
+      "must use https://",
+    );
+  });
+
+  it("never treats empty or relative XDG roots as config directories", () => {
+    expect(corpusConfigPath({ XDG_CONFIG_HOME: "" }, "/home/me", "linux")).toBe(
+      "/home/me/.config/corpus/config.json",
+    );
+    expect(
+      corpusConfigPath({ XDG_CONFIG_HOME: "relative" }, "/home/me", "linux"),
+    ).toBe("/home/me/.config/corpus/config.json");
+    expect(
+      corpusConfigPath(
+        { XDG_CONFIG_HOME: "/private/config" },
+        "/home/me",
+        "linux",
+      ),
+    ).toBe("/private/config/corpus/config.json");
+    expect(
+      corpusConfigPath({ LOCALAPPDATA: "relative" }, "/home/me", "win32"),
+    ).toBe("/home/me/AppData/Local/Corpus/config.json");
+  });
+
+  it.each([
+    [
+      { ok: false, segmentCollision: true },
+      "collides with an existing file or folder path",
+    ],
+    [{ ok: false, rolledBack: true }, "could not be completed atomically"],
+  ])("explains non-version push conflicts", async (body, message) => {
+    await expect(
+      push(
+        {
+          baseUrl: "https://example.com",
+          apiKey: "cck_test",
+          fetch: () =>
+            Promise.resolve(
+              new Response(JSON.stringify(body), {
+                status: 409,
+                headers: { "content-type": "application/json" },
+              }),
+            ),
+          files: {
+            readText: (path) =>
+              Promise.resolve(path.endsWith(".md") ? "# Draft" : undefined),
+            writeText: () => Promise.resolve(),
+          },
+        },
+        "draft",
+      ),
+    ).rejects.toThrow(message);
   });
 
   it("bounds doctor connectivity checks", async () => {

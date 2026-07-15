@@ -46,7 +46,10 @@ const DocFullSchema = z.object({
 const PushResultSchema = z.object({
   ok: z.boolean().optional(),
   docVersion: z.number().optional(),
+  conflict: z.boolean().optional(),
   currentVersion: z.number().optional(),
+  segmentCollision: z.boolean().optional(),
+  rolledBack: z.boolean().optional(),
 });
 const SidecarSchema = z.object({ slug: z.string(), docVersion: z.number() });
 
@@ -203,6 +206,20 @@ export async function push(
   });
   const body = PushResultSchema.parse(await res.json());
   if (res.status === 409) {
+    if (body.segmentCollision === true) {
+      throw new CliError(
+        "conflict",
+        "conflict: that slug collides with an existing file or folder path.",
+        { status: 409 },
+      );
+    }
+    if (body.rolledBack === true) {
+      throw new CliError(
+        "conflict",
+        "conflict: the write could not be completed atomically. Retry it.",
+        { status: 409 },
+      );
+    }
     throw new CliError(
       "conflict",
       `conflict: the document is at v${body.currentVersion ?? 0}. ` +

@@ -15,6 +15,13 @@ export function normalizeBaseUrl(value: string): string {
   if (url.username !== "" || url.password !== "") {
     throw new Error("Corpus URL must not contain embedded credentials.");
   }
+  const loopback =
+    url.hostname === "localhost" ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]";
+  if (url.protocol === "http:" && !loopback) {
+    throw new Error("Corpus URL must use https:// outside this machine.");
+  }
   url.hash = "";
   url.search = "";
   url.pathname = url.pathname.replace(/\/+$/, "");

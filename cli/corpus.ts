@@ -18,6 +18,7 @@ import process from "node:process";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface as createPromiseInterface } from "node:readline/promises";
 
+import { corpusConfigPath } from "./config-path.js";
 import {
   parseSavedConfig,
   resolveConfig,
@@ -41,18 +42,7 @@ function die(message: string): never {
 }
 
 function configPath(): string {
-  if (process.env.CORPUS_CONFIG !== undefined) {
-    return process.env.CORPUS_CONFIG;
-  }
-  if (process.env.XDG_CONFIG_HOME !== undefined) {
-    return join(process.env.XDG_CONFIG_HOME, "corpus", "config.json");
-  }
-  if (platform() === "win32") {
-    const root =
-      process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
-    return join(root, "Corpus", "config.json");
-  }
-  return join(homedir(), ".config", "corpus", "config.json");
+  return corpusConfigPath(process.env, homedir(), platform());
 }
 
 async function readStoredConfig(

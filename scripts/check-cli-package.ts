@@ -3,11 +3,9 @@ import { execFile } from "node:child_process";
 import {
   chmod,
   mkdtemp,
-  mkdir,
   readFile,
   rm,
   stat,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -185,22 +183,25 @@ async function main(): Promise<void> {
     assert(paths.includes("dist/corpus.js"));
     assert(paths.includes("dist/core.d.ts"));
 
-    const extracted = join(temporary, "extracted");
-    await mkdir(extracted);
+    const installed = join(temporary, "installed");
+    const tarball = join(temporary, packageResult[0].filename);
     await execFileAsync(
-      "tar",
-      ["-xzf", join(temporary, packageResult[0].filename), "-C", extracted],
+      "npm",
+      [
+        "install",
+        "--prefix",
+        installed,
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        tarball,
+      ],
       { cwd: ROOT, env: CLEAN_ENV },
     );
-    await symlink(
-      join(ROOT, "node_modules"),
-      join(extracted, "package", "node_modules"),
-      "dir",
-    );
     const installedVersion = await execFileAsync(
-      process.execPath,
-      [join(extracted, "package", "dist", "corpus.js"), "--version"],
-      { cwd: extracted, env: CLEAN_ENV },
+      "npm",
+      ["exec", "--prefix", installed, "--", "corpus", "--version"],
+      { cwd: installed, env: CLEAN_ENV },
     );
     assert.equal(installedVersion.stdout, `${cliPackage.version}\n`);
 
