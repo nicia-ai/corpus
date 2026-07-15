@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   asCallerRef,
   asConnectionId,
+  asProjectId,
   asUserId,
   callerRefFromOAuth,
 } from "../src/ids";
@@ -22,6 +23,10 @@ import { colSlug, docSlug, freshStore } from "./_helpers";
 const DOC_A = "alpha one\n\nbeta two";
 const DOC_B = "gamma one\n\ndelta two";
 const AGENT = asCallerRef("apikey:agent-a");
+const TEST_LOCATION = {
+  baseUrl: "http://localhost:8787",
+  projectId: asProjectId("test-project"),
+} as const;
 
 type RpcResponse = Readonly<{
   result?: { content?: { text: string }[] };
@@ -62,7 +67,13 @@ async function setup(): Promise<{
   await store.attachDocument(colSlug("col-b"), docSlug("doc-b"), 1, "bob");
 
   const members = (await store.collectionMembers(colSlug("col-a"))) ?? [];
-  const exec = scopedExecutor(store, colSlug("col-a"), members, AGENT);
+  const exec = scopedExecutor(
+    store,
+    colSlug("col-a"),
+    members,
+    AGENT,
+    TEST_LOCATION,
+  );
   return { store, exec };
 }
 
@@ -154,6 +165,9 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       });
     }
     expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({ outcome: "open", acceptedHunks: [] });
+    expect(
       await store.applySuggestion({
         suggestionId: proposalId,
         appliedBy: "alice",
@@ -175,6 +189,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       colSlug("col-a"),
       (await store.collectionMembers(colSlug("col-a"))) ?? [],
       asCallerRef("apikey:agent-b"),
+      TEST_LOCATION,
     );
     expect(
       await store.replyToProposal(
@@ -185,7 +200,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     ).toEqual({ ok: false, reason: "missing" });
     expect(
       (await call(other, { proposalId }, "get_proposal_result")).error,
-    )?.toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
+    ).toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
   });
 
   it("keeps proposals private between OAuth Connections owned by the same user", async () => {
@@ -197,12 +212,14 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       colSlug("col-a"),
       members,
       callerRefFromOAuth(userId, asConnectionId("conn-a")),
+      TEST_LOCATION,
     );
     const second = scopedExecutor(
       store,
       colSlug("col-a"),
       members,
       callerRefFromOAuth(userId, asConnectionId("conn-b")),
+      TEST_LOCATION,
     );
     const proposalId = resultJson(
       await call(first, {
@@ -215,7 +232,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
 
     expect(
       (await call(second, { proposalId }, "get_proposal_result")).error,
-    )?.toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
+    ).toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
   });
 
   it("reports a fully accepted edit as applied with the exact public result shape", async () => {
@@ -469,6 +486,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       colSlug("col-a"),
       (await store.collectionMembers(colSlug("col-a"))) ?? [],
       asCallerRef("apikey:agent-b"),
+      TEST_LOCATION,
     );
     expect(
       (

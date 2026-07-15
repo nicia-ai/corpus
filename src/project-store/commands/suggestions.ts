@@ -26,6 +26,7 @@ import {
   type Hunk,
   type HunkOp,
   isCreateProposal,
+  type ProposalOutcome,
 } from "../../store/domain/suggestion";
 import {
   type CommandOutcome,
@@ -81,8 +82,7 @@ export type ProposalMessage = Readonly<{
   createdAt: string;
 }>;
 
-export type ProposalOutcome =
-  "open" | "applied" | "partially_applied" | "rejected" | "stale";
+export type { ProposalOutcome } from "../../store/domain/suggestion";
 
 export type ProposalResult = Readonly<
   | { found: false }

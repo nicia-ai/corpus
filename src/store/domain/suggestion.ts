@@ -19,6 +19,23 @@ import { parseBlocksWithRanges } from "./block-parse";
 // carries no hunks — the whole body is the proposal.
 export const CREATE_PROPOSAL_BASE_VERSION = 0;
 
+export type ProposalStatus = "open" | "applied" | "rejected" | "stale";
+export type ProposalOutcome = ProposalStatus | "partially_applied";
+
+// Reviewers persist only the four storage statuses. Partial application is
+// derived from the terminal hunk decisions so it cannot drift from what was
+// actually applied or require a fifth stored status.
+export function computeProposalOutcome(
+  status: ProposalStatus,
+  hunks: readonly Readonly<{
+    decision: "pending" | "accepted" | "rejected";
+  }>[],
+): ProposalOutcome {
+  if (status !== "applied" || hunks.length === 0) return status;
+  const accepted = hunks.filter((hunk) => hunk.decision === "accepted").length;
+  return accepted < hunks.length ? "partially_applied" : status;
+}
+
 export function isCreateProposal(
   row: Readonly<{ baseDocVersion: number }>,
 ): boolean {
