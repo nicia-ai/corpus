@@ -60,7 +60,8 @@ export const TOOLS = [
       type: "object",
       properties: {
         proposalId: {
-          type: "number",
+          type: "integer",
+          minimum: 1,
           description: "The suggestionId returned by suggest_edit.",
         },
       },
@@ -89,7 +90,8 @@ export const TOOLS = [
           description: "The full proposed document body, verbatim.",
         },
         baseDocVersion: {
-          type: "number",
+          type: "integer",
+          minimum: 0,
           description:
             "The docVersion you read; must still be head or you get a conflict. Pass 0 with a new slug/path to propose creating a document.",
         },

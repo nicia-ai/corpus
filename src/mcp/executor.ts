@@ -9,7 +9,7 @@ import type { CollectionDelivery } from "../store/domain/collection-expand";
 import type { VerifyResult } from "../store/domain/verify";
 
 // The per-request MCP executor port. `callerRef` carries the namespaced
-// caller identity (`apikey:<id>` | `oauth:<sub>`) so downstream code can
+// caller identity (`apikey:<id>` | `oauth:<sub>:connection:<id>`) so downstream code can
 // attribute reads to a stable caller in the durable event stream.
 export type McpExecutor = Readonly<{
   callerRef: CallerRef;

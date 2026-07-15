@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { asCallerRef } from "../src/ids";
+import {
+  asCallerRef,
+  asConnectionId,
+  asUserId,
+  callerRefFromOAuth,
+} from "../src/ids";
 import { handleMcp, RpcSchema } from "../src/mcp";
 import { ERR } from "../src/mcp/protocol";
 import { scopedExecutor } from "../src/scoped-executor";
@@ -163,6 +168,36 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     );
     expect(
       (await call(other, { proposalId }, "get_proposal_result")).error,
+    )?.toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
+  });
+
+  it("keeps proposals private between OAuth Connections owned by the same user", async () => {
+    const { store } = await setup();
+    const members = (await store.collectionMembers(colSlug("col-a"))) ?? [];
+    const userId = asUserId("same-user");
+    const first = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      members,
+      callerRefFromOAuth(userId, asConnectionId("conn-a")),
+    );
+    const second = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      members,
+      callerRefFromOAuth(userId, asConnectionId("conn-b")),
+    );
+    const proposalId = resultJson(
+      await call(first, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nprivate to conn-a`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+
+    expect(
+      (await call(second, { proposalId }, "get_proposal_result")).error,
     )?.toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
   });
 
@@ -420,7 +455,13 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       exec,
     )) as {
       result: {
-        tools: { name: string; inputSchema?: { required?: string[] } }[];
+        tools: {
+          name: string;
+          inputSchema?: {
+            required?: string[];
+            properties?: Record<string, Record<string, unknown>>;
+          };
+        }[];
       };
     };
     const tool = res.result.tools.find((t) => t.name === "suggest_edit");
@@ -429,5 +470,16 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       "proposedMarkdown",
       "baseDocVersion",
     ]);
+    expect(tool?.inputSchema?.properties?.baseDocVersion).toMatchObject({
+      type: "integer",
+      minimum: 0,
+    });
+    const resultTool = res.result.tools.find(
+      (candidate) => candidate.name === "get_proposal_result",
+    );
+    expect(resultTool?.inputSchema?.properties?.proposalId).toMatchObject({
+      type: "integer",
+      minimum: 1,
+    });
   });
 });

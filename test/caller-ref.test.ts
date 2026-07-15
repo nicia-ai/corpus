@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   asApiKeyId,
+  asConnectionId,
   asUserId,
   type CallerRef,
   callerRefFromApiKey,
@@ -19,9 +20,11 @@ describe("CallerRef — construction is namespaced", () => {
     expect(callerRefFromApiKey(apiKeyId)).toBe("apikey:a1b2c3d4");
   });
 
-  it("OAuth path produces `oauth:<userId>`", () => {
+  it("OAuth path includes the Connection in its caller identity", () => {
     const userId = asUserId("user-abc-123");
-    expect(callerRefFromOAuth(userId)).toBe("oauth:user-abc-123");
+    expect(callerRefFromOAuth(userId, asConnectionId("conn-1"))).toBe(
+      "oauth:user-abc-123:connection:conn-1",
+    );
   });
 
   it("an api_key id and an oauth sub with the same raw string DO NOT collide", () => {
@@ -30,10 +33,20 @@ describe("CallerRef — construction is namespaced", () => {
     // entire point — these MUST be distinct CallerRefs.
     const sharedSuffix = "abc-123";
     const a: CallerRef = callerRefFromApiKey(asApiKeyId(sharedSuffix));
-    const b: CallerRef = callerRefFromOAuth(asUserId(sharedSuffix));
+    const b: CallerRef = callerRefFromOAuth(
+      asUserId(sharedSuffix),
+      asConnectionId("conn-1"),
+    );
     expect(a).not.toBe(b);
     expect(a).toBe("apikey:abc-123");
-    expect(b).toBe("oauth:abc-123");
+    expect(b).toBe("oauth:abc-123:connection:conn-1");
+  });
+
+  it("scopes the same OAuth user to distinct Connections", () => {
+    const userId = asUserId("user-1");
+    expect(callerRefFromOAuth(userId, asConnectionId("conn-a"))).not.toBe(
+      callerRefFromOAuth(userId, asConnectionId("conn-b")),
+    );
   });
 
   it("CallerRefs round-trip as their string form (opaque to downstream)", () => {
