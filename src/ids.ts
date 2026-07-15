@@ -36,8 +36,9 @@ export type InvitationId = Id<"InvitationId">;
 
 // The per-request identity of an MCP caller, namespaced by auth path
 // so an api_key.id can never collide with an OAuth `sub`. Values are
-// either `apikey:<api_key.id>` or `oauth:<jwt.sub>` — never the raw
-// token, never the OAuth access token. Built once at the auth
+// either `apikey:<api_key.id>` or
+// `oauth:<jwt.sub>:connection:<connection.id>` — never the raw token,
+// never the OAuth access token. Built once at the auth
 // resolver (resolveApiKey / resolveConnection) and threaded end-to-end
 // into the scopedExecutor so the durable event stream's read events
 // attribute reads to a stable caller.
@@ -69,8 +70,11 @@ export function callerRefFromApiKey(apiKeyId: ApiKeyId): CallerRef {
 // which IS the user id). Symmetric with the API-key path; both
 // resolver sites produce a CallerRef that the rest of the system can
 // compare as opaque strings.
-export function callerRefFromOAuth(userId: UserId): CallerRef {
-  return asCallerRef(`oauth:${userId}`);
+export function callerRefFromOAuth(
+  userId: UserId,
+  connectionId: ConnectionId,
+): CallerRef {
+  return asCallerRef(`oauth:${userId}:connection:${connectionId}`);
 }
 
 // Decode a stored author id into its kind + bare id — the inverse of the
@@ -88,7 +92,9 @@ export function parseCallerRef(
     if (id !== "") return { kind: "apikey", id };
   }
   if (ref.startsWith("oauth:")) {
-    const id = ref.slice("oauth:".length);
+    const body = ref.slice("oauth:".length);
+    const connectionMarker = body.lastIndexOf(":connection:");
+    const id = connectionMarker === -1 ? body : body.slice(0, connectionMarker);
     if (id !== "") return { kind: "oauth", id };
   }
   return { kind: "user", id: ref };

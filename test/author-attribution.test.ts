@@ -44,12 +44,14 @@ describe("resolveAuthorLabels (control plane)", () => {
     const out = await resolveAuthorLabels(db, [
       userId,
       `oauth:${userId}`,
+      `oauth:${userId}:connection:conn-1`,
       `apikey:${apiKeyId}`,
     ]);
     const name = out.get(userId);
     expect(name).toBeDefined();
     // oauth:<sub> IS the user id; apikey:<id> hops api_key.userId to the owner.
     expect(out.get(`oauth:${userId}`)).toBe(name);
+    expect(out.get(`oauth:${userId}:connection:conn-1`)).toBe(name);
     expect(out.get(`apikey:${apiKeyId}`)).toBe(name);
   });
 

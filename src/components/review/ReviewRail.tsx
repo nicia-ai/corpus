@@ -2,6 +2,7 @@ import { Check, MessageSquare, PencilLine, X } from "lucide-react";
 import { useState } from "react";
 
 import { ProseDiff } from "@/components/diff/Diff";
+import { Field } from "@/components/Field";
 import { Button } from "@/components/ui/Button";
 import { cardClass } from "@/components/ui/Surface";
 import type { CallerChannel, ProjectId } from "@/ids";
@@ -350,6 +351,7 @@ function SuggestionCard({
   onChange: () => void;
 }>): React.ReactElement {
   const suggestion = item.suggestion;
+  const [reviewerNote, setReviewerNote] = useState("");
   const { run: decide } = useSubmit(
     async (hunkId: number, decision: "accepted" | "rejected") => {
       await setHunkDecision({ data: { projectId, hunkId, decision } });
@@ -362,7 +364,7 @@ function SuggestionCard({
     run: apply,
   } = useSubmit(async () => {
     const r = await applySuggestion({
-      data: { projectId, suggestionId: suggestion.id },
+      data: { projectId, suggestionId: suggestion.id, reviewerNote },
     });
     if (!r.ok) {
       throw new Error(applyErrorMessage(r.reason));
@@ -371,7 +373,7 @@ function SuggestionCard({
   });
   const { run: reject } = useSubmit(async () => {
     await rejectSuggestion({
-      data: { projectId, suggestionId: suggestion.id },
+      data: { projectId, suggestionId: suggestion.id, reviewerNote },
     });
     onChange();
   });
@@ -402,6 +404,13 @@ function SuggestionCard({
           labels={SUGGESTION_STATUS_LABEL}
         />
       </div>
+
+      {suggestion.reviewerNote !== null && (
+        <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <span className="font-medium">Reviewer note:</span>{" "}
+          {suggestion.reviewerNote}
+        </p>
+      )}
 
       {open && !item.applicable && (
         <p className="text-sm text-amber-700">
@@ -439,6 +448,14 @@ function SuggestionCard({
               </li>
             ))}
           </ul>
+          <Field
+            label="Reviewer note (optional)"
+            as="textarea"
+            rows={2}
+            required={false}
+            value={reviewerNote}
+            onChange={setReviewerNote}
+          />
           <div className="flex flex-wrap items-center gap-2">
             <Button
               disabled={applyDisabled || applying || acceptedCount === 0}

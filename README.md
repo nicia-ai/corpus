@@ -44,8 +44,8 @@ version history.
   threaded **comments** anchored to text that follow it across edits and
   moves; **suggestions** reviewed and applied per hunk; live **presence**
   of who's viewing; and a verifiable **edit history** any version can be
-  restored from. Deliberately never exposed over MCP or in the bundle —
-  agents read approved docs, they don't see or touch review state.
+  restored from. The full review layer stays off MCP and out of the bundle;
+  an originating agent can only retrieve its own proposal's settled outcome.
 - **Collections** — an ordered set of documents assembled into one
   corpus, with a token-size estimate so you can see when a collection is
   too large for an agent to use well.
@@ -55,8 +55,10 @@ version history.
   collections, and can **propose edits — and new documents** with
   `suggest_edit`: a reviewable suggestion a human accepts or rejects
   (per hunk for edits; create-then-attach for a proposed new document),
-  never an auto-applied write. Agents propose; only humans approve.
-  Review state (comments, suggestion threads) is otherwise off-MCP.
+  never an auto-applied write. Agents propose; only humans approve. With
+  `get_proposal_result`, the originating caller can retrieve the outcome,
+  accepted hunks, resulting version, and optional reviewer note. Comments
+  and unrelated suggestion state remain off-MCP.
 - **CLI** — a Git-free `pull`/`push` tool (`pnpm corpus`) over a
   collection-scoped REST surface (`/api/v1/docs`), for editing documents
   from a terminal or CI with the same optimistic-concurrency contract as

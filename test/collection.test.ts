@@ -229,6 +229,9 @@ describe("MCP JSON-RPC dispatcher", () => {
     recordRead: () => Promise.resolve(),
     suggestEdit: () =>
       Promise.resolve({ ok: false as const, reason: "missing" as const }),
+    suggestCreate: () =>
+      Promise.resolve({ ok: false as const, reason: "invalid" as const }),
+    proposalResult: () => Promise.resolve({ found: false as const }),
     listCollections: async () => [{ slug: "c1", name: "C1" }],
     listDocuments: async () => [
       { slug: "d1", title: "D1", docVersion: 1, size: 3, path: "docs/d1.md" },
@@ -296,12 +299,13 @@ describe("MCP JSON-RPC dispatcher", () => {
     expect(r.result.capabilities).toHaveProperty("resources");
   });
 
-  it("tools/list returns the 6 read tools plus suggest_edit (the one write tool)", async () => {
+  it("tools/list returns the read tools and proposal workflow tools", async () => {
     const r = (await handleMcp(
       { jsonrpc: "2.0", id: 2, method: "tools/list" },
       fake,
     )) as { result: { tools: { name: string }[] } };
     expect(r.result.tools.map((t) => t.name).sort()).toEqual([
+      "get_proposal_result",
       "list_collections",
       "list_documents",
       "read_collection",

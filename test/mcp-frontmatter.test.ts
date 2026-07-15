@@ -21,6 +21,8 @@ function executor(): McpExecutor {
     callerRef: asCallerRef("apikey:test"),
     recordRead: () => Promise.resolve(),
     suggestEdit: unused,
+    suggestCreate: unused,
+    proposalResult: unused,
     listCollections: unused,
     listDocuments: unused,
     readCollection: unused,

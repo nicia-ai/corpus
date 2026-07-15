@@ -121,15 +121,25 @@ export class SuggestionRepo {
   }
 
   async resolve(
-    id: number,
-    status: SuggestionStatus,
-    resolvedBy: string,
-    resolvedAt: string,
+    input: Readonly<{
+      id: number;
+      status: SuggestionStatus;
+      resolvedBy: string;
+      resolvedAt: string;
+      resultDocVersion?: number;
+      reviewerNote?: string;
+    }>,
   ): Promise<void> {
     await this.db
       .update(suggestion)
-      .set({ status, resolvedBy, resolvedAt })
-      .where(eq(suggestion.id, id));
+      .set({
+        status: input.status,
+        resolvedBy: input.resolvedBy,
+        resolvedAt: input.resolvedAt,
+        resultDocVersion: input.resultDocVersion ?? null,
+        reviewerNote: input.reviewerNote ?? null,
+      })
+      .where(eq(suggestion.id, input.id));
   }
 
   async markStale(id: number): Promise<void> {

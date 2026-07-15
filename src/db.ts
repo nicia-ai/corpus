@@ -192,6 +192,11 @@ export const suggestion = sqliteTable(
     createdAt: text("created_at").notNull(),
     resolvedBy: text("resolved_by"),
     resolvedAt: text("resolved_at"),
+    // Human-facing outcome metadata returned to the originating agent.
+    // The version is set only when an apply creates a canonical version;
+    // the note is optional on apply/reject and remains null for stale rows.
+    resultDocVersion: integer("result_doc_version"),
+    reviewerNote: text("reviewer_note"),
     // Create-proposals only (baseDocVersion === 0 — a real document's head
     // is never below 1, so 0 is the airtight discriminant): the Corpus path
     // the proposed document should be created at (null = project root with

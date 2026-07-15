@@ -90,6 +90,11 @@ function stubExec(): Omit<McpExecutor, "callerRef"> {
     },
     verifyHistory: () => Promise.resolve({ ok: true }),
     recordRead: () => Promise.resolve(),
+    suggestEdit: () =>
+      Promise.resolve({ ok: false as const, reason: "missing" as const }),
+    suggestCreate: () =>
+      Promise.resolve({ ok: false as const, reason: "invalid" as const }),
+    proposalResult: () => Promise.resolve({ found: false }),
     collectionOutline: (slug) =>
       slug === "marketing"
         ? Promise.resolve({

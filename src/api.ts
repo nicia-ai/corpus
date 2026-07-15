@@ -79,13 +79,13 @@ async function respondMcp(
   }
   const { store: inner, members } = scope;
   // Build the per-request CallerRef from the resolved Connection. The
-  // api_key path populates `apiKeyId`; the OAuth path leaves it
-  // undefined and the namespace falls to `oauth:<userId>`. Either way
-  // the result is opaque and stable for downstream event attribution.
+  // api_key path populates `apiKeyId`; the OAuth path binds identity to
+  // both the user and resolved Connection. That keeps proposal ownership
+  // credential-scoped when one user authorizes multiple agents.
   const callerRef =
     ref.apiKeyId !== undefined
       ? callerRefFromApiKey(ref.apiKeyId)
-      : callerRefFromOAuth(ref.userId);
+      : callerRefFromOAuth(ref.userId, ref.connectionId);
   // Fire caller.connected exactly once per request — the
   // EventLogStore's idempotency_key collapses every subsequent
   // connect of the same caller to the original monotonic id so
