@@ -5,10 +5,17 @@ const SavedConfigSchema = z.object({
   apiKey: z.string().trim().min(1),
 });
 
+export const DEFAULT_CORPUS_URL = "https://corpus.nicia.ai";
+
 export type SavedConfig = Readonly<z.infer<typeof SavedConfigSchema>>;
 
 export function normalizeBaseUrl(value: string): string {
-  const url = new URL(value.trim());
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("Corpus URL must be an absolute http:// or https:// URL.");
+  }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Corpus URL must use http:// or https://.");
   }

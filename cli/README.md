@@ -10,9 +10,10 @@ corpus doctor
 
 Requires Node.js 22 or newer.
 
-The setup command securely prompts for your Corpus URL and `cck_…` API key,
-verifies the connection, and writes a private `0600` config file on Unix.
-Windows uses the current user's ACLs. Environment
+The setup command defaults to `https://corpus.nicia.ai`, securely prompts once
+for your `cck_…` API key, verifies the connection, and writes a private `0600`
+config file on Unix. Self-hosters use `corpus setup --url URL`. Windows uses the
+current user's ACLs. Environment
 variables (`CORPUS_URL`, `CORPUS_API_KEY`) continue to override saved config
 for CI.
 

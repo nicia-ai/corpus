@@ -48,7 +48,7 @@
     "lint:fix": "eslint . --fix",
     "test:watch": "vitest",
     "build": "vite build && pnpm cli:build && pnpm cli:check",
-    "cli:build": "tsc -p cli/tsconfig.json",
+    "cli:build": "node -e \"require('node:fs').rmSync('cli/dist',{recursive:true,force:true})\" && tsc -p cli/tsconfig.json",
     "cli:check": "tsx scripts/check-cli-package.ts",
     "auth:schema": "auth generate --config src/control/auth.cli.ts --output src/control/schema/better-auth.ts --yes",
     "db:generate": "drizzle-kit generate",

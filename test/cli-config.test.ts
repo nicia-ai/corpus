@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_CORPUS_URL,
   normalizeBaseUrl,
   parseSavedConfig,
   resolveConfig,
@@ -11,6 +12,10 @@ import { corpusConfigPath } from "../cli/config-path";
 import { doctor, push } from "../cli/core";
 
 describe("CLI saved configuration", () => {
+  it("uses the hosted Corpus origin for one-prompt setup", () => {
+    expect(DEFAULT_CORPUS_URL).toBe("https://corpus.nicia.ai");
+  });
+
   it("normalizes a URL and round-trips the stored JSON", () => {
     const config = savedConfig({
       baseUrl: " https://corpus.example.com/ ",
@@ -52,6 +57,9 @@ describe("CLI saved configuration", () => {
     ).toBeUndefined();
     expect(() => normalizeBaseUrl("file:///tmp/corpus")).toThrow(
       "http:// or https://",
+    );
+    expect(() => normalizeBaseUrl("not a URL")).toThrow(
+      "absolute http:// or https:// URL",
     );
     const embeddedCredentials = ["https://user", "pass@example.com"].join(":");
     expect(() => normalizeBaseUrl(embeddedCredentials)).toThrow(

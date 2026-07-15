@@ -16,10 +16,10 @@ import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
 import { emitKeypressEvents } from "node:readline";
-import { createInterface as createPromiseInterface } from "node:readline/promises";
 
 import { corpusConfigPath } from "./config-path.js";
 import {
+  DEFAULT_CORPUS_URL,
   parseSavedConfig,
   resolveConfig,
   savedConfig,
@@ -124,18 +124,6 @@ function parseSetupOptions(args: readonly string[]): SetupOptions {
   };
 }
 
-async function prompt(label: string): Promise<string> {
-  const rl = createPromiseInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  try {
-    return await rl.question(label);
-  } finally {
-    rl.close();
-  }
-}
-
 async function promptSecret(label: string): Promise<string> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error(
@@ -213,14 +201,11 @@ async function setup(args: readonly string[]): Promise<void> {
   // Setup is the repair path too: an invalid existing file should not prevent
   // the user from replacing it with a verified configuration.
   const current = await readStoredConfig(configPath()).catch(() => undefined);
-  const suppliedUrl =
+  const baseUrl =
     options.url ??
     process.env.CORPUS_URL ??
-    (await prompt(
-      `Corpus URL${current === undefined ? "" : ` [${current.baseUrl}]`}: `,
-    ));
-  const baseUrl =
-    suppliedUrl.trim() === "" ? (current?.baseUrl ?? "") : suppliedUrl;
+    current?.baseUrl ??
+    DEFAULT_CORPUS_URL;
   const suppliedKey =
     process.env.CORPUS_API_KEY ?? (await promptSecret("Corpus API key: "));
   const apiKey =
@@ -250,6 +235,7 @@ async function runDoctor(): Promise<void> {
   };
 
   pass(`configuration loaded (${path})`);
+  pass(`CLI version ${await version()}`);
   try {
     if (platform() === "win32") {
       await access(path, constants.R_OK);

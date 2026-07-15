@@ -11,10 +11,12 @@ is the way automation edits canonical documents without a browser: a CI job
 that regenerates a runbook, a script that syncs docs from another system, or
 just you, editing in your own `$EDITOR` instead of the web UI.
 
-Unlike [MCP](./connect-your-agent.md) — which is **read-only**, for agents
-consuming collections — the CLI **reads and writes**. It pushes new versions
-through the same optimistic-concurrency contract the web editor enforces, so
-nothing is ever silently overwritten.
+Unlike [MCP](./connect-your-agent.md) — whose only write is a human-reviewed
+proposal — the CLI **reads and writes canonical documents**. That is why it
+deliberately uses the collection-scoped REST API and an API key instead of the
+MCP/OAuth transport. It pushes new versions through the same
+optimistic-concurrency contract the web editor enforces, so nothing is ever
+silently overwritten.
 
 > The CLI is scoped to the **one collection** its API key is bound to. It
 > can only see and edit that collection's documents — never the rest of the
@@ -31,12 +33,13 @@ corpus setup
 
 The packaged CLI requires Node.js 22 or newer.
 
-`setup` asks for the Corpus URL and API key (the key is masked), verifies the
-connection, then writes a private `0600` config file under
+`setup` defaults to `https://corpus.nicia.ai` and asks only for the API key
+(masked), verifies the connection, then writes a private `0600` config file under
 `$XDG_CONFIG_HOME/corpus/config.json` (normally
 `~/.config/corpus/config.json`). On Windows it uses
 `%LOCALAPPDATA%\\Corpus\\config.json` and relies on Windows ACLs rather than
-POSIX mode bits. Use `CORPUS_CONFIG` to choose another path.
+POSIX mode bits. Self-hosters pass `--url`; use `CORPUS_CONFIG` to choose
+another config path.
 
 Confirm the whole local path is healthy at any time:
 
@@ -44,9 +47,9 @@ Confirm the whole local path is healthy at any time:
 corpus doctor
 ```
 
-Doctor checks configuration permissions, key format, working-directory
-writability, authentication, server reachability, and how many documents the
-credential can see.
+Doctor reports the installed CLI version and checks configuration permissions,
+key format, working-directory writability, authentication, server reachability,
+and how many documents the credential can see.
 
 For a non-interactive setup (for example, a development container), inject the
 key through the environment so it does not land in shell history:
@@ -57,8 +60,6 @@ CORPUS_API_KEY="cck_…" corpus setup --url "https://corpus.example.com"
 
 The CLI also accepts environment variables. They override saved configuration,
 which is convenient in CI:
-
-The CLI needs two environment variables:
 
 | Variable         | Value                                                                    |
 | ---------------- | ------------------------------------------------------------------------ |

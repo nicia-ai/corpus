@@ -127,6 +127,10 @@ async function main(): Promise<void> {
     const listed = await run(["list"], { CORPUS_CONFIG: config });
     assert.equal(listed.stdout, "guide\tv3\tGuide\n");
     const healthy = await run(["doctor"], { CORPUS_CONFIG: config });
+    assert.match(
+      healthy.stdout,
+      new RegExp(`CLI version ${cliPackage.version}`),
+    );
     assert.match(healthy.stdout, /server authenticated; 1 documents visible/);
 
     await writeFile(config, "not json\n");
@@ -182,6 +186,10 @@ async function main(): Promise<void> {
     assert(paths.includes("package.json"));
     assert(paths.includes("dist/corpus.js"));
     assert(paths.includes("dist/core.d.ts"));
+    assert.equal(
+      paths.some((path) => path.endsWith(".js.map")),
+      false,
+    );
 
     const installed = join(temporary, "installed");
     const tarball = join(temporary, packageResult[0].filename);
