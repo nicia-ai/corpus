@@ -256,7 +256,7 @@ export function DocumentUploader(
         }}
         className={cardClass(
           `flex flex-col items-center gap-4 border-dashed py-12! text-center ${
-            dragging ? "border-blue-600 bg-blue-50" : "border-slate-300"
+            dragging ? "border-blue-600! bg-blue-50!" : "border-slate-300!"
           }`,
         )}
       >

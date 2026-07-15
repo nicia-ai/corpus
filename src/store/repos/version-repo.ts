@@ -79,6 +79,18 @@ export class VersionRepo {
       .sort((a, b) => a.docVersion - b.docVersion);
   }
 
+  async documentVersion(
+    slug: DocumentSlug,
+    docVersion: number,
+  ): Promise<DocumentVersionRow | undefined> {
+    const nodes = await this.g.nodes.DocumentVersion.find({
+      where: (d) => d.slug.eq(slug).and(d.docVersion.eq(docVersion)),
+      limit: 1,
+    });
+    const node = nodes[0];
+    return node === undefined ? undefined : toDocumentVersionRow(node);
+  }
+
   async allDocumentVersions(): Promise<readonly DocumentVersionRow[]> {
     const nodes = await findAll((w) => this.g.nodes.DocumentVersion.find(w));
     return nodes

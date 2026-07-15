@@ -97,6 +97,18 @@ describe("documentHistory — the version chain, newest first, bodies resolved",
       docVersion: 1,
       markdown: "v1",
     });
+    await expect(
+      store.documentHistoryPageSnapshot(slug, 99),
+    ).resolves.toMatchObject({ active: undefined });
+
+    await expect(store.documentHistoryVersion(slug, 3)).resolves.toMatchObject({
+      docVersion: 3,
+      markdown: "v3",
+      retained: true,
+    });
+    await expect(
+      store.documentHistoryVersion(slug, 99),
+    ).resolves.toBeUndefined();
   });
 
   it("pages retention metadata beyond one safe SQLite parameter batch", async () => {

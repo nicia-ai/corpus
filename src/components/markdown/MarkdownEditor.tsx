@@ -24,13 +24,18 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 
 import type { ReviewRailLayout } from "@/components/review/ReviewRail";
 import { hrefToDocSlug, isExternalHref } from "@/lib/doc-href";
-import { scanWikilinks, splitWikiTarget } from "@/store/domain/links";
+import {
+  scanWikilinks,
+  splitWikiTarget,
+  type WikiMatch,
+} from "@/store/domain/links";
 import { resolveWikiPath } from "@/store/domain/paths";
 
 import { frontmatter } from "./block-widgets";
@@ -51,6 +56,9 @@ import {
 } from "./live-review";
 import { Markdown } from "./Markdown";
 import { wikiLinkResolver } from "./wikilink-facet";
+
+const useClientLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 // Source-of-truth markdown editor: CodeMirror with Obsidian-style live preview
 // (see ./live-preview), so the edit surface reads as the rendered document —
@@ -454,9 +462,9 @@ export function MarkdownEditor({
   const cleanDoc = useRef<Text | undefined>(undefined);
   // The active selection drives the inline Comment/Suggest popover (review mode).
   const [reviewSelection, setReviewSelection] = useState<ReviewSelection>();
-  // CodeMirror mounts client-side in the effect below; until it does (incl.
-  // SSR), render the rendered Markdown so first paint shows the document rather
-  // than an empty box, then swap to the live editor.
+  // SSR renders the document as Markdown. On client navigation, CodeMirror
+  // replaces that fallback in a layout effect so the browser never paints two
+  // different document geometries in succession.
   const [mounted, setMounted] = useState(false);
   // Linter inputs change with route data, not per keystroke; a compartment
   // lets us reconfigure the rule without tearing down the editor. The latest
@@ -509,6 +517,20 @@ export function MarkdownEditor({
     wiki: WikiResolve | undefined,
   ) {
     const known = new Set(refs.map((d) => d.slug));
+    // Cache the position-independent regex result by line text. CodeMirror's
+    // document is a persistent tree, but flattening it with toString() after
+    // every editing pause threw that advantage away. Wikilinks cannot cross a
+    // newline, so unchanged lines can reuse their scan while context checks
+    // still run at their current absolute positions.
+    const wikiMatchesByLine = new Map<string, readonly WikiMatch[]>();
+    const wikiMatches = (text: string): readonly WikiMatch[] => {
+      const cached = wikiMatchesByLine.get(text);
+      if (cached !== undefined) return cached;
+      const matches = scanWikilinks(text);
+      if (wikiMatchesByLine.size >= 2_000) wikiMatchesByLine.clear();
+      wikiMatchesByLine.set(text, matches);
+      return matches;
+    };
     return linter(
       (v) => {
         const diags: Diagnostic[] = [];
@@ -534,17 +556,26 @@ export function MarkdownEditor({
         });
         if (wiki !== undefined) {
           const fm = frontmatter(v.state);
-          for (const m of scanWikilinks(v.state.doc.toString())) {
-            if (fm && m.from < fm.to) continue;
-            if (inCodeContext(v.state, m.from + 2)) continue;
-            const { target } = splitWikiTarget(m.inner);
-            if (target !== "" && wiki(target) === undefined) {
-              diags.push({
-                from: m.from,
-                to: m.to,
-                severity: "warning",
-                message: `No document matches [[${target}]] in this project`,
-              });
+          for (
+            let lineNumber = 1;
+            lineNumber <= v.state.doc.lines;
+            lineNumber += 1
+          ) {
+            const line = v.state.doc.line(lineNumber);
+            for (const m of wikiMatches(line.text)) {
+              const from = line.from + m.from;
+              const to = line.from + m.to;
+              if (fm && from < fm.to) continue;
+              if (inCodeContext(v.state, from + 2)) continue;
+              const { target } = splitWikiTarget(m.inner);
+              if (target !== "" && wiki(target) === undefined) {
+                diags.push({
+                  from,
+                  to,
+                  severity: "warning",
+                  message: `No document matches [[${target}]] in this project`,
+                });
+              }
             }
           }
         }
@@ -556,8 +587,10 @@ export function MarkdownEditor({
   }
 
   // Mount once (DOM widget lifecycle — not data loading). CodeMirror touches
-  // the DOM, so it constructs only client-side, inside the effect.
-  useEffect(() => {
+  // the DOM, so it constructs only client-side. The layout effect keeps the
+  // rendered-Markdown fallback useful for SSR without flashing it during a
+  // client-side route transition.
+  useClientLayoutEffect(() => {
     const parent = host.current;
     if (parent === null) return;
     // A read-only view (history) renders the document but disables editing;
@@ -645,6 +678,7 @@ export function MarkdownEditor({
               liveReview({
                 onSelect: setReviewSelection,
                 onLayout: (layout) => onReviewLayoutRef.current?.(layout),
+                initialMarks: reviewMarks,
               }),
             ]
           : []),
@@ -675,7 +709,6 @@ export function MarkdownEditor({
       cm.destroy();
     };
     // Construct once; value/slug syncing is handled by the effects below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // External value changes (conflict resolution rewrites the draft) — sync

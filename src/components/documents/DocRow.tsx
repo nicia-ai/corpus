@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { FileText } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import { fieldInputClass } from "@/components/Field";
 import { CollectionCountBadge } from "@/components/ui/CollectionCountBadge";
@@ -15,7 +15,18 @@ import { InlineConfirm } from "./RowActions";
 // detail page), inline filename rename, collection-count badge, and
 // hover-revealed delete confirm. Shift-click on the checkbox flips
 // `range` so the parent extends the selection from the last anchor.
-export function DocRow({
+type DocRowProps = Readonly<{
+  doc: DocListItem;
+  projectId: ProjectId;
+  depth: number;
+  selected: boolean;
+  onSelect: (slug: DocumentSlug, range: boolean) => void;
+  onArchive: (slug: DocumentSlug) => void;
+  onDragStart: (slug: DocumentSlug) => void;
+  onRename: (slug: DocumentSlug, filename: string) => Promise<void>;
+}>;
+
+function DocRowComponent({
   doc,
   projectId,
   depth,
@@ -24,22 +35,13 @@ export function DocRow({
   onArchive,
   onDragStart,
   onRename,
-}: Readonly<{
-  doc: DocListItem;
-  projectId: ProjectId;
-  depth: number;
-  selected: boolean;
-  onSelect: (range: boolean) => void;
-  onArchive: () => void;
-  onDragStart: () => void;
-  onRename: (filename: string) => Promise<void>;
-}>): React.ReactElement {
+}: DocRowProps): React.ReactElement {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(doc.filename);
   return (
     <div
       draggable={!editing}
-      onDragStart={onDragStart}
+      onDragStart={() => onDragStart(doc.slug)}
       style={treeIndent(depth)}
       className={cn(
         "group flex items-center gap-2 py-1 pr-3 text-base [contain-intrinsic-size:auto_3.5rem] [content-visibility:auto]",
@@ -52,6 +54,7 @@ export function DocRow({
           checked={selected}
           onChange={(e) =>
             onSelect(
+              doc.slug,
               e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey,
             )
           }
@@ -94,7 +97,7 @@ export function DocRow({
                   setEditing(false);
                   return;
                 }
-                void onRename(v).then(() => setEditing(false));
+                void onRename(doc.slug, v).then(() => setEditing(false));
               }}
             >
               <input
@@ -123,11 +126,13 @@ export function DocRow({
       <InlineConfirm
         prompt="Delete?"
         label="Delete document"
-        onConfirm={onArchive}
+        onConfirm={() => onArchive(doc.slug)}
       />
     </div>
   );
 }
+
+export const DocRow = memo(DocRowComponent);
 
 // Type alias re-exported for parents that build a slug-based selection
 // without importing the brand directly.

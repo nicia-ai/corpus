@@ -31,8 +31,6 @@ import {
 } from "@/lib/server/documents";
 import { useFollowDocLink } from "@/lib/use-follow-doc-link";
 
-const CHANGE_PREVIEW_LIMIT = 8;
-
 function scrollBehavior(): ScrollBehavior {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ? "auto"
@@ -40,6 +38,7 @@ function scrollBehavior(): ScrollBehavior {
 }
 
 type HistoryView = "version" | "compare";
+const HISTORY_PAGE_SIZE = 100;
 
 type CompareSection = Readonly<
   | { kind: "same"; lines: readonly DiffLine[] }
@@ -53,10 +52,6 @@ function authorOf(e: Readonly<DocVersionMeta>): string | undefined {
   if (e.changedByName !== undefined) return e.changedByName;
   if (e.changedBy === "import") return "Imported";
   return undefined;
-}
-
-function changedLines(lines: readonly DiffLine[]): readonly DiffLine[] {
-  return lines.filter((line) => line.tag !== "same");
 }
 
 function compareSectionsOf(
@@ -95,79 +90,30 @@ function changeSectionCount(sections: readonly CompareSection[]): number {
   return sections.filter((section) => section.kind === "change").length;
 }
 
-function changeCountLabel(lines: readonly DiffLine[]): string {
-  const added = lines.filter((line) => line.tag === "added").length;
-  const removed = lines.filter((line) => line.tag === "removed").length;
-  const parts: string[] = [];
-
-  if (added > 0) parts.push(`${added.toString()} added`);
-  if (removed > 0) parts.push(`${removed.toString()} removed`);
-
-  return parts.length > 0 ? parts.join(" · ") : "No text changes";
-}
-
 function VersionChangeSummary({
   activeVersion,
   currentVersion,
-  lines,
   onCompare,
 }: Readonly<{
   activeVersion: number;
   currentVersion: number;
-  lines: readonly DiffLine[];
   onCompare: () => void;
 }>): React.ReactElement {
-  const preview = lines.slice(0, CHANGE_PREVIEW_LIMIT);
-  const hidden = lines.length - preview.length;
-
   return (
     <section className="mb-4 rounded-md border border-slate-200 bg-white px-4 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="text-sm font-medium text-slate-500">What changed</div>
           <div className="mt-1 text-base text-slate-700">
-            Current v{currentVersion} compared with v{activeVersion}:{" "}
-            {changeCountLabel(lines)}
+            Current v{currentVersion} compared with v{activeVersion}: open
+            Compare to inspect the line changes
           </div>
         </div>
-        {lines.length > 0 && (
-          <Button variant="secondary" className="shrink-0" onClick={onCompare}>
-            <GitCompareArrows className="size-4" aria-hidden="true" />
-            Compare to current
-          </Button>
-        )}
+        <Button variant="secondary" className="shrink-0" onClick={onCompare}>
+          <GitCompareArrows className="size-4" aria-hidden="true" />
+          Compare to current
+        </Button>
       </div>
-
-      {preview.length > 0 && (
-        <ol className="mt-3 max-h-52 space-y-1 overflow-auto border-t border-slate-200 pt-3 text-base">
-          {preview.map((line, index) => {
-            const added = line.tag === "added";
-            return (
-              <li
-                key={`${String(index)}:${line.tag}:${line.text}`}
-                className={
-                  added
-                    ? "flex gap-2 rounded bg-green-50 px-2 py-1 text-green-800"
-                    : "flex gap-2 rounded bg-red-50 px-2 py-1 text-red-700"
-                }
-              >
-                <span className="w-4 shrink-0 font-medium">
-                  {added ? "+" : "-"}
-                </span>
-                <span className={added ? "" : "line-through"}>
-                  {line.text || " "}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-
-      {hidden > 0 && (
-        <div className="mt-2 text-sm text-slate-500">
-          {hidden.toString()} more changed {hidden === 1 ? "line" : "lines"}
-        </div>
-      )}
     </section>
   );
 }
@@ -298,25 +244,39 @@ export function DocumentHistory({
   entries,
   active,
   projectId,
+  onSelectVersion,
 }: Readonly<{
   current: DocSnapshot;
   entries: readonly DocVersionMeta[];
   active: DocVersionEntry | undefined;
   projectId: ProjectId;
+  onSelectVersion: (version: number) => Promise<void>;
 }>): React.ReactElement {
   const [view, setView] = useState<HistoryView>("version");
   const [focusedChangeIndex, setFocusedChangeIndex] = useState(0);
+  const [visibleHistoryCount, setVisibleHistoryCount] = useState(() => {
+    const activeIndex = entries.findIndex(
+      (entry) => entry.docVersion === active?.docVersion,
+    );
+    return Math.max(
+      HISTORY_PAGE_SIZE,
+      Math.ceil((activeIndex + 1) / HISTORY_PAGE_SIZE) * HISTORY_PAGE_SIZE,
+    );
+  });
   const pendingScrollIndex = useRef<number | undefined>(undefined);
   const changeRefs = useRef<(HTMLDivElement | null)[]>([]);
   const router = useRouter();
   const navigate = useNavigate();
   const followLink = useFollowDocLink(projectId);
+  const versionSelection = useSubmit(onSelectVersion);
 
   const diffLines = useMemo(
-    () => (active ? lineDiff(active.markdown, current.markdown) : []),
-    [active, current.markdown],
+    () =>
+      view === "compare" && active
+        ? lineDiff(active.markdown, current.markdown)
+        : [],
+    [active, current.markdown, view],
   );
-  const changedDiffLines = useMemo(() => changedLines(diffLines), [diffLines]);
   const compareSections = useMemo(
     () => compareSectionsOf(diffLines),
     [diffLines],
@@ -374,18 +334,24 @@ export function DocumentHistory({
   );
 
   if (active === undefined) {
-    return <p className="text-base text-slate-500">No history yet.</p>;
+    return (
+      <p className="text-base text-slate-500">
+        {entries.length === 0
+          ? "No history yet."
+          : "That version is no longer available."}
+      </p>
+    );
   }
 
   const showCompareAt = (index: number) => {
-    if (changeCount === 0) return;
-    const next = Math.max(0, Math.min(index, changeCount - 1));
-    setFocusedChangeIndex(next);
     if (view !== "compare") {
-      pendingScrollIndex.current = next;
+      pendingScrollIndex.current = Math.max(0, index);
       setView("compare");
       return;
     }
+    if (changeCount === 0) return;
+    const next = Math.max(0, Math.min(index, changeCount - 1));
+    setFocusedChangeIndex(next);
     changeRefs.current[next]?.scrollIntoView({
       block: "center",
       behavior: scrollBehavior(),
@@ -462,7 +428,6 @@ export function DocumentHistory({
               <VersionChangeSummary
                 activeVersion={active.docVersion}
                 currentVersion={current.docVersion}
-                lines={changedDiffLines}
                 onCompare={() => showCompareAt(0)}
               />
             )}
@@ -489,7 +454,7 @@ export function DocumentHistory({
           />
         )}
         <ol className="space-y-1">
-          {entries.map((e) => {
+          {entries.slice(0, visibleHistoryCount).map((e) => {
             const on = e.docVersion === active.docVersion;
             const isCurrentEntry = e.docVersion === current.docVersion;
             const who = authorOf(e);
@@ -506,19 +471,15 @@ export function DocumentHistory({
                   onClick={() => {
                     setFocusedChangeIndex(0);
                     if (view === "compare") pendingScrollIndex.current = 0;
-                    void navigate({
-                      to: "/p/$projectId/documents/$slug/versions",
-                      params: { projectId, slug: current.slug },
-                      search: { version: e.docVersion },
-                      replace: true,
-                    });
+                    void versionSelection.run(e.docVersion);
                   }}
                   aria-label={ariaLabel}
                   aria-current={on ? "true" : undefined}
+                  disabled={versionSelection.pending}
                   className={
                     on
-                      ? "w-full rounded-md border border-blue-600 bg-blue-50 px-3 py-2 text-left"
-                      : "w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-left hover:bg-slate-50"
+                      ? "min-h-11 w-full rounded-md border border-blue-600 bg-blue-50 px-3 py-2 text-left disabled:opacity-60"
+                      : "min-h-11 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-60"
                   }
                 >
                   <div className="flex items-baseline justify-between gap-3">
@@ -550,6 +511,22 @@ export function DocumentHistory({
             );
           })}
         </ol>
+        {versionSelection.error && (
+          <p className="mt-2 text-sm text-red-600" role="alert">
+            {versionSelection.error}
+          </p>
+        )}
+        {visibleHistoryCount < entries.length && (
+          <Button
+            variant="secondary"
+            className="mt-3 w-full"
+            onClick={() =>
+              setVisibleHistoryCount((count) => count + HISTORY_PAGE_SIZE)
+            }
+          >
+            Show older versions
+          </Button>
+        )}
       </aside>
     </div>
   );

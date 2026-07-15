@@ -131,6 +131,10 @@ responsibility.
   `ValidateSerializableMapped`; every handler maps DO results into
   explicit plain types (`DocMeta`, `ColDetail`, …) with explicit
   `Promise<…>` return annotations.
+- Keep browser-imported server-function modules free of server-only dependency
+  graphs. When a feature needs auth, environment, or email implementation,
+  expose the `createServerFn` wrappers from `feature.functions.ts` and put the
+  implementation in `feature.server.ts`; routes import the wrapper module.
 - Request middleware (`sessionRequestMiddleware`) runs once per HTTP
   request; function middleware (`authMiddleware`, `projectMiddleware`)
   runs once per server-fn invocation. Parallelize independent loader
@@ -150,7 +154,7 @@ responsibility.
 - The Better Auth Drizzle schema is generated. `pnpm auth:schema`
   runs `auth generate` against `src/control/auth.cli.ts` and writes
   `src/control/schema/better-auth.ts` verbatim (lint/format-ignored).
-  `auth.cli.ts` must mirror `src/auth.ts`'s plugin surface
+  `auth.cli.ts` must mirror `src/auth.server.ts`'s plugin surface
   (schema-affecting options only). Regenerate on any Better Auth bump,
   then `pnpm db:generate`. `src/control/schema/app.ts` holds only the
   Nicia-owned tables (`project`, `connection`, `api_key`, seams).
@@ -162,13 +166,13 @@ responsibility.
   `test/connections-cross-tenant.test.ts`.
 - Invitations: created by the team server fn (not Better Auth's
   `sendInvitationEmail`), `requireEmailVerificationOnInvitation: false`.
-  The invite email sends fail-soft through `src/control/email.ts`
+  The invite email sends fail-soft through `src/control/email.server.ts`
   (Cloudflare Email Service or Resend, `EMAIL_PROVIDER`/`EMAIL_FROM` in
-  `src/control/env.ts`); the `/invite/<id>` link is always shown for
+  `src/control/env.server.ts`); the `/invite/<id>` link is always shown for
   out-of-band sharing. Better Auth binds acceptance to the invited
   email (intentional, not a bug).
 - `BETTER_AUTH_SECRET` is dev-only in `wrangler.jsonc` (`.min(32)` in
-  `src/control/env.ts`); production sets it via `wrangler secret put`.
+  `src/control/env.server.ts`); production sets it via `wrangler secret put`.
 - Verify library APIs against the installed version + current docs —
   training data lags these fast-moving deps.
 - `pnpm.overrides` pins `kysely` to `0.28.17` — a build workaround, not a
@@ -296,7 +300,7 @@ Deliberate exceptions — do not "fix" these:
 - `null` at the SQL/JSON boundary (Drizzle nullable columns, JSON
   encoded into `change_events.beforeJson` / `afterJson`) is fine; the
   "prefer `undefined`" rule applies to domain/return types only.
-- `src/control/env.ts` uses Zod `.parse` (throws) at startup —
+- `src/control/env.server.ts` uses Zod `.parse` (throws) at startup —
   fail-fast on a missing/weak secret is intended.
 - `src/server.ts` keeps a `default` export (Workers runtime entry).
   `interface Register` in `server.ts` / `router.tsx` stays `interface`

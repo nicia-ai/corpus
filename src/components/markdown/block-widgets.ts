@@ -364,27 +364,41 @@ class FrontmatterWidget extends WidgetType {
 // (a line's .text excludes its terminator), so it's a cheap first-line filter.
 const OPEN_FENCE = /^---[ \t]*$/;
 
-export function frontmatter(state: EditorState):
+type FrontmatterDecoration =
   | {
       readonly from: number;
       readonly to: number;
       readonly deco: CmRange<Decoration>;
     }
-  | undefined {
+  | undefined;
+
+const frontmatterCache = new WeakMap<EditorState, FrontmatterDecoration>();
+
+export function frontmatter(state: EditorState): FrontmatterDecoration {
+  if (frontmatterCache.has(state)) return frontmatterCache.get(state);
   // Fast path: computeDecorations calls this on every keystroke and caret
   // move. The vast majority of documents have no frontmatter, so checking
   // the first line avoids a full-document toString() + YAML parse per edit.
   // A `---` first line that's actually a thematic break falls through to
   // the full parse, which correctly returns "no frontmatter".
-  if (!OPEN_FENCE.test(state.doc.lineAt(0).text)) return undefined;
+  if (!OPEN_FENCE.test(state.doc.lineAt(0).text)) {
+    frontmatterCache.set(state, undefined);
+    return undefined;
+  }
   const raw = state.doc.toString();
   const fm = parseFrontmatter(raw);
-  if (!fm.ok || fm.frontmatter === undefined) return undefined;
+  if (!fm.ok || fm.frontmatter === undefined) {
+    frontmatterCache.set(state, undefined);
+    return undefined;
+  }
   const to = raw.length - fm.body.length;
-  if (to <= 0) return undefined;
+  if (to <= 0) {
+    frontmatterCache.set(state, undefined);
+    return undefined;
+  }
   const entries = Object.entries(fm.frontmatter);
   const src = raw.slice(0, to);
-  return {
+  const result = {
     from: 0,
     to,
     deco: Decoration.replace({
@@ -392,4 +406,6 @@ export function frontmatter(state: EditorState):
       block: true,
     }).range(0, to),
   };
+  frontmatterCache.set(state, result);
+  return result;
 }

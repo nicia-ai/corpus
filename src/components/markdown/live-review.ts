@@ -53,6 +53,7 @@ export type ReviewSelection = Readonly<{
 export type LiveReviewConfig = Readonly<{
   onSelect: (selection: ReviewSelection | undefined) => void;
   onLayout: (layout: ReviewRailLayout) => void;
+  initialMarks?: readonly ReviewMark[] | undefined;
 }>;
 
 // Outlasts the CSS fade (corpus-line-flash); the host clears its flash request
@@ -296,15 +297,19 @@ function layoutPlugin(onLayout: LiveReviewConfig["onLayout"]): Extension {
         this.observer?.observe(view.dom);
       }
       update(u: ViewUpdate): void {
-        if (
-          u.geometryChanged ||
-          u.viewportChanged ||
-          u.transactions.some(marksChanged)
-        ) {
+        const didChangeMarks = u.transactions.some(marksChanged);
+        const hasMarks = (u.state.field(marksField, false)?.length ?? 0) > 0;
+        if (didChangeMarks) this.schedule(true);
+        else if (hasMarks && (u.heightChanged || u.viewportChanged))
           this.schedule();
-        }
       }
-      schedule(): void {
+      schedule(force = false): void {
+        if (
+          !force &&
+          (this.view.state.field(marksField, false)?.length ?? 0) === 0
+        ) {
+          return;
+        }
         this.view.requestMeasure({
           key: LAYOUT_MEASURE_KEY,
           read: (view) => {
@@ -321,7 +326,7 @@ function layoutPlugin(onLayout: LiveReviewConfig["onLayout"]): Extension {
 
 export function liveReview(config: LiveReviewConfig): Extension {
   return [
-    marksField,
+    marksField.init(() => config.initialMarks ?? []),
     reviewDecorationsField,
     flashDecorationsField,
     selectionHandlers(config.onSelect),

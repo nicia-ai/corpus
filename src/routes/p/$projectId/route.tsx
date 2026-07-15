@@ -64,9 +64,15 @@ function ProjectLayout() {
 
   useEffect(() => {
     if (!navOpen) return undefined;
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const closeAtDesktop = (event: MediaQueryListEvent): void => {
+      if (event.matches) setNavOpen(false);
+    };
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    desktop.addEventListener("change", closeAtDesktop);
     return () => {
+      desktop.removeEventListener("change", closeAtDesktop);
       document.body.style.overflow = previous;
     };
   }, [navOpen]);
@@ -91,9 +97,9 @@ function ProjectLayout() {
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      {/* The mobile bar is the burger only — the wordmark lives inside
-          the sidebar (and the open drawer reveals it), so we don't show
-          it twice on phones. */}
+      {/* Keep the compact brand beside the mobile trigger. The drawer repeats
+          it inside the focused dialog surface while the bar sits behind the
+          modal backdrop. */}
       <div className="flex items-center gap-2.5 border-b border-slate-200 bg-white px-4 py-3 md:hidden">
         <button
           type="button"

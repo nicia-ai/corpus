@@ -97,4 +97,21 @@ describe("review decorations", () => {
     });
     expect(entries(state.field(reviewDecorationsField))).toEqual([]);
   });
+
+  it("paints initial marks in the first editor state", () => {
+    const state = EditorState.create({
+      doc: "hello world",
+      extensions: [
+        liveReview({
+          onSelect: noop,
+          onLayout: noop,
+          initialMarks: [{ id: "comment:1", kind: "comment", from: 0, to: 5 }],
+        }),
+      ],
+    });
+
+    expect(entries(state.field(reviewDecorationsField))).toEqual([
+      { from: 0, to: 5, cls: "cm-md-comment" },
+    ]);
+  });
 });

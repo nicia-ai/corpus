@@ -124,19 +124,45 @@ export function DocumentEditor({
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
   const editorRef = useRef<MarkdownEditorHandle>(null);
+  const draftRef = useRef(doc.markdown);
+  const dirtyRef = useRef(false);
   const [editorSeed, setEditorSeed] = useState(doc.markdown);
+  const [draftVersion, setDraftVersion] = useState(doc.docVersion);
   const [dirty, setDirty] = useState(false);
   const [broken, setBroken] = useState(0);
   // The version a save is optimistically checked against. Starts at the
   // loaded doc; after resolving a 409 without overwriting it advances to
   // the fetched head, so the next save doesn't immediately re-conflict.
-  // A successful save remounts this component (version key), resetting it.
   const [base, setBase] = useState<DocSnapshot>(doc);
-  const [conflict, setConflict] = useState<Conflict>();
-  const head = base.updatedAt >= doc.updatedAt ? base : doc;
+  const conflictRef = useRef<Conflict | undefined>(undefined);
+  const [conflict, setConflictState] = useState<Conflict>();
+  const remoteArchivedRef = useRef(false);
+  const [remoteArchived, setRemoteArchivedState] = useState(false);
+  const conflictRequest = useRef(0);
+  const head =
+    doc.docVersion > base.docVersion ||
+    (doc.docVersion === base.docVersion && doc.updatedAt > base.updatedAt)
+      ? doc
+      : base;
+  const setEditorValue = useCallback((next: string): void => {
+    draftRef.current = next;
+    setEditorSeed(next);
+  }, []);
+  const setDraftDirty = useCallback((next: boolean): void => {
+    dirtyRef.current = next;
+    setDirty(next);
+  }, []);
+  const setConflict = useCallback((next: Conflict | undefined): void => {
+    conflictRef.current = next;
+    setConflictState(next);
+  }, []);
+  const setRemoteArchived = useCallback((next: boolean): void => {
+    remoteArchivedRef.current = next;
+    setRemoteArchivedState(next);
+  }, []);
   const currentDraft = useCallback(
-    (): string => editorRef.current?.getValue() ?? editorSeed,
-    [editorSeed],
+    (): string => editorRef.current?.getValue() ?? draftRef.current,
+    [],
   );
 
   // "Never lose a write" extends to the tab-close edge: if the user
@@ -163,6 +189,7 @@ export function DocumentEditor({
       if (refreshTimer.current !== undefined) {
         clearTimeout(refreshTimer.current);
       }
+      conflictRequest.current += 1;
     },
     [],
   );
@@ -190,6 +217,44 @@ export function DocumentEditor({
     refreshTimer.current ??= setTimeout(invalidate, 250 - elapsed);
   }, [router]);
 
+  const loadRemoteConflict = useCallback(
+    (slug: string): Promise<void> => {
+      const request = (conflictRequest.current += 1);
+      return getDocument({ data: { projectId, slug } })
+        .then((theirs) => {
+          if (request !== conflictRequest.current) return;
+          if (!dirtyRef.current) {
+            refreshRoute();
+            return;
+          }
+          if (theirs === undefined) {
+            setRemoteArchived(true);
+            showToast(
+              "This document is no longer available. Your unsaved draft is still here so you can copy it.",
+            );
+            return;
+          }
+          const mine = currentDraft();
+          setEditorValue(mine);
+          setConflict({ theirs, mine });
+        })
+        .catch(() => {
+          if (request !== conflictRequest.current) return;
+          showToast(
+            "The document changed elsewhere, but the latest version could not be loaded. Your draft is safe; save to retry.",
+          );
+        });
+    },
+    [
+      currentDraft,
+      projectId,
+      refreshRoute,
+      setConflict,
+      setEditorValue,
+      setRemoteArchived,
+    ],
+  );
+
   // The DO broadcasts every write to all sockets, including the actor's own.
   // Identify self-echoes by actor id (web writes stamp the viewer's id) so we
   // refresh but skip the flash/toast for our own edits — without ever muting a
@@ -200,23 +265,26 @@ export function DocumentEditor({
         change?.actorId !== undefined && change.actorId === viewerId;
       const contentChange = shouldFlashContentChange(change, head.slug);
       const remoteContentChange = !isSelf && contentChange;
+      const currentDocumentArchived =
+        change?.docSlug === head.slug && change.action === "document.archived";
+
+      if (currentDocumentArchived && dirtyRef.current) {
+        conflictRequest.current += 1;
+        setRemoteArchived(true);
+        showToast(
+          "This document was deleted elsewhere. Your unsaved draft is still here so you can copy it.",
+        );
+        return;
+      }
+
+      if (remoteArchivedRef.current && dirtyRef.current) return;
 
       // refreshRoute() re-runs the loader, which bumps doc.docVersion and
-      // remounts this component (the version-keyed remount that normally
-      // resets state after OUR OWN save). Doing that here over an unsaved
-      // draft would silently discard it. Route through the same "someone
-      // else edited this" panel a save-time 409 shows instead — nothing is
-      // lost, and the loader/route stays untouched until the user resolves it.
-      if (remoteContentChange && dirty) {
-        void getDocument({ data: { projectId, slug: head.slug } }).then(
-          (theirs) => {
-            if (theirs !== undefined) {
-              const mine = currentDraft();
-              setEditorSeed(mine);
-              setConflict({ theirs, mine });
-            }
-          },
-        );
+      // advances the server snapshot. Doing that over an unsaved draft would
+      // silently discard it if the editor were re-seeded. Route through the
+      // same conflict panel a save-time 409 shows instead.
+      if (remoteContentChange && dirtyRef.current) {
+        void loadRemoteConflict(head.slug);
         return;
       }
 
@@ -234,25 +302,27 @@ export function DocumentEditor({
         );
       }
       // A self echo for the body just saved must not invalidate a newer draft
-      // typed while that request was in flight; its parent key would remount
-      // the editor from the older server body and lose those keystrokes.
-      if (!(isSelf && dirty && contentChange)) {
-        if (shouldRefreshDocumentPage(change, head.slug)) refreshRoute();
+      // typed while that request was in flight.
+      const preservesNewerDraft = isSelf && dirtyRef.current && contentChange;
+      if (
+        !preservesNewerDraft &&
+        shouldRefreshDocumentPage(change, head.slug)
+      ) {
+        refreshRoute();
       }
       if (isSelf) return;
       const message = collabToastMessage(change, head.slug);
       if (message !== undefined) showToast(message);
     },
     [
-      dirty,
-      currentDraft,
       head.docVersion,
       head.markdown,
       head.slug,
+      loadRemoteConflict,
       onRemoteContentChange,
       onRemoteSuggestionChange,
-      projectId,
       refreshRoute,
+      setRemoteArchived,
       suggestions.suggestions,
       viewerId,
     ],
@@ -448,9 +518,14 @@ export function DocumentEditor({
   }, []);
 
   function discard() {
+    const wasArchived = remoteArchivedRef.current;
+    editorRef.current?.setCleanValue(head.markdown);
     editorRef.current?.setValue(head.markdown);
-    setEditorSeed(head.markdown);
-    setDirty(false);
+    setEditorValue(head.markdown);
+    setDraftVersion(head.docVersion);
+    setDraftDirty(false);
+    setRemoteArchived(false);
+    if (wasArchived) refreshRoute();
   }
 
   const {
@@ -469,31 +544,28 @@ export function DocumentEditor({
     });
     if (!r.ok) {
       if ("conflict" in r) {
-        const theirs = await getDocument({
-          data: { projectId, slug: against.slug },
-        });
-        if (theirs !== undefined) {
-          const mine = currentDraft();
-          setEditorSeed(mine);
-          setConflict({ theirs, mine });
-        }
+        await loadRemoteConflict(against.slug);
         return;
       }
       throw new Error("Save was rolled back — please retry.");
     }
+    // Preserve the last trusted server timestamp from `against`. The
+    // optimistic snapshot wins ties, while a later loader response can still
+    // replace it without a skewed browser clock pinning stale metadata.
     const saved: DocSnapshot = {
       ...against,
       markdown: body,
       docVersion: r.docVersion,
-      updatedAt: new Date().toISOString(),
     };
     const latest = currentDraft();
     const newerDraft = latest !== body;
+    conflictRequest.current += 1;
     editorRef.current?.setCleanValue(body);
-    setEditorSeed(latest);
+    setEditorValue(latest);
     setBase(saved);
     setConflict(undefined);
-    setDirty(newerDraft);
+    setDraftDirty(newerDraft);
+    if (!newerDraft) setDraftVersion(saved.docVersion);
     showToast(newerDraft ? "Saved — newer changes are still unsaved" : "Saved");
     if (!newerDraft) refreshRoute();
   });
@@ -613,9 +685,11 @@ export function DocumentEditor({
           <Button
             variant="secondary"
             onClick={() => {
-              setEditorSeed(conflict.theirs.markdown);
+              conflictRequest.current += 1;
+              setEditorValue(conflict.theirs.markdown);
+              setDraftVersion(conflict.theirs.docVersion);
               setBase(conflict.theirs);
-              setDirty(false);
+              setDraftDirty(false);
               setConflict(undefined);
               // Adopt their version: refresh so blocks/comments/docVersion match
               // the new head (else review marks + clientVersion stay stale).
@@ -627,9 +701,11 @@ export function DocumentEditor({
           <Button
             variant="secondary"
             onClick={() => {
-              setEditorSeed(conflict.mine);
+              conflictRequest.current += 1;
+              setEditorValue(conflict.mine);
+              setDraftVersion(conflict.theirs.docVersion);
               setBase(conflict.theirs);
-              setDirty(true);
+              setDraftDirty(true);
               setConflict(undefined);
             }}
           >
@@ -781,7 +857,7 @@ export function DocumentEditor({
         Unsaved changes
       </span>
       <Button
-        disabled={pending}
+        disabled={pending || remoteArchived}
         onClick={() => void save(head, currentDraft())}
       >
         Save
@@ -791,7 +867,7 @@ export function DocumentEditor({
       </Button>
       <Button
         variant="secondary"
-        disabled={suggesting}
+        disabled={suggesting || remoteArchived}
         onClick={() => void suggest()}
       >
         Suggest changes
@@ -816,7 +892,7 @@ export function DocumentEditor({
   );
 
   return (
-    <div className={showReview ? "max-w-7xl" : "mx-auto max-w-doc"}>
+    <div className="max-w-7xl">
       {renaming ? (
         <RenameField
           label="Title"
@@ -850,6 +926,16 @@ export function DocumentEditor({
           subline={subline}
         />
       )}
+      {remoteArchived && (
+        <p
+          role="status"
+          className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          This document was deleted elsewhere. Your unsaved draft remains in the
+          editor so you can copy it before leaving. Discard closes the deleted
+          document.
+        </p>
+      )}
       <div
         className={cn(
           "min-w-0",
@@ -860,12 +946,13 @@ export function DocumentEditor({
       >
         <div className="min-w-0">
           <MarkdownEditor
+            key={dirty ? draftVersion : head.docVersion}
             review
-            value={editorSeed}
+            value={dirty ? editorSeed : head.markdown}
             syncValue={false}
             cleanValue={head.markdown}
             editorRef={editorRef}
-            onDirtyChange={setDirty}
+            onDirtyChange={setDraftDirty}
             docRefs={docRefs}
             selfSlug={head.slug}
             onBrokenChange={setBroken}

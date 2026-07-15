@@ -137,6 +137,7 @@ import {
   documentHistoryProjection,
   documentHistoryPageProjection,
   getDocumentProjection,
+  documentHistoryVersionProjection,
   resolvedMembersProjection,
   listCollectionsProjection,
   listDocumentsProjection,
@@ -250,11 +251,6 @@ export type DocumentReviewSnapshot = Readonly<{
   blocks: DocumentBlocksResult;
   comments: readonly CommentThreadView[];
   suggestions: readonly SuggestionView[];
-}>;
-
-export type DocumentHistorySnapshot = Readonly<{
-  doc: DocumentSnapshot | undefined;
-  history: readonly DocumentHistoryEntry[];
 }>;
 
 export type DocumentHistoryPageSnapshot = Readonly<{
@@ -698,17 +694,6 @@ export class ProjectStore extends DurableObject<Env> {
     return { doc, blocks, comments, suggestions };
   }
 
-  async documentHistorySnapshot(
-    slug: DocumentSlug,
-  ): Promise<DocumentHistorySnapshot> {
-    const u = await this.read();
-    const [doc, history] = await Promise.all([
-      getDocumentProjection(u, slug),
-      documentHistoryProjection(u, slug),
-    ]);
-    return { doc, history };
-  }
-
   async documentHistoryPageSnapshot(
     slug: DocumentSlug,
     selectedVersion?: number,
@@ -719,6 +704,17 @@ export class ProjectStore extends DurableObject<Env> {
       documentHistoryPageProjection(u, slug, selectedVersion),
     ]);
     return { doc, ...page };
+  }
+
+  async documentHistoryVersion(
+    slug: DocumentSlug,
+    docVersion: number,
+  ): Promise<DocumentHistoryEntry | undefined> {
+    return documentHistoryVersionProjection(
+      await this.read(),
+      slug,
+      docVersion,
+    );
   }
 
   async listDocuments(): Promise<

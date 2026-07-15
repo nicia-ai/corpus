@@ -7,7 +7,7 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DocRow } from "@/components/documents/DocRow";
 import { FolderHeader } from "@/components/documents/FolderHeader";
@@ -195,34 +195,38 @@ export function DocumentsPage({
     return out;
   }, [childFolders, docsByFolder, expanded]);
 
-  function selectOne(slug: DocumentSlug, range: boolean) {
-    if (range && anchor.current !== null) {
-      const i = visibleDocOrder.indexOf(anchor.current);
-      const j = visibleDocOrder.indexOf(slug);
-      if (i !== -1 && j !== -1) {
-        const [lo, hi] = i < j ? [i, j] : [j, i];
-        setSelected((prev) => {
-          const next = new Set(prev);
-          for (const s of visibleDocOrder.slice(lo, hi + 1)) next.add(s);
-          return next;
-        });
-        return;
+  const selectOne = useCallback(
+    (slug: DocumentSlug, range: boolean): void => {
+      if (range && anchor.current !== null) {
+        const i = visibleDocOrder.indexOf(anchor.current);
+        const j = visibleDocOrder.indexOf(slug);
+        if (i !== -1 && j !== -1) {
+          const [lo, hi] = i < j ? [i, j] : [j, i];
+          setSelected((prev) => {
+            const next = new Set(prev);
+            for (const s of visibleDocOrder.slice(lo, hi + 1)) next.add(s);
+            return next;
+          });
+          return;
+        }
       }
-    }
-    anchor.current = slug;
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
-      return next;
-    });
-  }
+      anchor.current = slug;
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(slug)) next.delete(slug);
+        else next.add(slug);
+        return next;
+      });
+    },
+    [visibleDocOrder],
+  );
 
   const archive = useSubmit(async (slugs: readonly DocumentSlug[]) => {
     await archiveDocuments({ data: { projectId, slugs: [...slugs] } });
     setSelected(new Set());
     await router.invalidate();
   });
+  const archiveRun = archive.run;
 
   const { error, run } = useSubmit(
     async (fn: () => Promise<{ ok: boolean; reason?: FolderOpReason }>) => {
@@ -230,6 +234,21 @@ export function DocumentsPage({
       if (!r.ok) throw new Error(REASON_MESSAGE[r.reason ?? "missing"]);
       await router.invalidate();
     },
+  );
+
+  const onDocArchive = useCallback(
+    (slug: DocumentSlug): void => {
+      void archiveRun([slug]);
+    },
+    [archiveRun],
+  );
+  const onDocDragStart = useCallback((slug: DocumentSlug): void => {
+    drag.current = { kind: "doc", slug };
+  }, []);
+  const onDocRename = useCallback(
+    (slug: DocumentSlug, filename: string): Promise<void> =>
+      run(() => renameFilename({ data: { projectId, slug, filename } })),
+    [projectId, run],
   );
 
   // Commit a folder pick from the move dialog: bulk-move the selection
@@ -258,35 +277,70 @@ export function DocumentsPage({
     await router.invalidate();
   });
 
-  function toggle(slug: FolderSlug) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
+  const onFolderToggle = useCallback((slug: FolderSlug): void => {
+    setExpanded((current) => {
+      const next = new Set(current);
       if (next.has(slug)) next.delete(slug);
       else next.add(slug);
       return next;
     });
-  }
+  }, []);
+  const onFolderDragStart = useCallback((slug: FolderSlug): void => {
+    drag.current = { kind: "folder", slug };
+  }, []);
+  const onFolderDragOver = useCallback(
+    (slug: FolderSlug, event: React.DragEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      setOver((current) => (current === slug ? current : slug));
+    },
+    [],
+  );
+  const onFolderAddChild = useCallback((slug: FolderSlug): void => {
+    setExpanded((current) => new Set(current).add(slug));
+    setCreatingIn(slug);
+  }, []);
+  const onFolderMove = useCallback((slug: FolderSlug): void => {
+    setMove({ kind: "folder", slug });
+  }, []);
+  const onFolderRename = useCallback(
+    (slug: FolderSlug, name: string): Promise<void> =>
+      run(() => renameFolder({ data: { projectId, slug, name } })),
+    [projectId, run],
+  );
+  const onFolderDelete = useCallback(
+    (slug: FolderSlug): Promise<void> =>
+      run(() => deleteFolder({ data: { projectId, slug } })),
+    [projectId, run],
+  );
 
-  function drop(target: DropTarget) {
-    const d = drag.current;
-    drag.current = null;
-    setOver(undefined);
-    if (d === null) return;
-    if (d.kind === "folder") {
-      if (d.slug === target) return;
-      void run(() =>
-        moveFolder({
-          data: { projectId, slug: d.slug, newParentSlug: target },
-        }),
-      );
-    } else {
-      void run(() =>
-        placeDocumentInFolder({
-          data: { projectId, documentSlug: d.slug, folderSlug: target },
-        }),
-      );
-    }
-  }
+  const commitDrop = useCallback(
+    (target: DropTarget): void => {
+      const item = drag.current;
+      drag.current = null;
+      setOver(undefined);
+      if (item === null) return;
+      if (item.kind === "folder") {
+        if (item.slug === target) return;
+        void run(() =>
+          moveFolder({
+            data: { projectId, slug: item.slug, newParentSlug: target },
+          }),
+        );
+      } else {
+        void run(() =>
+          placeDocumentInFolder({
+            data: {
+              projectId,
+              documentSlug: item.slug,
+              folderSlug: target,
+            },
+          }),
+        );
+      }
+    },
+    [projectId, run],
+  );
 
   function createFolderAt(parentSlug: DropTarget) {
     return async (name: string) => {
@@ -306,27 +360,14 @@ export function DocumentsPage({
           depth={depth}
           open={isOpen}
           highlighted={over === f.slug}
-          onToggle={() => toggle(f.slug)}
-          onDragStart={() => {
-            drag.current = { kind: "folder", slug: f.slug };
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (over !== f.slug) setOver(f.slug);
-          }}
-          onDrop={() => drop(f.slug)}
-          onAddChild={() => {
-            setExpanded((p) => new Set(p).add(f.slug));
-            setCreatingIn(f.slug);
-          }}
-          onMove={() => setMove({ kind: "folder", slug: f.slug })}
-          onRename={(name) =>
-            run(() => renameFolder({ data: { projectId, slug: f.slug, name } }))
-          }
-          onDelete={() =>
-            run(() => deleteFolder({ data: { projectId, slug: f.slug } }))
-          }
+          onToggle={onFolderToggle}
+          onDragStart={onFolderDragStart}
+          onDragOver={onFolderDragOver}
+          onDrop={commitDrop}
+          onAddChild={onFolderAddChild}
+          onMove={onFolderMove}
+          onRename={onFolderRename}
+          onDelete={onFolderDelete}
         />
         {isOpen && (
           <>
@@ -345,18 +386,10 @@ export function DocumentsPage({
                 projectId={projectId}
                 depth={depth + 1}
                 selected={selected.has(d.slug)}
-                onSelect={(range) => selectOne(d.slug, range)}
-                onArchive={() => void archive.run([d.slug])}
-                onDragStart={() => {
-                  drag.current = { kind: "doc", slug: d.slug };
-                }}
-                onRename={(filename) =>
-                  run(() =>
-                    renameFilename({
-                      data: { projectId, slug: d.slug, filename },
-                    }),
-                  )
-                }
+                onSelect={selectOne}
+                onArchive={onDocArchive}
+                onDragStart={onDocDragStart}
+                onRename={onDocRename}
               />
             ))}
           </>
@@ -520,7 +553,7 @@ export function DocumentsPage({
             e.preventDefault();
             if (over !== null) setOver(null);
           }}
-          onDrop={() => drop(null)}
+          onDrop={() => commitDrop(null)}
           className={listSurface(cn("divide-y divide-slate-200"))}
         >
           <div
@@ -531,7 +564,7 @@ export function DocumentsPage({
             }}
             onDrop={(e) => {
               e.stopPropagation();
-              drop(null);
+              commitDrop(null);
             }}
             className={cn(
               "flex items-center gap-2 px-3 py-2 text-sm",
@@ -561,18 +594,10 @@ export function DocumentsPage({
               projectId={projectId}
               depth={0}
               selected={selected.has(d.slug)}
-              onSelect={(range) => selectOne(d.slug, range)}
-              onArchive={() => void archive.run([d.slug])}
-              onDragStart={() => {
-                drag.current = { kind: "doc", slug: d.slug };
-              }}
-              onRename={(filename) =>
-                run(() =>
-                  renameFilename({
-                    data: { projectId, slug: d.slug, filename },
-                  }),
-                )
-              }
+              onSelect={selectOne}
+              onArchive={onDocArchive}
+              onDragStart={onDocDragStart}
+              onRename={onDocRename}
             />
           ))}
         </div>

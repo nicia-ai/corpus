@@ -110,11 +110,11 @@ export function DocumentCurrentPage({
 
   if (doc === undefined) return null;
 
-  // Keyed by version: a successful save invalidates the loader, the new
-  // version remounts the editor with a fresh draft — no useEffect re-seeding.
+  // The editor owns the draft across loader invalidations. Its inner
+  // CodeMirror instance is version-keyed only while clean, so a loader
+  // catch-up can never remount away keystrokes typed after a save response.
   return (
     <DocumentEditor
-      key={doc.docVersion}
       doc={doc}
       projectId={projectId}
       blocks={blocks}

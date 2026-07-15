@@ -733,9 +733,9 @@ function updateForDocChange(
     if (from <= end) from = 0;
   }
 
-  const fm = frontmatter(tr.state);
-  const add = computeDecorationsInRange(tr.state, from, to, fm);
-  const fmDeco = from === 0 ? frontmatterDecoration(tr.state, fm) : undefined;
+  const add = computeDecorationsInRange(tr.state, from, to, afterFrontmatter);
+  const fmDeco =
+    from === 0 ? frontmatterDecoration(tr.state, afterFrontmatter) : undefined;
   return value.map(tr.changes).update({
     filterFrom: from,
     filterTo: to,

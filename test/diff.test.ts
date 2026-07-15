@@ -32,4 +32,23 @@ describe("lineDiff", () => {
       { tag: "same", text: "omega" },
     ]);
   });
+
+  it("bounds work for large unrelated middles while preserving shared edges", () => {
+    const before = [
+      "shared start",
+      ...Array.from({ length: 2_000 }, (_, index) => `before ${index}`),
+      "shared end",
+    ].join("\n");
+    const after = [
+      "shared start",
+      ...Array.from({ length: 2_000 }, (_, index) => `after ${index}`),
+      "shared end",
+    ].join("\n");
+
+    const result = lineDiff(before, after);
+    expect(result[0]).toEqual({ tag: "same", text: "shared start" });
+    expect(result.at(-1)).toEqual({ tag: "same", text: "shared end" });
+    expect(result.filter((line) => line.tag === "removed")).toHaveLength(2_000);
+    expect(result.filter((line) => line.tag === "added")).toHaveLength(2_000);
+  });
 });

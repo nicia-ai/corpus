@@ -7,7 +7,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import { fieldInputClass } from "@/components/Field";
 import { cn } from "@/lib/cn";
@@ -20,7 +20,22 @@ import { IconButton } from "./RowActions";
 // inline rename), and hover-revealed actions for add-subfolder /
 // move / rename / delete. The drag handle is the whole row, so the
 // rename input disables draggable while editing.
-export function FolderHeader({
+type FolderHeaderProps = Readonly<{
+  folder: FolderRow;
+  depth: number;
+  open: boolean;
+  highlighted: boolean;
+  onToggle: (slug: FolderRow["slug"]) => void;
+  onDragStart: (slug: FolderRow["slug"]) => void;
+  onDragOver: (slug: FolderRow["slug"], e: React.DragEvent) => void;
+  onDrop: (slug: FolderRow["slug"], e: React.DragEvent) => void;
+  onAddChild: (slug: FolderRow["slug"]) => void;
+  onMove: (slug: FolderRow["slug"]) => void;
+  onRename: (slug: FolderRow["slug"], name: string) => Promise<void>;
+  onDelete: (slug: FolderRow["slug"]) => Promise<void>;
+}>;
+
+function FolderHeaderComponent({
   folder,
   depth,
   open,
@@ -33,20 +48,7 @@ export function FolderHeader({
   onMove,
   onRename,
   onDelete,
-}: Readonly<{
-  folder: FolderRow;
-  depth: number;
-  open: boolean;
-  highlighted: boolean;
-  onToggle: () => void;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: (e: React.DragEvent) => void;
-  onAddChild: () => void;
-  onMove: () => void;
-  onRename: (name: string) => Promise<void>;
-  onDelete: () => Promise<void>;
-}>): React.ReactElement {
+}: FolderHeaderProps): React.ReactElement {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(folder.name);
   const [confirming, setConfirming] = useState(false);
@@ -54,11 +56,11 @@ export function FolderHeader({
   return (
     <div
       draggable={!editing}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
+      onDragStart={() => onDragStart(folder.slug)}
+      onDragOver={(e) => onDragOver(folder.slug, e)}
       onDrop={(e) => {
         e.stopPropagation();
-        onDrop(e);
+        onDrop(folder.slug, e);
       }}
       style={treeIndent(depth)}
       className={cn(
@@ -68,7 +70,7 @@ export function FolderHeader({
     >
       <button
         type="button"
-        onClick={onToggle}
+        onClick={() => onToggle(folder.slug)}
         aria-label={open ? "Collapse" : "Expand"}
         className="grid size-11 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100"
       >
@@ -89,7 +91,7 @@ export function FolderHeader({
               setEditing(false);
               return;
             }
-            void onRename(v).then(() => setEditing(false));
+            void onRename(folder.slug, v).then(() => setEditing(false));
           }}
         >
           <input
@@ -115,7 +117,7 @@ export function FolderHeader({
             type="button"
             onClick={() => {
               setConfirming(false);
-              void onDelete();
+              void onDelete(folder.slug);
             }}
             className="font-medium text-red-600 hover:underline"
           >
@@ -131,10 +133,13 @@ export function FolderHeader({
         </span>
       ) : (
         <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-          <IconButton label="New subfolder" onClick={onAddChild}>
+          <IconButton
+            label="New subfolder"
+            onClick={() => onAddChild(folder.slug)}
+          >
             <FolderPlus className="size-4" />
           </IconButton>
-          <IconButton label="Move folder" onClick={onMove}>
+          <IconButton label="Move folder" onClick={() => onMove(folder.slug)}>
             <FolderInput className="size-4" />
           </IconButton>
           <IconButton label="Rename folder" onClick={() => setEditing(true)}>
@@ -152,3 +157,5 @@ export function FolderHeader({
     </div>
   );
 }
+
+export const FolderHeader = memo(FolderHeaderComponent);

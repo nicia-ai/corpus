@@ -12,6 +12,25 @@ type Option<T extends string> = Readonly<{
   icon?: LucideIcon;
 }>;
 
+function nextOptionIndex(
+  key: string,
+  current: number,
+  last: number,
+): number | undefined {
+  switch (key) {
+    case "ArrowRight":
+      return current === last ? 0 : current + 1;
+    case "ArrowLeft":
+      return current === 0 ? last : current - 1;
+    case "Home":
+      return 0;
+    case "End":
+      return last;
+    default:
+      return undefined;
+  }
+}
+
 export function Segmented<T extends string>({
   options,
   value,
@@ -27,21 +46,8 @@ export function Segmented<T extends string>({
     const index = options.findIndex((option) => option.value === value);
     if (index < 0) return;
     const last = options.length - 1;
-    const next =
-      event.key === "ArrowRight"
-        ? index === last
-          ? 0
-          : index + 1
-        : event.key === "ArrowLeft"
-          ? index === 0
-            ? last
-            : index - 1
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? last
-              : -1;
-    if (next < 0) return;
+    const next = nextOptionIndex(event.key, index, last);
+    if (next === undefined) return;
     const option = options[next];
     if (option === undefined) return;
     event.preventDefault();

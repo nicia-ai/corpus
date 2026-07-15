@@ -110,18 +110,18 @@ Other commands:
 src/
   server.ts            Worker entry: routes API paths → Hono, else → TanStack Start
   api.ts               Hono app — external/non-UI surface (auth, MCP, discovery, health)
-  auth.ts              Better Auth instance (email+password, JWT, OAuth provider)
+  auth.server.ts       Better Auth instance (email+password, JWT, OAuth provider)
   start.tsx router.tsx TanStack Start wiring
   routes/              File-based routes; data via loaders + server fns (no useEffect)
   lib/
-    server/            Server functions, one file per feature — the web app's data layer
+    server/            Web data layer; `*.functions.ts` wrappers isolate `*.server.ts` implementations
     middleware.ts      Session / auth / project middleware
     server-context.ts  Injected Cloudflare-binding context + guard
   control/             Control plane (D1): identity, organizations, projects, membership
     project-resolution.ts  resolveProject (cached): projectId → ProjectStore lookup
     org-lifecycle.ts       Better Auth org-plugin seam (materializes the default project)
     store-for.ts           The storeFor() multi-tenant boundary
-    db.ts env.ts schema/ auth.cli.ts
+    db.ts env.ts env.server.ts schema/ auth.cli.ts
   project-store.ts     ProjectStore Durable Object — one per project
   event-log-store.ts   EventLogStore Durable Object — durable instrumentation event stream
   store/               Data-plane internals: handle, repos, domain

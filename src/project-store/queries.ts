@@ -431,9 +431,9 @@ export async function documentHistoryPageProjection(
     }),
   );
   const selected =
-    rows.find((row) => row.docVersion === selectedVersion) ??
-    rows[1] ??
-    rows[0];
+    selectedVersion === undefined
+      ? (rows[1] ?? rows[0])
+      : rows.find((row) => row.docVersion === selectedVersion);
   if (selected === undefined) return { history, active: undefined };
 
   const markdown = retainedHashes.has(selected.contentHash)
@@ -450,6 +450,24 @@ export async function documentHistoryPageProjection(
       retained: markdown !== undefined,
     }),
   };
+}
+
+export async function documentHistoryVersionProjection(
+  u: ProjectUnit,
+  slug: DocumentSlug,
+  docVersion: number,
+): Promise<DocumentHistoryEntry | undefined> {
+  const row = await u.versions.documentVersion(slug, docVersion);
+  if (row === undefined) return undefined;
+  const markdown = await u.blobs.get(row.contentHash);
+  return compact({
+    docVersion: row.docVersion,
+    changedAt: row.changedAt,
+    changedBy: row.changedBy,
+    diffSummary: row.diffSummary,
+    markdown: markdown ?? "",
+    retained: markdown !== undefined,
+  });
 }
 
 export async function verifyHistoryProjection(

@@ -147,3 +147,27 @@ export const getDocumentHistoryPage = createServerFn({ method: "GET" })
             }),
     };
   });
+
+export const getDocumentHistoryVersion = createServerFn({ method: "GET" })
+  .middleware([projectMiddleware])
+  .validator(
+    z.object({
+      slug: z.string().min(1),
+      version: z.number().int().positive(),
+    }),
+  )
+  .handler(async ({ data, context }): Promise<DocVersionEntry | undefined> => {
+    const c = srv(context);
+    const entry = await storeOf(c).documentHistoryVersion(
+      asDocumentSlug(data.slug),
+      data.version,
+    );
+    if (entry === undefined) return undefined;
+    const names = await resolveUserNames(connectControlDb(c.env.DB), [
+      entry.changedBy,
+    ]);
+    return compact({
+      ...entry,
+      changedByName: names.get(entry.changedBy),
+    });
+  });
