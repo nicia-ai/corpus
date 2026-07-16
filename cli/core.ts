@@ -46,12 +46,19 @@ const DocFullSchema = z.object({
 const PushResultSchema = z.object({
   ok: z.boolean().optional(),
   docVersion: z.number().optional(),
+  conflict: z.boolean().optional(),
   currentVersion: z.number().optional(),
+  segmentCollision: z.boolean().optional(),
+  rolledBack: z.boolean().optional(),
 });
 const SidecarSchema = z.object({ slug: z.string(), docVersion: z.number() });
 
 export type DocSummary = Readonly<z.infer<typeof DocSummarySchema>>;
 export type DocFull = Readonly<z.infer<typeof DocFullSchema>>;
+
+export type DoctorResult = Readonly<{
+  documentCount: number;
+}>;
 
 // A failure the Node shell maps to a message + exit code. `kind`
 // classifies it; `detail` carries the structured fields the shell may want
@@ -129,6 +136,24 @@ export async function list(cfg: CorpusConfig): Promise<readonly DocSummary[]> {
   return DocListSchema.parse(await res.json()).documents;
 }
 
+export async function doctor(
+  cfg: CorpusConfig,
+  timeoutMs = 5000,
+): Promise<DoctorResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const documents = await list({
+      ...cfg,
+      fetch: (input, init) =>
+        cfg.fetch(input, { ...init, signal: controller.signal }),
+    });
+    return { documentCount: documents.length };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function pull(
   cfg: CorpusConfig,
   slug: string,
@@ -181,11 +206,30 @@ export async function push(
   });
   const body = PushResultSchema.parse(await res.json());
   if (res.status === 409) {
+    if (body.segmentCollision === true) {
+      throw new CliError(
+        "conflict",
+        "conflict: that slug collides with an existing file or folder path.",
+        { status: 409 },
+      );
+    }
+    if (body.rolledBack === true) {
+      throw new CliError(
+        "conflict",
+        "conflict: the write could not be completed atomically. Retry it.",
+        { status: 409 },
+      );
+    }
     throw new CliError(
       "conflict",
       `conflict: the document is at v${body.currentVersion ?? 0}. ` +
         "Pull, reapply your change, and push again.",
-      { status: 409, currentVersion: body.currentVersion },
+      {
+        status: 409,
+        ...(body.currentVersion === undefined
+          ? {}
+          : { currentVersion: body.currentVersion }),
+      },
     );
   }
   if (!res.ok || body.ok !== true || body.docVersion === undefined) {
