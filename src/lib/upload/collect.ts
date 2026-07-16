@@ -5,6 +5,8 @@
 
 import { strFromU8, unzipSync } from "fflate";
 
+import { formatNumber, MAX_MARKDOWN_BYTES } from "@/util";
+
 export type CollectedFile = Readonly<{ path: string; text: string }>;
 export type SkippedFile = Readonly<{ path: string; reason: string }>;
 export type Collected = Readonly<{
@@ -68,6 +70,16 @@ function partition(
   }
   if (!TEXT_EXT.test(path)) {
     out.skipped.push({ path: label, reason: "unsupported file type" });
+    return;
+  }
+  // The file's raw bytes ARE its UTF-8 size, so this is the same measure
+  // the server enforces (MAX_MARKDOWN_BYTES); skipping here reports the
+  // file up front instead of shipping it only to fail per-file.
+  if (bytes.byteLength > MAX_MARKDOWN_BYTES) {
+    out.skipped.push({
+      path: label,
+      reason: `over the ${formatNumber(MAX_MARKDOWN_BYTES)}-byte document limit`,
+    });
     return;
   }
   try {

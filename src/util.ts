@@ -100,6 +100,37 @@ export const alwaysIncludeBudgetTokensZ = z
   .nonnegative()
   .max(MAX_ALWAYS_INCLUDE_BUDGET_TOKENS);
 
+// Hard cap on one markdown body, in UTF-8 bytes (utf8Bytes). Durable
+// Object SQLite stores each blob as a single value with a hard ~2MB
+// per-value limit; without a named cap an oversized save dies
+// mid-transaction as an opaque storage error. 1MB keeps ample headroom
+// under that ceiling while far exceeding any real prose document. The
+// authoritative check runs in the DO write commands (saveDocument /
+// createSuggestion / createDocProposal); transports pre-filter with
+// `markdownBodyZ` below.
+export const MAX_MARKDOWN_BYTES = 1_000_000;
+
+// The one human-readable refusal shared by every transport (server fn
+// 400, REST 413, MCP INVALID_PARAMS) so the limit is named identically
+// everywhere it surfaces.
+export const MARKDOWN_TOO_LARGE_MESSAGE = `markdown exceeds the ${formatNumber(MAX_MARKDOWN_BYTES)}-byte (1 MB) document limit`;
+
+// The authoritative predicate, measured in UTF-8 bytes — the unit DO
+// SQLite stores. Used by the DO commands; transports may call it too
+// when they want an exact early refusal.
+export function markdownTooLarge(markdown: string): boolean {
+  return utf8Bytes(markdown) > MAX_MARKDOWN_BYTES;
+}
+
+// THE shared Zod pre-filter for markdown bodies at transports. `.max`
+// counts UTF-16 code units and `utf8Bytes(s) >= s.length`, so exceeding
+// this length guarantees exceeding the byte cap — a sound but incomplete
+// first gate (multi-byte text can pass here and still exceed the byte
+// cap); the DO command byte check is the authority.
+export const markdownBodyZ = z
+  .string()
+  .max(MAX_MARKDOWN_BYTES, MARKDOWN_TOO_LARGE_MESSAGE);
+
 // Sum of per-document token estimates for an assembled collection — the
 // value the BudgetMeter compares against the collection's configured
 // `alwaysIncludeBudgetTokens`.

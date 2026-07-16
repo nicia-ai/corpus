@@ -18,7 +18,7 @@ import type {
   CreateSuggestionResult,
   SuggestionView,
 } from "@/project-store/commands/suggestions";
-import { compact, utf8Bytes } from "@/util";
+import { compact, markdownBodyZ, utf8Bytes } from "@/util";
 
 const ReviewDecisionInput = z.object({
   suggestionId: z.number().int(),
@@ -63,7 +63,9 @@ export const createSuggestion = createServerFn({ method: "POST" })
   .validator(
     z.object({
       slug: z.string().min(1),
-      proposedMarkdown: z.string(),
+      // First-gate length cap; the DO command's UTF-8 byte check is the
+      // authority and reports `reason: "too-large"`.
+      proposedMarkdown: markdownBodyZ,
       clientVersion: z.number().int().nonnegative(),
     }),
   )

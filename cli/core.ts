@@ -50,6 +50,9 @@ const PushResultSchema = z.object({
   currentVersion: z.number().optional(),
   segmentCollision: z.boolean().optional(),
   rolledBack: z.boolean().optional(),
+  // The server's refusal message on a non-409 error body (e.g. the 413
+  // markdown-size cap) — surfaced verbatim so the shell explains itself.
+  error: z.string().optional(),
 });
 const SidecarSchema = z.object({ slug: z.string(), docVersion: z.number() });
 
@@ -233,7 +236,8 @@ export async function push(
     );
   }
   if (!res.ok || body.ok !== true || body.docVersion === undefined) {
-    throw new CliError("http", `push failed (${res.status})`, {
+    const detail = body.error === undefined ? "" : `: ${body.error}`;
+    throw new CliError("http", `push failed (${res.status})${detail}`, {
       status: res.status,
     });
   }

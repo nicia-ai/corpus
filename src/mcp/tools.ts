@@ -5,7 +5,7 @@ import { proposalMessageSchema } from "../lib/proposal-message";
 import type { ProposalResult } from "../project-store/commands/suggestions";
 import { parseFrontmatter } from "../store/domain/frontmatter";
 import { CREATE_PROPOSAL_BASE_VERSION } from "../store/domain/suggestion";
-import { compact } from "../util";
+import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "../util";
 
 import type { McpExecutor } from "./executor";
 import { boundCollectionSlug, documentSlugFromArgs, strField } from "./params";
@@ -17,9 +17,20 @@ import { ERR, err, ok, textContent, TOOLS } from "./protocol";
 // write tool, so it gets real validation rather than the ad-hoc strField
 // the read tools use.
 const SuggestEditArgs = z.object({
-  proposedMarkdown: z.string(),
+  // First-gate length cap; the DO command's UTF-8 byte check is the
+  // authority and reports `reason: "too-large"`.
+  proposedMarkdown: markdownBodyZ,
   baseDocVersion: z.number().int().nonnegative(),
 });
+
+// True when suggest_edit's args failed ONLY because the body blew the
+// length gate — classified on Zod's structured issue code so the agent
+// gets an INVALID_PARAMS naming the limit, not the generic shape hint.
+function proposedMarkdownTooBig(error: z.ZodError): boolean {
+  return error.issues.some(
+    (issue) => issue.code === "too_big" && issue.path[0] === "proposedMarkdown",
+  );
+}
 
 const GetProposalResultArgs = z.object({
   proposalId: z.number().int().positive(),
@@ -127,6 +138,9 @@ async function proposeCreate(
       ERR.CONFLICT,
       "that slug or path already belongs to a document; propose a different one",
     );
+  }
+  if (res.reason === "too-large") {
+    return err(id, ERR.INVALID_PARAMS, MARKDOWN_TOO_LARGE_MESSAGE);
   }
   return err(
     id,
@@ -327,7 +341,9 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       return err(
         id,
         ERR.INVALID_PARAMS,
-        "suggest_edit needs proposedMarkdown (string) and baseDocVersion (number)",
+        proposedMarkdownTooBig(fields.error)
+          ? MARKDOWN_TOO_LARGE_MESSAGE
+          : "suggest_edit needs proposedMarkdown (string) and baseDocVersion (number)",
       );
     }
     const requested = await documentSlugFromArgs(exec, params);
@@ -379,6 +395,10 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
           `document moved to version ${res.currentVersion}; re-read and re-propose against the current head`,
           { currentVersion: res.currentVersion },
         );
+      // The DO's authoritative UTF-8 byte cap (reachable when multi-byte
+      // markdown passes the transport length gate above).
+      case "too-large":
+        return err(id, ERR.INVALID_PARAMS, MARKDOWN_TOO_LARGE_MESSAGE);
       case "no-change":
         return ok(
           id,

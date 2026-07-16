@@ -60,6 +60,7 @@ import {
   FilenameCollision,
   ImportAbort,
   importDocumentAtPathCommand,
+  MarkdownTooLarge,
   renameDocumentCommand,
   renameFilenameCommand,
   saveDocumentCommand,
@@ -970,6 +971,9 @@ export class ProjectStore extends DurableObject<Env> {
     if (err instanceof FilenameCollision) {
       return { ok: false, segmentCollision: true };
     }
+    if (err instanceof MarkdownTooLarge) {
+      return { ok: false, tooLarge: true };
+    }
     if (err instanceof ConflictError) {
       return { ok: false, conflict: true, currentVersion: err.currentVersion };
     }
@@ -1544,23 +1548,34 @@ export class ProjectStore extends DurableObject<Env> {
     input: ApplySuggestionInput,
   ): Promise<ApplySuggestionResult> {
     const now = new Date().toISOString();
-    const outcome = await this.writeCommand(
-      now,
-      (ctx) => applySuggestionCommand(ctx, input),
-      (out) =>
-        out.result.ok
-          ? {
-              area: "review",
-              action: "suggestion.applied",
-              actorId: input.appliedBy,
-              docSlug: out.result.documentSlug,
-              docVersion: out.result.docVersion,
-            }
-          : undefined,
-    );
-    return outcome.result.ok
-      ? { ok: true, docVersion: outcome.result.docVersion }
-      : outcome.result;
+    try {
+      const outcome = await this.writeCommand(
+        now,
+        (ctx) => applySuggestionCommand(ctx, input),
+        (out) =>
+          out.result.ok
+            ? {
+                area: "review",
+                action: "suggestion.applied",
+                actorId: input.appliedBy,
+                docSlug: out.result.documentSlug,
+                docVersion: out.result.docVersion,
+              }
+            : undefined,
+      );
+      return outcome.result.ok
+        ? { ok: true, docVersion: outcome.result.docVersion }
+        : outcome.result;
+    } catch (err) {
+      // A partial acceptance splices hunks into the base, and the spliced
+      // document can exceed MAX_MARKDOWN_BYTES even though the base and the
+      // proposal were each admitted under it. The save path's sentinel rolls
+      // the whole apply back; surface it as a structured refusal.
+      if (err instanceof MarkdownTooLarge) {
+        return { ok: false, reason: "too-large" };
+      }
+      throw err;
+    }
   }
 
   async rejectSuggestion(
@@ -1992,6 +2007,11 @@ export class ProjectStore extends DurableObject<Env> {
     } catch (err) {
       if (err instanceof ImportAbort) {
         return { ok: false, reason: err.reason };
+      }
+      // An oversized file fails only ITS OWN per-document unit; the caller
+      // records it in `failed` and the rest of the tree import proceeds.
+      if (err instanceof MarkdownTooLarge) {
+        return { ok: false, reason: "too-large" };
       }
       throw err;
     }

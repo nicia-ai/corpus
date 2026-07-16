@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { PROPOSAL_MESSAGE_MAX_LENGTH } from "../lib/proposal-message";
+import { MAX_MARKDOWN_BYTES } from "../util";
 
 export const RpcSchema = z.object({
   jsonrpc: z.literal("2.0"),
@@ -142,7 +143,9 @@ export const TOOLS = [
         },
         proposedMarkdown: {
           type: "string",
-          description: "The full proposed document body, verbatim.",
+          maxLength: MAX_MARKDOWN_BYTES,
+          description:
+            "The full proposed document body, verbatim (at most 1 MB of UTF-8 markdown).",
         },
         baseDocVersion: {
           type: "integer",

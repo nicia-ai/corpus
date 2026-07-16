@@ -690,5 +690,7 @@ function applyErrorMessage(reason: string): string {
     return "The document changed; recreate this suggestion.";
   if (reason === "nothing-accepted") return "Accept at least one hunk first.";
   if (reason === "not-open") return "This suggestion is already settled.";
+  if (reason === "too-large")
+    return "Applying these hunks would put the document over the 1 MB markdown limit.";
   return "Could not apply this suggestion.";
 }

@@ -13,7 +13,12 @@ import { projectMiddleware } from "@/lib/middleware";
 import { changedBy, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
 import { parseFrontmatter } from "@/store/domain/frontmatter";
-import { compact, utf8Bytes } from "@/util";
+import {
+  compact,
+  MARKDOWN_TOO_LARGE_MESSAGE,
+  markdownBodyZ,
+  utf8Bytes,
+} from "@/util";
 
 // Plain, JSON-serializable shapes returned to loaders/components. Durable
 // Object RPC returns carry non-serializable branding, so every handler
@@ -159,7 +164,9 @@ export const saveDocument = createServerFn({ method: "POST" })
     z.object({
       slug: z.string().min(1),
       title: z.string().optional(),
-      markdown: z.string(),
+      // First-gate length cap; the DO's UTF-8 byte check is the authority
+      // (multi-byte text can pass this and still come back `tooLarge`).
+      markdown: markdownBodyZ,
       // Basename incl. extension. Only meaningful on create (clientVersion:
       // 0) — an existing document keeps its filename via renameFilename.
       // Same basename rule as renameFilename: no path separator.
@@ -203,6 +210,9 @@ export const saveDocument = createServerFn({ method: "POST" })
     if ("segmentCollision" in r) {
       return { ok: false, segmentCollision: true };
     }
+    // The DO's authoritative UTF-8 byte cap — same boundary treatment as
+    // the frontmatter check above (validation kind → HTTP 400).
+    if ("tooLarge" in r) throw new ValidationError(MARKDOWN_TOO_LARGE_MESSAGE);
     return { ok: false, rolledBack: true };
   });
 

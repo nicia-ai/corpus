@@ -46,6 +46,9 @@ export type SaveResult = Readonly<
   | { ok: true; docVersion: number }
   | { ok: false; conflict: true; currentVersion: number }
   | { ok: false; segmentCollision: true }
+  // Markdown over MAX_MARKDOWN_BYTES (src/util.ts) — refused before any
+  // write; transports map it to validation (HTTP 400/413).
+  | { ok: false; tooLarge: true }
   | { ok: false; rolledBack: true }
 >;
 
@@ -117,7 +120,7 @@ export type ImportDocResult = Readonly<
       folderSlug: string | null;
       createdFolders: readonly string[];
     }
-  | { ok: false; reason: "invalid-path" | "segment-collision" }
+  | { ok: false; reason: "invalid-path" | "segment-collision" | "too-large" }
 >;
 
 export type ImportSummary = Readonly<{
