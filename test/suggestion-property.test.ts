@@ -103,8 +103,24 @@ function buildScenario(
   };
 }
 
+// Consecutive list items join TIGHT ("\n") — the separator shape the 2026-07-16
+// dogfood found applyHunks destroying; everything else joins loose ("\n\n").
+// Both documents render under the same rule, so the separator between two
+// UNCHANGED neighbors is identical on both sides and byte-exact round-trips
+// are a fair expectation.
 function renderDoc(blocks: readonly BlockSpec[]): string {
-  return blocks.map(renderBlock).join("\n\n");
+  let out = "";
+  blocks.forEach((block, i) => {
+    if (i > 0) {
+      const prev = blocks[i - 1];
+      out +=
+        prev?.kind === "list-item" && block.kind === "list-item"
+          ? "\n"
+          : "\n\n";
+    }
+    out += renderBlock(block);
+  });
+  return out;
 }
 
 function blockText(block: BlockSpec): string {
@@ -131,36 +147,6 @@ function renderBlock(block: BlockSpec): string {
   }
 }
 
-function normalizeAppliedMarkdown(markdown: string): string {
-  return collapseBlankRunsOutsideCode(markdown)
-    .replace(/^\n+/, "")
-    .replace(/\s+$/, "");
-}
-
-function collapseBlankRunsOutsideCode(markdown: string): string {
-  const lines = markdown.split("\n");
-  const out: string[] = [];
-  let fence: string | undefined;
-  let blankRun = 0;
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    const run = /^(`{3,}|~{3,})/.exec(trimmed)?.[1];
-    if (fence === undefined) {
-      if (run !== undefined) fence = run[0];
-    } else if (run?.[0] === fence) {
-      fence = undefined;
-    }
-    if (fence === undefined && line.trim() === "") {
-      blankRun += 1;
-      if (blankRun >= 2) continue;
-    } else {
-      blankRun = 0;
-    }
-    out.push(line);
-  }
-  return out.join("\n");
-}
-
 function subsetByMask(
   hunks: readonly Hunk[],
   mask: readonly boolean[],
@@ -169,13 +155,11 @@ function subsetByMask(
 }
 
 describe("suggestion hunks (property)", () => {
-  it("accept-all reproduces the proposed markdown after suggestion normalization", () => {
+  it("accept-all reproduces the proposed markdown byte-for-byte", () => {
     fc.assert(
       fc.property(scenarioArb, ({ base, proposed }) => {
         const hunks = diffToHunks(base, proposed);
-        expect(applyHunks(base, hunks)).toBe(
-          normalizeAppliedMarkdown(proposed),
-        );
+        expect(applyHunks(base, hunks)).toBe(proposed);
       }),
       PROPERTY_RUNS,
     );
@@ -199,12 +183,28 @@ describe("suggestion hunks (property)", () => {
           const hunks = diffToHunks(base, proposed);
           const subset = subsetByMask(hunks, mask);
 
-          expect(() => applyHunks(base, subset)).not.toThrow();
-          expect(typeof applyHunks(base, subset)).toBe("string");
+          const applied = applyHunks(base, subset);
           expect(applyHunks(base, [])).toBe(base);
-          expect(applyHunks(base, hunks)).toBe(
-            normalizeAppliedMarkdown(proposed),
-          );
+          expect(applyHunks(base, hunks)).toBe(proposed);
+          // Content fidelity under ANY decision mix: every accepted
+          // insert/replace body lands verbatim; an accepted delete removes
+          // its block; a skipped delete keeps it (block texts are unique by
+          // construction, so containment is a faithful check).
+          const acceptedSet = new Set(subset);
+          for (const h of hunks) {
+            if (h.op !== "delete") {
+              if (acceptedSet.has(h)) {
+                expect(applied).toContain(h.proposedText);
+              }
+            } else {
+              const blockText = base.slice(h.baseStart, h.baseEnd);
+              if (acceptedSet.has(h)) {
+                expect(applied).not.toContain(blockText);
+              } else {
+                expect(applied).toContain(blockText);
+              }
+            }
+          }
         },
       ),
       PROPERTY_RUNS,
@@ -227,6 +227,63 @@ describe("suggestion hunks (property)", () => {
     fc.assert(
       fc.property(scenarioArb, ({ base }) => {
         expect(diffToHunks(base, base)).toEqual([]);
+      }),
+      PROPERTY_RUNS,
+    );
+  });
+
+  // The universal contract — for ARBITRARY markdown-ish byte pairs, not
+  // just the structured generator's class: diffToHunks self-verifies and
+  // degrades to a whole-document hunk when granular hunks can't reproduce
+  // the proposal, so these two lines hold for every input.
+  it("holds the diff contract on chaotic inputs: empty ⟺ identical, apply-all === proposed", () => {
+    const chaosDocArb = fc
+      .array(
+        fc.record({
+          body: fc.oneof(
+            fc.constantFrom(
+              "plain paragraph text",
+              "## a heading",
+              "- list item one",
+              "- list item two",
+              "> a quote block",
+              "```txt\ncode body\n```",
+              "| a | b |\n| - | - |\n| 1 | 2 |",
+              "---",
+              "[ref]: https://example.com",
+              "**bold** and *italic* and [link][ref]",
+            ),
+            fc.string({ minLength: 1, maxLength: 24 }),
+          ),
+          sep: fc.constantFrom("\n", "\n\n", "\n\n\n", "\r\n\r\n"),
+        }),
+        { minLength: 0, maxLength: 8 },
+      )
+      .map((parts) => {
+        let doc = "";
+        parts.forEach((p, i) => {
+          doc += (i > 0 ? p.sep : "") + p.body;
+        });
+        return doc;
+      });
+    // The edge decoration is independent of the doc — tuple, not chain
+    // (shrinks better).
+    const chaosWithEdgeArb = fc
+      .tuple(
+        chaosDocArb,
+        fc.constantFrom("", "\n", "\n\n", "---\nkey: value\n---\n\n"),
+      )
+      .map(([doc, edge]) => (edge.startsWith("---") ? edge + doc : doc + edge));
+
+    fc.assert(
+      fc.property(chaosWithEdgeArb, chaosWithEdgeArb, (base, proposed) => {
+        const hunks = diffToHunks(base, proposed);
+        if (base === proposed) {
+          expect(hunks).toEqual([]);
+        } else {
+          expect(hunks.length).toBeGreaterThan(0);
+          expect(applyHunks(base, hunks)).toBe(proposed);
+        }
       }),
       PROPERTY_RUNS,
     );

@@ -10,6 +10,7 @@
 // silently pick the first match anywhere.
 
 import { MIN_ANCHOR_CHARS } from "@/store/domain/anchor";
+import { isBlank } from "@/util";
 
 export type AnchorBlock = Readonly<{
   id?: string;
@@ -62,10 +63,6 @@ function alignBlocks(
     cursor = end;
   }
   return out;
-}
-
-function isBlank(text: string): boolean {
-  return text.trim() === "";
 }
 
 // Map a selection's character span in the rendered document text to the

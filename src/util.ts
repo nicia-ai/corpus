@@ -52,6 +52,12 @@ export function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
+// Whitespace-or-empty, the one blank test shared by text anchoring and the
+// suggestion splice so "blank" can never mean two different things.
+export function isBlank(text: string): boolean {
+  return text.trim() === "";
+}
+
 // Format an integer with US-style thousands separators. Pinned to
 // `en-US` so SSR (Workers, no locale) and the browser (user's locale)
 // render byte-identical strings — `toLocaleString()` without a locale

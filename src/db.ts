@@ -229,6 +229,11 @@ export const suggestionHunk = sqliteTable(
     baseStart: integer("base_start").notNull(),
     baseEnd: integer("base_end").notNull(),
     proposedText: text("proposed_text").notNull(),
+    // Separator bytes around the block in the proposed source; semantics
+    // (incl. the '' legacy-row fallback) live on the canonical Hunk type in
+    // src/store/domain/suggestion.ts.
+    leadSep: text("lead_sep").notNull().default(""),
+    trailSep: text("trail_sep").notNull().default(""),
     decision: text("decision", { enum: HUNK_DECISIONS }).notNull(),
   },
   (t) => [

@@ -5,7 +5,7 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 
 import type { BlockKind, NextBlock } from "./block-match";
-import { parseFrontmatter } from "./frontmatter";
+import { frontmatterLength } from "./frontmatter";
 
 // Markdown → ordered block list, the input side of the anchor matcher.
 //
@@ -59,11 +59,12 @@ export function parseBlocks(markdown: string): readonly NextBlock[] {
 export function parseBlocksWithRanges(
   markdown: string,
 ): readonly ParsedBlock[] {
-  const parsed = parseFrontmatter(markdown);
-  const body = parsed.ok ? parsed.body : markdown;
   // `body` is a suffix of `markdown` (a leading frontmatter fence is the
   // only thing stripped), so mdast's body-relative offsets shift by this.
-  const bodyOffset = markdown.length - body.length;
+  // frontmatterLength is THE boundary — the suggestion diff tiles the
+  // document against the same function.
+  const bodyOffset = frontmatterLength(markdown);
+  const body = markdown.slice(bodyOffset);
   const tree = processor.parse(body);
   const out: ParsedBlock[] = [];
   emitBlocks(tree.children, bodyOffset, out);
