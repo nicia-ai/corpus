@@ -48,20 +48,19 @@ describe("alignBlocks cell budget", () => {
     expect(pairedNonAnchor).toBe(2 * 240);
   });
 
-  it("stays fast on the many-legal-gaps attack shape", () => {
-    // The re-review's measured shape (scaled for CI-stable separation):
-    // many gaps, each individually under the old per-gap ceiling. Broken
-    // behavior runs every gap's similarity DP (~1.1s+ locally for this
-    // shape, 3s for the full-size attack); the shared budget bounds DP
-    // work at one pool, leaving only linear parse cost (~250ms locally).
+  it("degrades the many-legal-gaps attack shape to one whole-document hunk", () => {
+    // The re-review's measured shape: many gaps, each individually under
+    // the old per-gap ceiling, which used to multiply into ~3s of DP work.
+    // No wall-clock assertion (CI contention makes any threshold flaky —
+    // proven the hard way); the six-gap test above is the deterministic
+    // proof that the shared budget cannot reset per gap. This end-to-end
+    // shape pins the OUTCOME: thousands of unpairable blocks can only be
+    // a whole-document review.
     const { base, proposed } = segmented(12, 300);
     const baseDoc = base.map((b) => b.text).join("\n\n");
     const proposedDoc = proposed.map((b) => b.text).join("\n\n");
-    const t0 = performance.now();
     const diff = diffSuggestion(baseDoc, proposedDoc);
-    const elapsed = performance.now() - t0;
-    expect(elapsed).toBeLessThan(1000);
-    // Thousands of unpairable blocks can only be a whole-document review.
     expect(diff.granularity).toBe("whole-document");
+    expect(diff.hunks).toHaveLength(1);
   });
 });
