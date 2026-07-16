@@ -107,6 +107,9 @@ const toHunk = (h: SuggestionHunkRow): Hunk => ({
   baseStart: h.baseStart,
   baseEnd: h.baseEnd,
   proposedText: h.proposedText,
+  // Separator semantics live on the Hunk type (src/store/domain/suggestion.ts).
+  leadSep: h.leadSep,
+  trailSep: h.trailSep,
 });
 
 // — Create ———————————————————————————————————————————————————————————
@@ -167,6 +170,8 @@ export async function createSuggestionCommand(
       baseStart: h.baseStart,
       baseEnd: h.baseEnd,
       proposedText: h.proposedText,
+      leadSep: h.leadSep,
+      trailSep: h.trailSep,
       decision: "pending",
     })),
   );
@@ -548,14 +553,23 @@ export async function applySuggestionCommand(
       currentVersion: head.docVersion,
     });
   }
-  const accepted = (await ctx.u.suggestions.hunksFor(s.id)).filter(
-    (h) => h.decision === "accepted",
-  );
+  const allHunks = await ctx.u.suggestions.hunksFor(s.id);
+  const accepted = allHunks.filter((h) => h.decision === "accepted");
   if (accepted.length === 0) {
     return commandOutcome({ ok: false, reason: "nothing-accepted" });
   }
-  const base = (await ctx.u.blobs.get(head.contentHash)) ?? "";
-  const newMarkdown = applyHunks(base, accepted.map(toHunk));
+  // Every hunk accepted ⇒ the new version is the stored proposal VERBATIM.
+  // For rows created since diffToHunks became self-verifying the splice
+  // would produce the same bytes; this branch exists for LEGACY rows (empty
+  // separator columns, pre-0007) whose splice re-synthesizes joins — and it
+  // skips the base blob read on the most common apply outcome.
+  const newMarkdown =
+    accepted.length === allHunks.length
+      ? s.proposedMarkdown
+      : applyHunks(
+          (await ctx.u.blobs.get(head.contentHash)) ?? "",
+          accepted.map(toHunk),
+        );
   const saved = await saveDocumentCommand(ctx, {
     slug,
     markdown: newMarkdown,

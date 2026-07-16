@@ -58,6 +58,12 @@ export const ledgerMigrations: LedgerMigrationBundle = {
         "when": 1784153463017,
         "tag": "0006_high_tana_nile",
         "breakpoints": true
+      },
+      {
+        "idx": 7,
+        "when": 1784220227964,
+        "tag": "0007_last_rhodey",
+        "breakpoints": true
       }
     ]
   },
@@ -68,6 +74,7 @@ export const ledgerMigrations: LedgerMigrationBundle = {
     "m0003": "ALTER TABLE `suggestion` ADD `channel` text DEFAULT 'web' NOT NULL;",
     "m0004": "ALTER TABLE `suggestion` ADD `proposed_path` text;--> statement-breakpoint\nALTER TABLE `suggestion` ADD `origin_collection_slug` text;",
     "m0005": "ALTER TABLE `suggestion` ADD `result_doc_version` integer;--> statement-breakpoint\nALTER TABLE `suggestion` ADD `reviewer_note` text;",
-    "m0006": "CREATE TABLE `suggestion_message` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`suggestion_id` integer NOT NULL,\n\t`body` text NOT NULL,\n\t`created_by` text NOT NULL,\n\t`channel` text NOT NULL,\n\t`created_at` text NOT NULL\n);\n--> statement-breakpoint\nCREATE INDEX `suggestion_message_suggestion` ON `suggestion_message` (`suggestion_id`);"
+    "m0006": "CREATE TABLE `suggestion_message` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`suggestion_id` integer NOT NULL,\n\t`body` text NOT NULL,\n\t`created_by` text NOT NULL,\n\t`channel` text NOT NULL,\n\t`created_at` text NOT NULL\n);\n--> statement-breakpoint\nCREATE INDEX `suggestion_message_suggestion` ON `suggestion_message` (`suggestion_id`);",
+    "m0007": "ALTER TABLE `suggestion_hunk` ADD `lead_sep` text DEFAULT '' NOT NULL;--> statement-breakpoint\nALTER TABLE `suggestion_hunk` ADD `trail_sep` text DEFAULT '' NOT NULL;"
   }
 };

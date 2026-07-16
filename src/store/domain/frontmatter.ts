@@ -37,6 +37,16 @@ function isMapping(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+// Byte length of the leading frontmatter fence (0 when there is none or
+// the fence is malformed). THE boundary between the frontmatter region and
+// the body — block-parse strips exactly this prefix before parsing, and the
+// suggestion diff tiles the document as [0, frontmatterLength) + blocks, so
+// both must consume this one function or the tiling silently breaks.
+export function frontmatterLength(raw: string): number {
+  const parsed = parseFrontmatter(raw);
+  return parsed.ok ? raw.length - parsed.body.length : 0;
+}
+
 export function parseFrontmatter(raw: string): FrontmatterParse {
   const open = OPEN.exec(raw);
   if (open === null) return plain(raw);
