@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyHunks,
   computeProposalOutcome,
+  diffSuggestion,
   diffToHunks,
 } from "../src/store/domain/suggestion";
 
@@ -183,24 +184,64 @@ describe("diffToHunks / applyHunks", () => {
     expect(diffToHunks("a b c\n", "a b c").length).toBeGreaterThan(0);
   });
 
+  // The diff aligns blocks ORDER-PRESERVING (never move-following — that
+  // lens belongs to comment anchors), so a relocation is an explicit
+  // delete + insert pair: granular and reviewable instead of degrading to
+  // one whole-document decision.
+  it("a pure move produces a granular delete + insert pair", () => {
+    const base = "alpha one\n\nbeta two\n\ngamma three";
+    const proposed = "beta two\n\nalpha one\n\ngamma three";
+    const diff = diffSuggestion(base, proposed);
+    expect(diff.granularity).toBe("block");
+    expect(diff.hunks.map((h) => h.op).sort()).toEqual(["delete", "insert"]);
+    const del = diff.hunks.find((h) => h.op === "delete");
+    const ins = diff.hunks.find((h) => h.op === "insert");
+    expect(del && base.slice(del.baseStart, del.baseEnd)).toBe("alpha one");
+    expect(ins?.proposedText).toBe("alpha one");
+    expect(applyHunks({ base, proposed, rejected: [] })).toBe(proposed);
+    expect(applyHunks({ base, proposed, rejected: diff.hunks })).toBe(base);
+  });
+
+  it("a move alongside an edit stays granular (each decidable on its own)", () => {
+    const base = "alpha one\n\nbeta two\n\ngamma three";
+    const proposed = "beta two\n\nalpha one\n\ngamma three EDITED";
+    const diff = diffSuggestion(base, proposed);
+    expect(diff.granularity).toBe("block");
+    expect(diff.hunks.map((h) => h.op).sort()).toEqual([
+      "delete",
+      "insert",
+      "replace",
+    ]);
+    // The edit is its own replace hunk, independent of the move pair.
+    const rep = diff.hunks.find((h) => h.op === "replace");
+    expect(rep?.proposedText).toBe("gamma three EDITED");
+    expect(applyHunks({ base, proposed, rejected: [] })).toBe(proposed);
+    expect(applyHunks({ base, proposed, rejected: diff.hunks })).toBe(base);
+  });
+
+  // Partial acceptance of a move's pair does the predictable per-hunk
+  // thing — the pair is two independent decisions, not an atomic move.
+  it("accepting only a move's insert duplicates the block; only its delete drops it", () => {
+    const base = "alpha one\n\nbeta two\n\ngamma three";
+    const proposed = "beta two\n\nalpha one\n\ngamma three";
+    const hunks = diffToHunks(base, proposed);
+    const deletes = hunks.filter((h) => h.op === "delete");
+    const inserts = hunks.filter((h) => h.op === "insert");
+    // Accept the insert, reject the delete: the block lands in its new
+    // spot AND stays in its old one.
+    expect(applyHunks({ base, proposed, rejected: deletes })).toBe(
+      "alpha one\n\nbeta two\n\nalpha one\n\ngamma three",
+    );
+    // Reject the insert, accept the delete: the block is gone entirely.
+    expect(applyHunks({ base, proposed, rejected: inserts })).toBe(
+      "beta two\n\ngamma three",
+    );
+  });
+
   // The self-verification contract: when the block lens cannot represent a
   // change faithfully (full rejection would not reconstruct the base), the
   // diff degrades to ONE whole-document hunk rather than offering granular
   // hunks whose reverts would distort part of the base or the proposal.
-  it("a move alongside an edit degrades to a whole-document hunk", () => {
-    // Content-first matching carries the moved block as "unchanged" (no
-    // hunk represents the move), so rejecting the granular hunks could
-    // never restore base order.
-    const base = "alpha one\n\nbeta two\n\ngamma three";
-    const proposed = "beta two\n\nalpha one\n\ngamma three EDITED";
-    const hunks = diffToHunks(base, proposed);
-    expect(hunks).toHaveLength(1);
-    expect(hunks[0]?.baseEnd).toBe(base.length);
-    expect(hunks[0]?.propEnd).toBe(proposed.length);
-    expect(applyHunks({ base, proposed, rejected: [] })).toBe(proposed);
-    expect(applyHunks({ base, proposed, rejected: hunks })).toBe(base);
-  });
-
   it("a link-reference-definition edit degrades to a whole-document hunk", () => {
     // Definition nodes are invisible to the block lens; a granular diff
     // would silently keep the base definition.

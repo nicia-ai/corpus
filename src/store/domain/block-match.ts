@@ -75,6 +75,9 @@ export type MatchResult = Readonly<{
 // A `modified` carry requires at least this idf-weighted overlap. Below
 // it, a changed block is treated as delete + insert rather than a false
 // carry (a fully rewritten paragraph *should* orphan its comments).
+// Exported because the suggestion diff's replace tier (block-align.ts)
+// reuses the same cutoff, so replace-vs-delete+insert classification
+// feels identical across both lenses.
 //
 // The similarity is token-set Jaccard weighted by inverse document
 // frequency over *this document's* blocks: tokens common across many
@@ -84,7 +87,7 @@ export type MatchResult = Readonly<{
 // unrelated paragraphs that merely share common words from being
 // conflated. The exact-match tier — every move, reorder, and duplicate —
 // does NOT depend on this constant; only the fuzzy "edited block" tier.
-const MODIFIED_SIMILARITY_THRESHOLD = 0.5;
+export const MODIFIED_SIMILARITY_THRESHOLD = 0.5;
 
 export function matchBlocks(
   input: Readonly<{
@@ -223,7 +226,7 @@ export function tokenSimilarity(
 // unique to one block weighs more. Smoothing keeps every weight positive
 // so an all-common-vocabulary pair still has a defined similarity.
 export function computeIdf(
-  prev: readonly Block[],
+  prev: readonly NextBlock[],
   next: readonly NextBlock[],
 ): ReadonlyMap<string, number> {
   const documentFrequency = new Map<string, number>();

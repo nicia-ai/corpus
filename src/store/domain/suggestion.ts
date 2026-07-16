@@ -1,6 +1,4 @@
-import { asBlockId, type BlockId } from "../../ids";
-
-import { type Block, matchBlocks, type NextBlock } from "./block-match";
+import { alignBlocks } from "./block-align";
 import { parseBlocksWithRanges } from "./block-parse";
 import { frontmatterLength } from "./frontmatter";
 
@@ -11,19 +9,22 @@ import { frontmatterLength } from "./frontmatter";
 // document by walking the PROPOSED bytes and reverting each REJECTED hunk
 // back to base bytes. Pure, zero-IO.
 //
-// Byte fidelity is the contract: block matching identifies blocks by their
-// PLAIN text (the right lens for anchor identity — a moved or lightly
-// edited block keeps its comments), but the diff below compares SOURCE
-// BYTES, so a formatting-only edit (`**bold**` → `*bold*`) still yields a
-// hunk. Mixed-decision spacing is PROPOSED-authoritative: the bytes between
+// Byte fidelity is the contract: the diff aligns the two block sequences
+// ORDER-PRESERVING (block-align.ts) — unlike the content-first anchor
+// matcher, a relocated block is an explicit delete + insert pair, exactly
+// what git shows — and compares SOURCE BYTES within each aligned pair, so
+// a formatting-only edit (`**bold**` → `*bold*`) still yields a hunk.
+// Mixed-decision spacing is PROPOSED-authoritative: the bytes between
 // surviving blocks are whatever the proposer wrote (a tight list stays
 // tight), never re-synthesized from the base. diffToHunks verifies per
 // instance that full rejection reconstructs the base and degrades to a
 // whole-document hunk when it cannot — see its contract comment below.
 //
-// v1 captures replace / insert / delete at block granularity. A pure MOVE
-// (same content relocated) carries as unchanged and yields no hunk — moves
-// are not represented in a suggestion yet.
+// The hunk vocabulary stays replace / insert / delete: a move is not a
+// first-class op — it surfaces as its delete + insert pair, and a partial
+// decision over the pair does the predictable thing (accept only the
+// insert ⇒ the block is duplicated; accept only the delete ⇒ it is
+// dropped).
 
 // Create-proposals reuse the suggestion table with this base version as the
 // discriminant: a real document's head is never below 1 (see nextVersion), so
@@ -85,8 +86,6 @@ export type Hunk = Readonly<{
   proposedText: string;
 }>;
 
-const baseIndexOf = (id: BlockId): number => Number(id.slice(1));
-
 // The one whole-document hunk: the degenerate (but always-faithful) diff.
 const wholeDocumentHunk = (base: string, proposed: string): Hunk => ({
   ordinal: 1,
@@ -121,8 +120,8 @@ export type SuggestionDiff = Readonly<{
 // Granular block hunks are OFFERED only when full rejection reconstructs
 // the base byte-for-byte — the direction that is NOT automatic under the
 // rejected-revert formulation. When the block lens cannot represent the
-// change faithfully (a moved block alongside other edits, an edited
-// link-reference definition, spacing shifts around unchanged blocks), the
+// change faithfully (an edited link-reference definition, spacing shifts
+// around unchanged blocks), the
 // diff degrades to ONE whole-document hunk: the review loses per-block
 // granularity but can never silently drop or distort part of what the
 // proposer wrote. Correctness beats granularity.
@@ -147,21 +146,11 @@ export function diffToHunks(base: string, proposed: string): readonly Hunk[] {
 function blockHunks(base: string, proposed: string): readonly Hunk[] {
   const baseBlocks = parseBlocksWithRanges(base);
   const proposedBlocks = parseBlocksWithRanges(proposed);
-  const prev: Block[] = baseBlocks.map((b, i) => ({
-    id: asBlockId(`b${i.toString()}`),
-    kind: b.kind,
-    text: b.text,
-  }));
-  const next: NextBlock[] = proposedBlocks.map((b) => ({
-    kind: b.kind,
-    text: b.text,
-  }));
-  let minted = 0;
-  const match = matchBlocks({
-    prev,
-    next,
-    mintId: () => asBlockId(`n${(minted += 1).toString()}`),
-  });
+  // Order-preserving alignment: aligned[j] is the base block shown at
+  // proposed position j (byte-compared below), undefined for an inserted
+  // block; base indices absent from the image are deletes. Never
+  // move-following — that lens belongs to comment anchors, not diffs.
+  const aligned = alignBlocks({ base: baseBlocks, proposed: proposedBlocks });
 
   const hunks: Hunk[] = [];
   // Where each carried base block landed in the proposed order — membership
@@ -194,20 +183,18 @@ function blockHunks(base: string, proposed: string): readonly Hunk[] {
   // region at document start.
   let seam = baseFmEnd;
 
-  match.blocks.forEach((mb, j) => {
-    const pb = proposedBlocks[j];
-    if (pb === undefined) return;
+  proposedBlocks.forEach((pb, j) => {
     const proposedText = proposed.slice(pb.sourceStart, pb.sourceEnd);
-    const origin = mb.origin;
-    if (origin.status === "unchanged" || origin.status === "modified") {
-      const i = baseIndexOf(origin.fromId);
+    const i = aligned[j];
+    if (i !== undefined) {
       const bb = baseBlocks[i];
       if (bb === undefined) return;
       carriedToProposed.set(i, j);
-      // "unchanged" means the PLAIN text matched — the right identity for
-      // anchors, but not proof the bytes did. A formatting-only edit
-      // (`**bold**` → `*bold*`, a reflowed soft wrap) must still be a
-      // reviewable hunk, so compare the source slices.
+      // Alignment pairs blocks by whitespace-normalized PLAIN text (the
+      // exact tier) or token similarity (the replace tier) — not proof
+      // the bytes matched. A formatting-only edit (`**bold**` → `*bold*`,
+      // a reflowed soft wrap) must still be a reviewable hunk, so compare
+      // the source slices.
       const baseText = base.slice(bb.sourceStart, bb.sourceEnd);
       if (baseText !== proposedText) {
         hunks.push({
