@@ -28,6 +28,7 @@ import {
   isCreateProposal,
   type ProposalOutcome,
 } from "../../store/domain/suggestion";
+import { markdownTooLarge } from "../../util";
 import {
   type CommandOutcome,
   commandOutcome,
@@ -126,7 +127,7 @@ export type CreateSuggestionInput = Readonly<{
 
 export type CreateSuggestionResult = Readonly<
   | { ok: true; suggestionId: number; hunkCount: number }
-  | { ok: false; reason: "missing" | "no-change" }
+  | { ok: false; reason: "missing" | "no-change" | "too-large" }
   | { ok: false; reason: "conflict"; currentVersion: number }
 >;
 
@@ -137,6 +138,12 @@ export async function createSuggestionCommand(
   ctx: ProjectCommandContext,
   input: CreateSuggestionInput,
 ): Promise<CommandOutcome<CreateSuggestionResult>> {
+  // The proposal body is stored verbatim and becomes the document on a
+  // full-acceptance apply, so it is bound by the same byte cap as a save
+  // (MAX_MARKDOWN_BYTES — the DO SQLite per-value limit rationale).
+  if (markdownTooLarge(input.proposedMarkdown)) {
+    return commandOutcome({ ok: false, reason: "too-large" });
+  }
   const head = await ctx.u.docs.find(input.slug);
   if (head === undefined) {
     return commandOutcome({ ok: false, reason: "missing" });
@@ -208,6 +215,8 @@ export type CreateDocProposalResult = Readonly<
   // 403 — deliberate, so an agent can pick another identifier.
   | { ok: false; reason: "taken" }
   | { ok: false; reason: "invalid" }
+  // The proposed body exceeds MAX_MARKDOWN_BYTES (see createSuggestion).
+  | { ok: false; reason: "too-large" }
 >;
 
 // The MCP-facing subset of a create-proposal: identity + body only. The DO
@@ -225,6 +234,11 @@ export async function createDocProposalCommand(
   ctx: ProjectCommandContext,
   input: CreateDocProposalInput,
 ): Promise<CommandOutcome<CreateDocProposalResult>> {
+  // Stored verbatim and materialized wholesale on apply — same byte cap
+  // as createSuggestion / saveDocument.
+  if (markdownTooLarge(input.proposedMarkdown)) {
+    return commandOutcome({ ok: false, reason: "too-large" });
+  }
   const segments = input.path === undefined ? [] : pathSegments(input.path);
   const path = segments.length === 0 ? undefined : segments.join("/");
   if (input.slug === undefined && path === undefined) {
@@ -519,6 +533,12 @@ export type ApplySuggestionResult = Readonly<
   | { ok: true; docVersion: number }
   | { ok: false; reason: "missing" | "not-open" | "nothing-accepted" }
   | { ok: false; reason: "stale"; currentVersion: number }
+  // A partial acceptance splices accepted hunks into the base, and the
+  // result can exceed MAX_MARKDOWN_BYTES even when the base and the
+  // proposal are each under it. The DO maps the save-path sentinel to
+  // this reason (full acceptance stores the already-capped proposal
+  // verbatim, so it can never hit this).
+  | { ok: false; reason: "too-large" }
 >;
 
 type ApplySuggestionCommandResult = Readonly<

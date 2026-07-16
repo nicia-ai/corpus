@@ -6,6 +6,7 @@ import {
   commonRoot,
   placeEntries,
 } from "../src/lib/upload/collect";
+import { MAX_MARKDOWN_BYTES } from "../src/util";
 
 function zipFile(entries: Record<string, string>, name = "docs.zip"): File {
   const bytes = zipSync(
@@ -26,6 +27,17 @@ describe("collectFromFiles — loose files", () => {
     expect(r.files.map((f) => f.path).sort()).toEqual(["a.md", "notes.txt"]);
     expect(r.skipped).toEqual([
       { path: "logo.png", reason: "unsupported file type" },
+    ]);
+  });
+
+  it("skips a text file over the markdown byte cap with a per-file reason", async () => {
+    const r = await collectFromFiles([
+      new File(["x".repeat(MAX_MARKDOWN_BYTES + 1)], "huge.md"),
+      new File(["# ok"], "ok.md"),
+    ]);
+    expect(r.files.map((f) => f.path)).toEqual(["ok.md"]);
+    expect(r.skipped).toEqual([
+      { path: "huge.md", reason: "over the 1,000,000-byte document limit" },
     ]);
   });
 });

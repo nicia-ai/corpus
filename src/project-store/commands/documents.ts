@@ -24,6 +24,7 @@ import {
 import { deriveSearchText } from "../../store/domain/search";
 import { nextVersion } from "../../store/domain/versioning";
 import { documentVersion } from "../../store/domain/versions";
+import { markdownTooLarge } from "../../util";
 import type {
   CommandOutcome,
   DomainChange,
@@ -60,6 +61,19 @@ export class FilenameCollision extends Error {
   }
 }
 
+// Same sentinel pattern again: markdown over MAX_MARKDOWN_BYTES. The DO
+// boundary maps it to a structured result before any transport sees it.
+// Enforced HERE — the single creation chokepoint every write funnels
+// through — because DO SQLite has a hard ~2MB per-value limit; without
+// this guard an oversized blob dies mid-transaction as an opaque
+// storage-layer error.
+export class MarkdownTooLarge extends Error {
+  constructor() {
+    super("markdown too large");
+    this.name = "MarkdownTooLarge";
+  }
+}
+
 export type SaveDocumentCommandInput = Readonly<{
   slug: DocumentSlug;
   markdown: string;
@@ -88,6 +102,7 @@ export async function saveDocumentCommand(
   ctx: ProjectCommandContext,
   input: SaveDocumentCommandInput,
 ): Promise<CommandOutcome<SaveDocumentCommandResult>> {
+  if (markdownTooLarge(input.markdown)) throw new MarkdownTooLarge();
   const contentHash = await ctx.hash(input.markdown);
   const head = await ctx.u.docs.find(input.slug);
   const filename =

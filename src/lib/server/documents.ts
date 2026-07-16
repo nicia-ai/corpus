@@ -13,7 +13,12 @@ import { projectMiddleware } from "@/lib/middleware";
 import { changedBy, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
 import { parseFrontmatter } from "@/store/domain/frontmatter";
-import { compact, utf8Bytes } from "@/util";
+import {
+  compact,
+  MARKDOWN_TOO_LARGE_MESSAGE,
+  markdownTooLarge,
+  utf8Bytes,
+} from "@/util";
 
 // Plain, JSON-serializable shapes returned to loaders/components. Durable
 // Object RPC returns carry non-serializable branding, so every handler
@@ -159,6 +164,9 @@ export const saveDocument = createServerFn({ method: "POST" })
     z.object({
       slug: z.string().min(1),
       title: z.string().optional(),
+      // Size rule lives in the handler, NOT here: a validator failure
+      // serializes Zod issues into a raw Error the form surfaces verbatim,
+      // while the handler throws a clean ValidationError.
       markdown: z.string(),
       // Basename incl. extension. Only meaningful on create (clientVersion:
       // 0) — an existing document keeps its filename via renameFilename.
@@ -173,6 +181,11 @@ export const saveDocument = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }): Promise<SaveResult> => {
+    // Exact early refusal (UTF-8 bytes, unlike the length-only Zod gate)
+    // with the friendly message; the DO byte check remains the authority.
+    if (markdownTooLarge(data.markdown)) {
+      throw new ValidationError(MARKDOWN_TOO_LARGE_MESSAGE);
+    }
     const fm = parseFrontmatter(data.markdown);
     if (!fm.ok) {
       throw new ValidationError(`invalid YAML frontmatter: ${fm.error}`);
@@ -203,6 +216,9 @@ export const saveDocument = createServerFn({ method: "POST" })
     if ("segmentCollision" in r) {
       return { ok: false, segmentCollision: true };
     }
+    // The DO's authoritative UTF-8 byte cap — same boundary treatment as
+    // the frontmatter check above (validation kind → HTTP 400).
+    if ("tooLarge" in r) throw new ValidationError(MARKDOWN_TOO_LARGE_MESSAGE);
     return { ok: false, rolledBack: true };
   });
 

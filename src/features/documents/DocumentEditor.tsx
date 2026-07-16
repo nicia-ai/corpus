@@ -1062,6 +1062,8 @@ function suggestionErrorMessage(
   if (reason === "no-change") return noChangeMessage;
   if (reason === "conflict")
     return "The document changed — reload and try again.";
+  if (reason === "too-large")
+    return "The proposed document is over the 1 MB markdown limit.";
   return "Could not create the suggestion.";
 }
 

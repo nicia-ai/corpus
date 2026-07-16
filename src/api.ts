@@ -32,7 +32,7 @@ import {
 } from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
 import { scopedExecutor } from "./scoped-executor";
-import { compact } from "./util";
+import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "./util";
 
 // Shared MCP responder: parse the JSON-RPC envelope (the trust
 // boundary), preflight the bound Collection, and dispatch through the
@@ -191,10 +191,22 @@ async function verifyOAuthJwt(
 }
 
 const DocPushBody = z.object({
-  markdown: z.string(),
+  // First-gate length cap; the DO's UTF-8 byte check is the authority
+  // (multi-byte text can pass this and still come back `tooLarge`).
+  markdown: markdownBodyZ,
   clientVersion: z.number().int().nonnegative(),
   title: z.string().optional(),
 });
+
+// True when the push body failed ONLY because the markdown blew the
+// length gate — classified on Zod's structured issue code (never a
+// message match) so the caller gets a 413 naming the limit rather than
+// a generic "invalid body" 400.
+function markdownTooBig(error: z.ZodError): boolean {
+  return error.issues.some(
+    (issue) => issue.code === "too_big" && issue.path[0] === "markdown",
+  );
+}
 
 type ApiKeyScope = Readonly<{
   store: ReturnType<typeof storeFor>;
@@ -302,7 +314,11 @@ export const api = new Hono<{ Bindings: Env }>()
     if (scope instanceof Response) return scope;
     const slug = c.req.param("slug");
     const parsed = DocPushBody.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.json({ error: "invalid body" }, 400);
+    if (!parsed.success) {
+      return markdownTooBig(parsed.error)
+        ? c.json({ error: MARKDOWN_TOO_LARGE_MESSAGE }, 413)
+        : c.json({ error: "invalid body" }, 400);
+    }
     const save = compact({
       slug: asDocumentSlug(slug),
       markdown: parsed.data.markdown,
@@ -325,6 +341,11 @@ export const api = new Hono<{ Bindings: Env }>()
         );
     if (r.ok) return c.json({ ok: true, docVersion: r.docVersion });
     if ("forbidden" in r) return c.json({ error: "forbidden" }, 403);
+    // The DO's authoritative UTF-8 byte cap (reachable when multi-byte
+    // markdown passes the length gate above).
+    if ("tooLarge" in r) {
+      return c.json({ error: MARKDOWN_TOO_LARGE_MESSAGE }, 413);
+    }
     if ("conflict" in r) {
       return c.json(
         { ok: false, conflict: true, currentVersion: r.currentVersion },
