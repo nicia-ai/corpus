@@ -4,6 +4,7 @@ import { z } from "zod";
 import { connectControlDb } from "@/control/db";
 import { entitlementsOf } from "@/control/entitlements";
 import { resolveAuthorLabels } from "@/control/users";
+import { ValidationError } from "@/errors";
 import { asDocumentSlug } from "@/ids";
 import type { CallerChannel } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
@@ -18,7 +19,12 @@ import type {
   CreateSuggestionResult,
   SuggestionView,
 } from "@/project-store/commands/suggestions";
-import { compact, markdownBodyZ, utf8Bytes } from "@/util";
+import {
+  compact,
+  MARKDOWN_TOO_LARGE_MESSAGE,
+  markdownTooLarge,
+  utf8Bytes,
+} from "@/util";
 
 const ReviewDecisionInput = z.object({
   suggestionId: z.number().int(),
@@ -63,13 +69,19 @@ export const createSuggestion = createServerFn({ method: "POST" })
   .validator(
     z.object({
       slug: z.string().min(1),
-      // First-gate length cap; the DO command's UTF-8 byte check is the
-      // authority and reports `reason: "too-large"`.
-      proposedMarkdown: markdownBodyZ,
+      // Size rule lives in the handler, NOT here: a validator failure
+      // serializes Zod issues into a raw Error the form surfaces verbatim,
+      // while the handler throws a clean ValidationError.
+      proposedMarkdown: z.string(),
       clientVersion: z.number().int().nonnegative(),
     }),
   )
   .handler(async ({ data, context }): Promise<CreateSuggestionResult> => {
+    // Exact early refusal (UTF-8 bytes) with the friendly message; the DO
+    // command's byte check remains the authority (`reason: "too-large"`).
+    if (markdownTooLarge(data.proposedMarkdown)) {
+      throw new ValidationError(MARKDOWN_TOO_LARGE_MESSAGE);
+    }
     const c = srv(context);
     return storeOf(c).createSuggestion({
       slug: asDocumentSlug(data.slug),

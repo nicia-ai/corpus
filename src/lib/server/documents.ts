@@ -16,7 +16,7 @@ import { parseFrontmatter } from "@/store/domain/frontmatter";
 import {
   compact,
   MARKDOWN_TOO_LARGE_MESSAGE,
-  markdownBodyZ,
+  markdownTooLarge,
   utf8Bytes,
 } from "@/util";
 
@@ -164,9 +164,10 @@ export const saveDocument = createServerFn({ method: "POST" })
     z.object({
       slug: z.string().min(1),
       title: z.string().optional(),
-      // First-gate length cap; the DO's UTF-8 byte check is the authority
-      // (multi-byte text can pass this and still come back `tooLarge`).
-      markdown: markdownBodyZ,
+      // Size rule lives in the handler, NOT here: a validator failure
+      // serializes Zod issues into a raw Error the form surfaces verbatim,
+      // while the handler throws a clean ValidationError.
+      markdown: z.string(),
       // Basename incl. extension. Only meaningful on create (clientVersion:
       // 0) — an existing document keeps its filename via renameFilename.
       // Same basename rule as renameFilename: no path separator.
@@ -180,6 +181,11 @@ export const saveDocument = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }): Promise<SaveResult> => {
+    // Exact early refusal (UTF-8 bytes, unlike the length-only Zod gate)
+    // with the friendly message; the DO byte check remains the authority.
+    if (markdownTooLarge(data.markdown)) {
+      throw new ValidationError(MARKDOWN_TOO_LARGE_MESSAGE);
+    }
     const fm = parseFrontmatter(data.markdown);
     if (!fm.ok) {
       throw new ValidationError(`invalid YAML frontmatter: ${fm.error}`);
