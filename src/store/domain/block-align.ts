@@ -33,9 +33,11 @@ import {
 //      edit classifies as ONE replace hunk exactly as it did before.
 //
 // Pure, zero-IO. The gap DPs are O(n·m) over GAP sizes, which patience
-// keeps small for real documents; a pathological gap that would exceed
-// MAX_DP_CELLS is skipped (its blocks fall out as delete + insert) and
-// byte fidelity is left to the diff's self-verification.
+// keeps small for real documents; all DPs in one alignment draw from a
+// SINGLE shared cell budget (many legal-sized gaps cannot multiply into
+// seconds of work), and a gap the remaining budget cannot afford is
+// skipped — its blocks fall out as delete + insert and byte fidelity is
+// left to the diff's self-verification.
 
 // For each proposed block index: the base block index shown at that
 // position, or undefined for an insertion. Defined values are strictly
@@ -44,12 +46,28 @@ import {
 export type BlockAlignment = readonly (number | undefined)[];
 
 // Empirically calibrated (2026-07-16): the gap DPs cost ~1.2µs/cell on
-// dev hardware, so 160k cells (a 400×400-block gap between patience
-// anchors) bounds any single DP at ~200ms — and real gaps are tiny, so
-// the practical cost is milliseconds. The previous 4M ceiling admitted
-// ~5s pathological diffs on a serialized DO. Beyond the ceiling a gap is
-// left unpaired (delete + insert) and self-verification decides.
+// dev hardware, so 160k cells bounds the ENTIRE alignment's DP work at
+// ~200ms — and real gaps are tiny, so the practical cost is
+// milliseconds. The budget is request-scoped and shared across both DP
+// passes (exact-match LCS and similarity pairing): a per-gap ceiling
+// would let twenty legal-sized gaps multiply into seconds on a
+// serialized DO. A gap the remaining budget cannot afford is left
+// unpaired (delete + insert) and self-verification decides.
 const MAX_DP_CELLS = 160_000;
+
+// Remaining-cell pool for one alignBlocks call, closed over so callees
+// just ask "may I spend n·m cells?". A DP that does not fit runs nothing
+// and charges nothing (later, smaller gaps may still fit).
+type TakeCells = (cells: number) => boolean;
+
+function cellBudget(total: number): TakeCells {
+  let remaining = total;
+  return (cells) => {
+    if (cells > remaining) return false;
+    remaining -= cells;
+    return true;
+  };
+}
 
 export function alignBlocks(
   input: Readonly<{
@@ -89,7 +107,9 @@ export function alignBlocks(
 
   // Patience skeleton over the trimmed middle, then exact-match LCS
   // inside each gap between consecutive patience anchors (the final
-  // iteration, against the trim boundary, covers the tail gap).
+  // iteration, against the trim boundary, covers the tail gap). One cell
+  // budget spans every DP in this call.
+  const budget = cellBudget(MAX_DP_CELLS);
   const anchors = patienceAnchors({ baseSigs, propSigs, lo, baseHi, propHi });
   let gapBaseLo = lo;
   let gapPropLo = lo;
@@ -105,6 +125,7 @@ export function alignBlocks(
       baseHi: bi,
       propLo: gapPropLo,
       propHi: pj,
+      budget,
     })) {
       aligned[j] = i;
     }
@@ -113,7 +134,7 @@ export function alignBlocks(
     gapPropLo = pj + 1;
   }
 
-  pairFacingLeftovers({ base, proposed, aligned });
+  pairFacingLeftovers({ base, proposed, aligned, budget });
   return aligned;
 }
 
@@ -202,12 +223,23 @@ function lcsAnchors(
     baseHi: number;
     propLo: number;
     propHi: number;
+    budget: TakeCells;
   }>,
 ): readonly (readonly [number, number])[] {
-  const { baseSigs, propSigs, baseLo, baseHi, propLo, propHi } = input;
+  const { baseSigs, propSigs, baseLo, baseHi, propLo, propHi, budget } = input;
   const n = baseHi - baseLo;
   const m = propHi - propLo;
-  if (n <= 0 || m <= 0 || n * m > MAX_DP_CELLS) return [];
+  if (n <= 0 || m <= 0) return [];
+  // O(n+m) pre-check: a gap with NO common signature has an empty LCS —
+  // skip without spending budget (the usual shape of an all-edited gap,
+  // whose budget the similarity pass actually needs).
+  const gapSigs = new Set<string>();
+  for (let i = baseLo; i < baseHi; i += 1) gapSigs.add(baseSigs[i] ?? "");
+  let anyCommon = false;
+  for (let j = propLo; j < propHi && !anyCommon; j += 1) {
+    anyCommon = gapSigs.has(propSigs[j] ?? "");
+  }
+  if (!anyCommon || !budget(n * m)) return [];
   // Flattened (n+1)×(m+1) table; dp[x][y] = LCS length of
   // baseSigs[baseLo+x..baseHi) vs propSigs[propLo+y..propHi).
   // Suffix-indexed so the pair walk runs forward through both sequences.
@@ -248,9 +280,10 @@ function pairFacingLeftovers(
     base: readonly NextBlock[];
     proposed: readonly NextBlock[];
     aligned: (number | undefined)[];
+    budget: TakeCells;
   }>,
 ): void {
-  const { base, proposed, aligned } = input;
+  const { base, proposed, aligned, budget } = input;
   const idf = computeIdf(base, proposed);
   let prevBase = -1;
   let j = 0;
@@ -281,6 +314,7 @@ function pairFacingLeftovers(
       baseEnd: nextBase,
       propStart: j,
       propEnd: jEnd,
+      budget,
     })) {
       aligned[pj] = bi;
     }
@@ -301,12 +335,22 @@ function bestFacingPairs(
     baseEnd: number;
     propStart: number;
     propEnd: number;
+    budget: TakeCells;
   }>,
 ): readonly (readonly [number, number])[] {
-  const { base, proposed, idf, baseStart, baseEnd, propStart, propEnd } = input;
+  const {
+    base,
+    proposed,
+    idf,
+    baseStart,
+    baseEnd,
+    propStart,
+    propEnd,
+    budget,
+  } = input;
   const n = baseEnd - baseStart;
   const m = propEnd - propStart;
-  if (n <= 0 || m <= 0 || n * m > MAX_DP_CELLS) return [];
+  if (n <= 0 || m <= 0 || !budget(n * m)) return [];
   const score = (x: number, y: number): number => {
     const b = base[baseStart + x];
     const p = proposed[propStart + y];
