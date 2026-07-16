@@ -76,6 +76,12 @@ export const ledgerMigrations: LedgerMigrationBundle = {
         "when": 1784225439559,
         "tag": "0009_first_ultimates",
         "breakpoints": true
+      },
+      {
+        "idx": 10,
+        "when": 1784226035280,
+        "tag": "0010_dark_tinkerer",
+        "breakpoints": true
       }
     ]
   },
@@ -89,6 +95,7 @@ export const ledgerMigrations: LedgerMigrationBundle = {
     "m0006": "CREATE TABLE `suggestion_message` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`suggestion_id` integer NOT NULL,\n\t`body` text NOT NULL,\n\t`created_by` text NOT NULL,\n\t`channel` text NOT NULL,\n\t`created_at` text NOT NULL\n);\n--> statement-breakpoint\nCREATE INDEX `suggestion_message_suggestion` ON `suggestion_message` (`suggestion_id`);",
     "m0007": "ALTER TABLE `suggestion_hunk` ADD `lead_sep` text DEFAULT '' NOT NULL;--> statement-breakpoint\nALTER TABLE `suggestion_hunk` ADD `trail_sep` text DEFAULT '' NOT NULL;",
     "m0008": "ALTER TABLE `suggestion_hunk` ADD `prop_start` integer DEFAULT 0 NOT NULL;--> statement-breakpoint\nALTER TABLE `suggestion_hunk` ADD `prop_end` integer DEFAULT 0 NOT NULL;",
-    "m0009": "ALTER TABLE `suggestion_hunk` DROP COLUMN `lead_sep`;--> statement-breakpoint\nALTER TABLE `suggestion_hunk` DROP COLUMN `trail_sep`;"
+    "m0009": "ALTER TABLE `suggestion_hunk` DROP COLUMN `lead_sep`;--> statement-breakpoint\nALTER TABLE `suggestion_hunk` DROP COLUMN `trail_sep`;",
+    "m0010": "ALTER TABLE `suggestion` ADD `granularity` text DEFAULT 'block' NOT NULL;"
   }
 };

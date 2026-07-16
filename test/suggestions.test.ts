@@ -32,9 +32,36 @@ describe("suggestions (DO + D1 integration)", () => {
     const list = await store.listSuggestions(slug);
     expect(list).toHaveLength(1);
     expect(list[0]?.status).toBe("open");
+    expect(list[0]?.granularity).toBe("block");
     expect(list[0]?.hunks).toHaveLength(1);
     expect(list[0]?.hunks[0]?.op).toBe("insert");
     expect(list[0]?.hunks[0]?.decision).toBe("pending");
+  });
+
+  it("records whole-document granularity when the diff degrades", async () => {
+    const store = freshStore("sug");
+    const slug = docSlug("doc-degrade");
+    await store.saveDocument({
+      slug,
+      markdown: "- alpha item\n\n- beta item",
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+
+    // A spacing-only change (both blocks byte-identical) is invisible to
+    // the block lens, so the diff degrades to one whole-document hunk —
+    // and the row records that fact.
+    const r = await store.createSuggestion({
+      slug,
+      proposedMarkdown: "- alpha item\n- beta item",
+      clientVersion: 1,
+      createdBy: "bob",
+    });
+    expect(r).toMatchObject({ ok: true, hunkCount: 1 });
+
+    const list = await store.listSuggestions(slug);
+    expect(list[0]?.granularity).toBe("whole-document");
+    expect(list[0]?.hunks[0]?.op).toBe("replace");
   });
 
   it("accepts a hunk and applies it as a new version", async () => {

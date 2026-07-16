@@ -12,7 +12,7 @@ import {
 
 import { CALLER_CHANNELS } from "./ids";
 import type { BlockKind } from "./store/domain/block-match";
-import { HUNK_OPS } from "./store/domain/suggestion";
+import { HUNK_OPS, SUGGESTION_GRANULARITIES } from "./store/domain/suggestion";
 
 // Content-addressed blob store, co-located in the DO's SQLite (NOT R2):
 // keeping it here preserves the single atomic tx (blob + DocumentVersion
@@ -190,6 +190,15 @@ export const suggestion = sqliteTable(
       .notNull()
       .default("web"),
     createdAt: text("created_at").notNull(),
+    // How diffSuggestion represented this proposal — `block` (granular
+    // per-hunk review) or `whole-document` (the self-verification failed
+    // and the diff degraded to one all-or-nothing hunk). Recorded at
+    // create time so degradation frequency is observable; semantics on
+    // SUGGESTION_GRANULARITIES in src/store/domain/suggestion.ts. The
+    // default covers the ADD COLUMN backfill and hunkless create-proposals.
+    granularity: text("granularity", { enum: SUGGESTION_GRANULARITIES })
+      .notNull()
+      .default("block"),
     resolvedBy: text("resolved_by"),
     resolvedAt: text("resolved_at"),
     // Human-facing outcome metadata returned to the originating agent.

@@ -22,11 +22,12 @@ import {
 import {
   applyHunks,
   CREATE_PROPOSAL_BASE_VERSION,
-  diffToHunks,
+  diffSuggestion,
   type Hunk,
   type HunkOp,
   isCreateProposal,
   type ProposalOutcome,
+  type SuggestionGranularity,
 } from "../../store/domain/suggestion";
 import { markdownTooLarge } from "../../util";
 import {
@@ -64,6 +65,9 @@ export type SuggestionView = Readonly<{
   id: number;
   status: SuggestionStatus;
   baseDocVersion: number;
+  // Whether this proposal reviews per-block or as one whole-document hunk
+  // (the diff degraded) — see SUGGESTION_GRANULARITIES in the domain.
+  granularity: SuggestionGranularity;
   proposedMarkdown: string;
   createdBy: string;
   // How the proposal arrived (web / mcp / cli) — drives the "via" label
@@ -151,7 +155,7 @@ export async function createSuggestionCommand(
     throw new ConflictError(head.docVersion);
   }
   const base = (await ctx.u.blobs.get(head.contentHash)) ?? "";
-  const hunks = diffToHunks(base, input.proposedMarkdown);
+  const { hunks, granularity } = diffSuggestion(base, input.proposedMarkdown);
   if (hunks.length === 0) {
     return commandOutcome({ ok: false, reason: "no-change" });
   }
@@ -167,6 +171,8 @@ export async function createSuggestionCommand(
     // runtime default.
     channel: input.channel ?? "web",
     createdAt: ctx.now,
+    // Observability: whether the diff degraded to the whole-document hunk.
+    granularity,
   });
   await ctx.u.suggestions.addHunks(
     hunks.map((h) => ({

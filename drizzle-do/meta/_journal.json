@@ -71,6 +71,13 @@
       "when": 1784225439559,
       "tag": "0009_first_ultimates",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1784226035280,
+      "tag": "0010_dark_tinkerer",
+      "breakpoints": true
     }
   ]
 }
