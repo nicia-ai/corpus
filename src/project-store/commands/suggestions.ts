@@ -110,9 +110,6 @@ const toHunk = (h: SuggestionHunkRow): Hunk => ({
   propStart: h.propStart,
   propEnd: h.propEnd,
   proposedText: h.proposedText,
-  // Separator semantics live on the Hunk type (src/store/domain/suggestion.ts).
-  leadSep: h.leadSep,
-  trailSep: h.trailSep,
 });
 
 // — Create ———————————————————————————————————————————————————————————
@@ -181,8 +178,6 @@ export async function createSuggestionCommand(
       propStart: h.propStart,
       propEnd: h.propEnd,
       proposedText: h.proposedText,
-      leadSep: h.leadSep,
-      trailSep: h.trailSep,
       decision: "pending",
     })),
   );
@@ -578,22 +573,18 @@ export async function applySuggestionCommand(
     });
   }
   const allHunks = await ctx.u.suggestions.hunksFor(s.id);
-  const accepted = allHunks.filter((h) => h.decision === "accepted");
-  if (accepted.length === 0) {
+  if (!allHunks.some((h) => h.decision === "accepted")) {
     return commandOutcome({ ok: false, reason: "nothing-accepted" });
   }
-  // Every hunk accepted ⇒ the new version is the stored proposal VERBATIM.
-  // For rows created since diffToHunks became self-verifying the splice
-  // would produce the same bytes; this branch exists for LEGACY rows (empty
-  // separator columns, pre-0007) whose splice re-synthesizes joins — and it
-  // skips the base blob read on the most common apply outcome.
-  const newMarkdown =
-    accepted.length === allHunks.length
-      ? s.proposedMarkdown
-      : applyHunks(
-          (await ctx.u.blobs.get(head.contentHash)) ?? "",
-          accepted.map(toHunk),
-        );
+  // Rejected-revert: the new version is the stored proposal with every
+  // non-accepted hunk (rejected or still pending) reverted to base bytes.
+  // All-accepted is the degenerate case — zero reverts reproduce the
+  // proposal verbatim by construction, no special case needed.
+  const newMarkdown = applyHunks({
+    base: (await ctx.u.blobs.get(head.contentHash)) ?? "",
+    proposed: s.proposedMarkdown,
+    rejected: allHunks.filter((h) => h.decision !== "accepted").map(toHunk),
+  });
   const saved = await saveDocumentCommand(ctx, {
     slug,
     markdown: newMarkdown,

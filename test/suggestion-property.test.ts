@@ -9,6 +9,74 @@ import {
 
 const PROPERTY_RUNS = { numRuns: 300, seed: 20260607 } as const;
 
+// — Reference model ——————————————————————————————————————————————————
+//
+// THE executable spec for what a mixed decision set means (stage-1 of the
+// rejected-revert reformulation): the output is the PROPOSED document with
+// every rejected hunk reverted —
+//   rejected replace — the base bytes come back in the proposed block's
+//     place; the separators around it stay as the proposer wrote them.
+//   rejected insert  — the inserted bytes vanish along with exactly ONE
+//     junction separator: the leading one when the walk still has one to
+//     consume before the block, otherwise the trailing one (the document
+//     head, or stacked directly on another reverted hunk that already
+//     consumed the lead).
+//   rejected delete  — the base block bytes re-enter at the junction,
+//     attached to the survivor before them by their base-side leading
+//     separator; at the document head (no survivor) they carry their base
+//     trailing separator instead, and a run of head deletes at the same
+//     junction chains that way.
+// Spacing under a mixed decision set is PROPOSED-authoritative: bytes
+// between surviving blocks are whatever the proposer wrote, never
+// re-synthesized from the base. `applyHunks` must match this model exactly.
+function referenceApply(
+  base: string,
+  proposed: string,
+  rejected: readonly Hunk[],
+): string {
+  const tailWs = (s: string): string => /\s*$/.exec(s)?.[0] ?? "";
+  const headWs = (s: string): string => /^\s*/.exec(s)?.[0] ?? "";
+  const ordered = [...rejected].sort(
+    (a, b) =>
+      a.propStart - b.propStart ||
+      a.propEnd - b.propEnd ||
+      a.ordinal - b.ordinal,
+  );
+  let out = "";
+  let cursor = 0;
+  let headRunAt = -1;
+  for (const h of ordered) {
+    const gap = proposed.slice(cursor, h.propStart);
+    cursor = h.propEnd;
+    const contentBefore = /\S/.test(out + gap);
+    if (h.op === "delete") {
+      const bytes = base.slice(h.baseStart, h.baseEnd);
+      if (contentBefore && headRunAt !== h.propStart) {
+        out += gap + tailWs(base.slice(0, h.baseStart)) + bytes;
+      } else {
+        out += gap + bytes + headWs(base.slice(h.baseEnd));
+        headRunAt = h.propStart;
+      }
+      continue;
+    }
+    headRunAt = -1;
+    if (h.op === "insert") {
+      const lead = tailWs(gap);
+      if (lead === "") {
+        out += gap;
+        cursor += headWs(proposed.slice(cursor)).length;
+      } else {
+        out += gap.slice(0, gap.length - lead.length);
+      }
+      continue;
+    }
+    out += gap + base.slice(h.baseStart, h.baseEnd); // rejected replace
+  }
+  return out + proposed.slice(cursor);
+}
+
+// — Generators ———————————————————————————————————————————————————————
+
 type RenderKind = "paragraph" | "heading" | "list-item" | "code";
 
 type BlockSpec = Readonly<{
@@ -147,64 +215,145 @@ function renderBlock(block: BlockSpec): string {
   }
 }
 
-function subsetByMask(
+// Arbitrary markdown-ish byte pairs — NOT restricted to the structured
+// generator's class — for the universal-contract and chaos-differential
+// properties.
+const chaosDocArb = fc
+  .array(
+    fc.record({
+      body: fc.oneof(
+        fc.constantFrom(
+          "plain paragraph text",
+          "## a heading",
+          "- list item one",
+          "- list item two",
+          "> a quote block",
+          "```txt\ncode body\n```",
+          "| a | b |\n| - | - |\n| 1 | 2 |",
+          "---",
+          "[ref]: https://example.com",
+          "**bold** and *italic* and [link][ref]",
+        ),
+        fc.string({ minLength: 1, maxLength: 24 }),
+      ),
+      sep: fc.constantFrom("\n", "\n\n", "\n\n\n", "\r\n\r\n"),
+    }),
+    { minLength: 0, maxLength: 8 },
+  )
+  .map((parts) => {
+    let doc = "";
+    parts.forEach((p, i) => {
+      doc += (i > 0 ? p.sep : "") + p.body;
+    });
+    return doc;
+  });
+// The edge decoration is independent of the doc — tuple, not chain
+// (shrinks better).
+const chaosWithEdgeArb = fc
+  .tuple(
+    chaosDocArb,
+    fc.constantFrom("", "\n", "\n\n", "---\nkey: value\n---\n\n"),
+  )
+  .map(([doc, edge]) => (edge.startsWith("---") ? edge + doc : doc + edge));
+
+const decisionMaskArb = fc.array(fc.boolean(), { maxLength: 24 });
+
+// mask[i % mask.length] decides hunk i; an empty mask accepts nothing.
+function splitByMask(
   hunks: readonly Hunk[],
   mask: readonly boolean[],
-): readonly Hunk[] {
-  return hunks.filter((_, index) => mask[index % mask.length] ?? false);
+): Readonly<{ accepted: readonly Hunk[]; rejected: readonly Hunk[] }> {
+  const acceptedAt = (i: number): boolean =>
+    mask.length > 0 && (mask[i % mask.length] ?? false);
+  return {
+    accepted: hunks.filter((_, i) => acceptedAt(i)),
+    rejected: hunks.filter((_, i) => !acceptedAt(i)),
+  };
 }
+
+// — Properties ———————————————————————————————————————————————————————
 
 describe("suggestion hunks (property)", () => {
   it("accept-all reproduces the proposed markdown byte-for-byte", () => {
     fc.assert(
       fc.property(scenarioArb, ({ base, proposed }) => {
+        // Zero reverts ⇒ the proposal verbatim, by construction.
+        expect(applyHunks({ base, proposed, rejected: [] })).toBe(proposed);
+      }),
+      PROPERTY_RUNS,
+    );
+  });
+
+  it("reject-all reconstructs the base byte-for-byte", () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ base, proposed }) => {
         const hunks = diffToHunks(base, proposed);
-        expect(applyHunks(base, hunks)).toBe(proposed);
+        expect(applyHunks({ base, proposed, rejected: hunks })).toBe(base);
       }),
       PROPERTY_RUNS,
     );
   });
 
-  it("apply-none leaves a normalized suggestion document unchanged", () => {
+  it("any decision mix is well-formed, with content fidelity per hunk", () => {
     fc.assert(
-      fc.property(scenarioArb, ({ base }) => {
-        expect(applyHunks(base, [])).toBe(base);
-      }),
-      PROPERTY_RUNS,
-    );
-  });
+      fc.property(scenarioArb, decisionMaskArb, ({ base, proposed }, mask) => {
+        const hunks = diffToHunks(base, proposed);
+        const { accepted, rejected } = splitByMask(hunks, mask);
 
-  it("any accepted subset is well-formed, with empty and full subsets pinned", () => {
-    fc.assert(
-      fc.property(
-        scenarioArb,
-        fc.array(fc.boolean(), { maxLength: 24 }),
-        ({ base, proposed }, mask) => {
-          const hunks = diffToHunks(base, proposed);
-          const subset = subsetByMask(hunks, mask);
-
-          const applied = applyHunks(base, subset);
-          expect(applyHunks(base, [])).toBe(base);
-          expect(applyHunks(base, hunks)).toBe(proposed);
-          // Content fidelity under ANY decision mix: every accepted
-          // insert/replace body lands verbatim; an accepted delete removes
-          // its block; a skipped delete keeps it (block texts are unique by
-          // construction, so containment is a faithful check).
-          const acceptedSet = new Set(subset);
-          for (const h of hunks) {
-            if (h.op !== "delete") {
-              if (acceptedSet.has(h)) {
-                expect(applied).toContain(h.proposedText);
-              }
+        const applied = applyHunks({ base, proposed, rejected });
+        // Content fidelity under ANY decision mix: every accepted
+        // insert/replace body lands verbatim; an accepted delete removes
+        // its block; a rejected delete keeps it (block texts are unique by
+        // construction, so containment is a faithful check).
+        const acceptedSet = new Set(accepted);
+        for (const h of hunks) {
+          if (h.op !== "delete") {
+            if (acceptedSet.has(h)) {
+              expect(applied).toContain(h.proposedText);
+            }
+          } else {
+            const blockText = base.slice(h.baseStart, h.baseEnd);
+            if (acceptedSet.has(h)) {
+              expect(applied).not.toContain(blockText);
             } else {
-              const blockText = base.slice(h.baseStart, h.baseEnd);
-              if (acceptedSet.has(h)) {
-                expect(applied).not.toContain(blockText);
-              } else {
-                expect(applied).toContain(blockText);
-              }
+              expect(applied).toContain(blockText);
             }
           }
+        }
+      }),
+      PROPERTY_RUNS,
+    );
+  });
+
+  // The differential property: the implementation equals the reference
+  // model for every decision mask — over the structured generator...
+  it("matches the reference model under any decision mask (structured)", () => {
+    fc.assert(
+      fc.property(scenarioArb, decisionMaskArb, ({ base, proposed }, mask) => {
+        const hunks = diffToHunks(base, proposed);
+        const { rejected } = splitByMask(hunks, mask);
+        expect(applyHunks({ base, proposed, rejected })).toBe(
+          referenceApply(base, proposed, rejected),
+        );
+      }),
+      PROPERTY_RUNS,
+    );
+  });
+
+  // ...and over arbitrary byte pairs (where degradation to the
+  // whole-document hunk must ALSO match the model).
+  it("matches the reference model under any decision mask (chaos)", () => {
+    fc.assert(
+      fc.property(
+        chaosWithEdgeArb,
+        chaosWithEdgeArb,
+        decisionMaskArb,
+        (base, proposed, mask) => {
+          const hunks = diffToHunks(base, proposed);
+          const { rejected } = splitByMask(hunks, mask);
+          expect(applyHunks({ base, proposed, rejected })).toBe(
+            referenceApply(base, proposed, rejected),
+          );
         },
       ),
       PROPERTY_RUNS,
@@ -232,7 +381,9 @@ describe("suggestion hunks (property)", () => {
         const hunks = diffToHunks(base, proposed);
         const reversed = [...hunks].reverse();
 
-        expect(applyHunks(base, reversed)).toBe(applyHunks(base, hunks));
+        expect(applyHunks({ base, proposed, rejected: reversed })).toBe(
+          applyHunks({ base, proposed, rejected: hunks }),
+        );
       }),
       PROPERTY_RUNS,
     );
@@ -248,48 +399,10 @@ describe("suggestion hunks (property)", () => {
   });
 
   // The universal contract — for ARBITRARY markdown-ish byte pairs, not
-  // just the structured generator's class: diffToHunks self-verifies and
-  // degrades to a whole-document hunk when granular hunks can't reproduce
-  // the proposal, so these two lines hold for every input.
-  it("holds the diff contract on chaotic inputs: empty ⟺ identical, apply-all === proposed", () => {
-    const chaosDocArb = fc
-      .array(
-        fc.record({
-          body: fc.oneof(
-            fc.constantFrom(
-              "plain paragraph text",
-              "## a heading",
-              "- list item one",
-              "- list item two",
-              "> a quote block",
-              "```txt\ncode body\n```",
-              "| a | b |\n| - | - |\n| 1 | 2 |",
-              "---",
-              "[ref]: https://example.com",
-              "**bold** and *italic* and [link][ref]",
-            ),
-            fc.string({ minLength: 1, maxLength: 24 }),
-          ),
-          sep: fc.constantFrom("\n", "\n\n", "\n\n\n", "\r\n\r\n"),
-        }),
-        { minLength: 0, maxLength: 8 },
-      )
-      .map((parts) => {
-        let doc = "";
-        parts.forEach((p, i) => {
-          doc += (i > 0 ? p.sep : "") + p.body;
-        });
-        return doc;
-      });
-    // The edge decoration is independent of the doc — tuple, not chain
-    // (shrinks better).
-    const chaosWithEdgeArb = fc
-      .tuple(
-        chaosDocArb,
-        fc.constantFrom("", "\n", "\n\n", "---\nkey: value\n---\n\n"),
-      )
-      .map(([doc, edge]) => (edge.startsWith("---") ? edge + doc : doc + edge));
-
+  // just the structured generator's class: diffToHunks self-verifies (full
+  // rejection must reconstruct the base) and degrades to a whole-document
+  // hunk when granular hunks can't, so these lines hold for every input.
+  it("holds the diff contract on chaotic inputs: empty ⟺ identical, reject-all === base, accept-all === proposed", () => {
     fc.assert(
       fc.property(chaosWithEdgeArb, chaosWithEdgeArb, (base, proposed) => {
         const hunks = diffToHunks(base, proposed);
@@ -297,7 +410,8 @@ describe("suggestion hunks (property)", () => {
           expect(hunks).toEqual([]);
         } else {
           expect(hunks.length).toBeGreaterThan(0);
-          expect(applyHunks(base, hunks)).toBe(proposed);
+          expect(applyHunks({ base, proposed, rejected: hunks })).toBe(base);
+          expect(applyHunks({ base, proposed, rejected: [] })).toBe(proposed);
         }
       }),
       PROPERTY_RUNS,
