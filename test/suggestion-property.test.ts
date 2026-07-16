@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyHunks,
+  diffSuggestion,
   diffToHunks,
   type Hunk,
 } from "../src/store/domain/suggestion";
@@ -89,6 +90,7 @@ type EditOp = Readonly<
   | { kind: "insert"; pos: number; blockKind: RenderKind }
   | { kind: "delete"; pos: number }
   | { kind: "replace"; pos: number; blockKind: RenderKind }
+  | { kind: "move"; from: number; to: number }
 >;
 
 type Scenario = Readonly<{
@@ -114,6 +116,13 @@ const editOpArb: fc.Arbitrary<EditOp> = fc.oneof(
     kind: fc.constant("replace"),
     pos: fc.nat(20),
     blockKind: renderKindArb,
+  }),
+  // Relocation — the class the order-preserving diff renders as an
+  // explicit delete + insert pair (never move-following).
+  fc.record({
+    kind: fc.constant("move"),
+    from: fc.nat(20),
+    to: fc.nat(20),
   }),
 );
 
@@ -161,6 +170,11 @@ function buildScenario(
           kind: op.blockKind,
           revision: current.revision + 1,
         };
+      }
+    } else if (op.kind === "move" && work.length > 1) {
+      const moved = work.splice(op.from % work.length, 1)[0];
+      if (moved !== undefined) {
+        work.splice(op.to % (work.length + 1), 0, moved);
       }
     }
   }
@@ -303,8 +317,11 @@ describe("suggestion hunks (property)", () => {
         const applied = applyHunks({ base, proposed, rejected });
         // Content fidelity under ANY decision mix: every accepted
         // insert/replace body lands verbatim; an accepted delete removes
-        // its block; a rejected delete keeps it (block texts are unique by
-        // construction, so containment is a faithful check).
+        // its block; a rejected delete keeps it (block texts are unique
+        // per block id by construction, so containment is a faithful
+        // check). One carve-out: a MOVE is a delete + insert pair over
+        // the SAME bytes, so an accepted delete only guarantees absence
+        // when no accepted insert/replace reintroduces those bytes.
         const acceptedSet = new Set(accepted);
         for (const h of hunks) {
           if (h.op !== "delete") {
@@ -314,7 +331,12 @@ describe("suggestion hunks (property)", () => {
           } else {
             const blockText = base.slice(h.baseStart, h.baseEnd);
             if (acceptedSet.has(h)) {
-              expect(applied).not.toContain(blockText);
+              const reintroduced = accepted.some(
+                (a) => a.op !== "delete" && a.proposedText.includes(blockText),
+              );
+              if (!reintroduced) {
+                expect(applied).not.toContain(blockText);
+              }
             } else {
               expect(applied).toContain(blockText);
             }
@@ -385,6 +407,39 @@ describe("suggestion hunks (property)", () => {
           applyHunks({ base, proposed, rejected: hunks }),
         );
       }),
+      PROPERTY_RUNS,
+    );
+  });
+
+  // The improvement the order-preserving alignment buys: a relocation in
+  // a uniformly-spaced document no longer degrades to a whole-document
+  // hunk — it reviews as an explicit delete + insert pair. (List items
+  // are excluded here because moving one can legitimately change the
+  // tight/loose separators around UNCHANGED neighbors, which the block
+  // lens cannot represent and correctly degrades on.)
+  it("a single block move in a loose document stays granular", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom<RenderKind>("paragraph", "heading", "code"), {
+          minLength: 2,
+          maxLength: 8,
+        }),
+        fc.nat(20),
+        fc.nat(20),
+        (kinds, from, to) => {
+          const { base, proposed } = buildScenario(kinds, [
+            { kind: "move", from, to },
+          ]);
+          fc.pre(base !== proposed);
+          const diff = diffSuggestion(base, proposed);
+          expect(diff.granularity).toBe("block");
+          expect(diff.hunks.some((h) => h.op === "delete")).toBe(true);
+          expect(diff.hunks.some((h) => h.op === "insert")).toBe(true);
+          expect(applyHunks({ base, proposed, rejected: diff.hunks })).toBe(
+            base,
+          );
+        },
+      ),
       PROPERTY_RUNS,
     );
   });
