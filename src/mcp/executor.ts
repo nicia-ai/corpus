@@ -1,17 +1,26 @@
-import type { CallerRef, CollectionSlug, DocumentSlug } from "../ids";
 import type {
+  CallerRef,
+  CollectionSlug,
+  DocumentSlug,
+  ProjectId,
+} from "../ids";
+import type {
+  AddSuggestionMessageResult,
   CreateDocProposalResult,
   CreateSuggestionResult,
+  ProposalResult,
   SuggestCreateInput,
 } from "../project-store/commands/suggestions";
 import type { CollectionDelivery } from "../store/domain/collection-expand";
 import type { VerifyResult } from "../store/domain/verify";
 
 // The per-request MCP executor port. `callerRef` carries the namespaced
-// caller identity (`apikey:<id>` | `oauth:<sub>`) so downstream code can
+// caller identity (`apikey:<id>` | `oauth:<sub>:connection:<id>`) so downstream code can
 // attribute reads to a stable caller in the durable event stream.
 export type McpExecutor = Readonly<{
   callerRef: CallerRef;
+  baseUrl: string;
+  projectId: ProjectId;
   listCollections: () => Promise<
     readonly {
       slug: string;
@@ -101,4 +110,18 @@ export type McpExecutor = Readonly<{
     callerRef: CallerRef,
     input: SuggestCreateInput,
   ) => Promise<CreateDocProposalResult>;
+  // Only the exact callerRef that created a proposal can retrieve its
+  // result. The scoped executor pins identity and the DO re-checks ownership.
+  proposalResult: (
+    callerRef: CallerRef,
+    proposalId: number,
+  ) => Promise<ProposalResult>;
+  // Proposal-scoped conversation only. The DO accepts a reply when this
+  // caller created the still-open proposal; general document comments are
+  // intentionally absent from the MCP port.
+  replyToProposal: (
+    callerRef: CallerRef,
+    proposalId: number,
+    body: string,
+  ) => Promise<AddSuggestionMessageResult>;
 }>;

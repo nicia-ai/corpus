@@ -133,7 +133,7 @@ const CollectionReorderedSchema = z.object({
 const ReadEventSchema = z.object({
   type: z.literal("read"),
   kind: z.enum(["first", "after-edit"]),
-  callerRef: z.string(), // `apikey:<api_key.id>` | `oauth:<jwt.sub>`
+  callerRef: z.string(), // `apikey:<api_key.id>` | `oauth:<jwt.sub>:connection:<connection.id>`
   collectionSlug: z.string(),
   versionCapturedAtRead: z.record(z.string(), z.number().int().positive()),
 });

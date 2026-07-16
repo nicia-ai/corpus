@@ -5,9 +5,12 @@ import {
   type LedgerDb,
   type NewSuggestion,
   type NewSuggestionHunk,
+  type NewSuggestionMessage,
   suggestion,
   suggestionHunk,
+  suggestionMessage,
   type SuggestionHunkRow,
+  type SuggestionMessageRow,
   type SuggestionRow,
   type SuggestionStatus,
 } from "../../db";
@@ -30,6 +33,28 @@ export class SuggestionRepo {
   async addHunks(rows: readonly NewSuggestionHunk[]): Promise<void> {
     if (rows.length === 0) return;
     await this.db.insert(suggestionHunk).values([...rows]);
+  }
+
+  async addMessage(row: NewSuggestionMessage): Promise<number> {
+    const [r] = await this.db
+      .insert(suggestionMessage)
+      .values(row)
+      .returning({ id: suggestionMessage.id });
+    if (r === undefined) {
+      throw new Error("Suggestion message insert returned no id.");
+    }
+    return r.id;
+  }
+
+  messagesForSuggestions(
+    ids: readonly number[],
+  ): Promise<readonly SuggestionMessageRow[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.db
+      .select()
+      .from(suggestionMessage)
+      .where(inArray(suggestionMessage.suggestionId, [...ids]))
+      .orderBy(suggestionMessage.id);
   }
 
   forDoc(documentSlug: string): Promise<readonly SuggestionRow[]> {
@@ -121,15 +146,25 @@ export class SuggestionRepo {
   }
 
   async resolve(
-    id: number,
-    status: SuggestionStatus,
-    resolvedBy: string,
-    resolvedAt: string,
+    input: Readonly<{
+      id: number;
+      status: SuggestionStatus;
+      resolvedBy: string;
+      resolvedAt: string;
+      resultDocVersion?: number;
+      reviewerNote?: string;
+    }>,
   ): Promise<void> {
     await this.db
       .update(suggestion)
-      .set({ status, resolvedBy, resolvedAt })
-      .where(eq(suggestion.id, id));
+      .set({
+        status: input.status,
+        resolvedBy: input.resolvedBy,
+        resolvedAt: input.resolvedAt,
+        resultDocVersion: input.resultDocVersion ?? null,
+        reviewerNote: input.reviewerNote ?? null,
+      })
+      .where(eq(suggestion.id, input.id));
   }
 
   async markStale(id: number): Promise<void> {

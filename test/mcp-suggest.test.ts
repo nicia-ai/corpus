@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { asCallerRef } from "../src/ids";
+import {
+  asCallerRef,
+  asConnectionId,
+  asProjectId,
+  asUserId,
+  callerRefFromOAuth,
+} from "../src/ids";
 import { handleMcp, RpcSchema } from "../src/mcp";
 import { ERR } from "../src/mcp/protocol";
 import { scopedExecutor } from "../src/scoped-executor";
@@ -17,6 +23,10 @@ import { colSlug, docSlug, freshStore } from "./_helpers";
 const DOC_A = "alpha one\n\nbeta two";
 const DOC_B = "gamma one\n\ndelta two";
 const AGENT = asCallerRef("apikey:agent-a");
+const TEST_LOCATION = {
+  baseUrl: "http://localhost:8787",
+  projectId: asProjectId("test-project"),
+} as const;
 
 type RpcResponse = Readonly<{
   result?: { content?: { text: string }[] };
@@ -57,20 +67,27 @@ async function setup(): Promise<{
   await store.attachDocument(colSlug("col-b"), docSlug("doc-b"), 1, "bob");
 
   const members = (await store.collectionMembers(colSlug("col-a"))) ?? [];
-  const exec = scopedExecutor(store, colSlug("col-a"), members, AGENT);
+  const exec = scopedExecutor(
+    store,
+    colSlug("col-a"),
+    members,
+    AGENT,
+    TEST_LOCATION,
+  );
   return { store, exec };
 }
 
 function call(
   exec: ReturnType<typeof scopedExecutor>,
   args: Record<string, unknown>,
+  name = "suggest_edit",
 ): Promise<RpcResponse> {
   return handleMcp(
     RpcSchema.parse({
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "suggest_edit", arguments: args },
+      params: { name, arguments: args },
     }),
     exec,
   ) as Promise<RpcResponse>;
@@ -82,6 +99,14 @@ function resultJson(res: RpcResponse): Record<string, unknown> {
     throw new Error(`expected a result, got ${JSON.stringify(res)}`);
   }
   return JSON.parse(text) as Record<string, unknown>;
+}
+
+function expectedReviewUrl(proposalId: number, slug?: string): string {
+  const path =
+    slug === undefined
+      ? "/p/test-project/documents"
+      : `/p/test-project/documents/${slug}`;
+  return `http://localhost:8787${path}#proposal-${String(proposalId)}`;
 }
 
 describe("suggest_edit MCP tool (DO + D1 integration)", () => {
@@ -103,6 +128,414 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     // recorded as `mcp` at write time (not inferred from the credential).
     expect(list[0]?.createdBy).toBe("apikey:agent-a");
     expect(list[0]?.channel).toBe("mcp");
+  });
+
+  it("returns only the originating caller's durable open and partial-apply outcomes", async () => {
+    const { store, exec } = await setup();
+    const proposed = await call(exec, {
+      slug: "doc-a",
+      proposedMarkdown: "alpha changed\n\nbeta two\n\ngamma added",
+      baseDocVersion: 1,
+    });
+    const proposalId = resultJson(proposed).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toEqual({
+      found: true,
+      proposalId,
+      kind: "edit",
+      documentSlug: "doc-a",
+      baseDocVersion: 1,
+      outcome: "open",
+      reviewUrl: expectedReviewUrl(proposalId, "doc-a"),
+      acceptedHunks: [],
+      messages: [],
+    });
+
+    const suggestion = (await store.listSuggestions(docSlug("doc-a")))[0];
+    if (suggestion === undefined || suggestion.hunks.length < 2) {
+      throw new Error("expected a multi-hunk proposal");
+    }
+    for (const [index, hunk] of suggestion.hunks.entries()) {
+      await store.setHunkDecision({
+        hunkId: hunk.id,
+        decision: index === 0 ? "accepted" : "rejected",
+      });
+    }
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({ outcome: "open", acceptedHunks: [] });
+    expect(
+      await store.applySuggestion({
+        suggestionId: proposalId,
+        appliedBy: "alice",
+        reviewerNote: "Kept the focused part; the rest is too broad.",
+      }),
+    ).toMatchObject({ ok: true, docVersion: 2 });
+
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({
+      outcome: "partially_applied",
+      resultingDocVersion: 2,
+      reviewerNote: "Kept the focused part; the rest is too broad.",
+      acceptedHunks: [{ decision: "accepted" }],
+    });
+
+    const other = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      asCallerRef("apikey:agent-b"),
+      TEST_LOCATION,
+    );
+    expect(
+      await store.replyToProposal(
+        asCallerRef("apikey:agent-b"),
+        proposalId,
+        "direct cross-caller write",
+      ),
+    ).toEqual({ ok: false, reason: "missing" });
+    expect(
+      (await call(other, { proposalId }, "get_proposal_result")).error,
+    ).toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
+  });
+
+  it("keeps proposals private between OAuth Connections owned by the same user", async () => {
+    const { store } = await setup();
+    const members = (await store.collectionMembers(colSlug("col-a"))) ?? [];
+    const userId = asUserId("same-user");
+    const first = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      members,
+      callerRefFromOAuth(userId, asConnectionId("conn-a")),
+      TEST_LOCATION,
+    );
+    const second = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      members,
+      callerRefFromOAuth(userId, asConnectionId("conn-b")),
+      TEST_LOCATION,
+    );
+    const proposalId = resultJson(
+      await call(first, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nprivate to conn-a`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+
+    expect(
+      (await call(second, { proposalId }, "get_proposal_result")).error,
+    ).toMatchObject({ code: ERR.NOT_FOUND, message: "unknown proposal" });
+  });
+
+  it("reports a fully accepted edit as applied with the exact public result shape", async () => {
+    const { store, exec } = await setup();
+    const proposalId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nfully accepted`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+    const hunk = (await store.listSuggestions(docSlug("doc-a")))[0]?.hunks[0];
+    if (hunk === undefined) throw new Error("missing proposal hunk");
+    await store.setHunkDecision({
+      hunkId: hunk.id,
+      decision: "accepted",
+    });
+    await store.applySuggestion({
+      suggestionId: proposalId,
+      appliedBy: "alice",
+    });
+
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toEqual({
+      found: true,
+      proposalId,
+      kind: "edit",
+      documentSlug: "doc-a",
+      baseDocVersion: 1,
+      outcome: "applied",
+      reviewUrl: expectedReviewUrl(proposalId, "doc-a"),
+      resultingDocVersion: 2,
+      resolvedAt: expect.any(String),
+      acceptedHunks: [{ ...hunk, decision: "accepted" }],
+      messages: [],
+    });
+  });
+
+  it("keeps reviewer/agent replies proposal-scoped and hides human identity", async () => {
+    const { store, exec } = await setup();
+    const proposalId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nconversation change`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+
+    expect(
+      await store.addSuggestionMessage({
+        suggestionId: proposalId,
+        body: "Please narrow this to the collection's terminology.",
+        createdBy: "human-user-id-should-not-leak",
+        channel: "web",
+      }),
+    ).toMatchObject({ ok: true });
+
+    const reviewed = resultJson(
+      await call(exec, { proposalId }, "get_proposal_result"),
+    );
+    expect(reviewed.messages).toEqual([
+      expect.objectContaining({
+        body: "Please narrow this to the collection's terminology.",
+        role: "reviewer",
+        channel: "web",
+      }),
+    ]);
+    expect(JSON.stringify(reviewed)).not.toContain(
+      "human-user-id-should-not-leak",
+    );
+
+    expect(
+      resultJson(
+        await call(
+          exec,
+          { proposalId, body: "Understood — I will re-propose narrowly." },
+          "reply_to_proposal",
+        ),
+      ),
+    ).toMatchObject({ proposalId, messageId: expect.any(Number) });
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({
+      messages: [
+        { role: "reviewer", channel: "web" },
+        { role: "proposer", channel: "mcp" },
+      ],
+    });
+
+    const other = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      asCallerRef("apikey:agent-b"),
+      TEST_LOCATION,
+    );
+    expect(
+      (
+        await call(
+          other,
+          { proposalId, body: "cross-caller write" },
+          "reply_to_proposal",
+        )
+      ).error?.code,
+    ).toBe(ERR.NOT_FOUND);
+
+    const afterCrossCaller = resultJson(
+      await call(exec, { proposalId }, "get_proposal_result"),
+    );
+    expect(JSON.stringify(afterCrossCaller)).not.toContain(
+      "cross-caller write",
+    );
+    expect(JSON.stringify(afterCrossCaller)).not.toContain(
+      "direct cross-caller write",
+    );
+
+    await store.rejectSuggestion({
+      suggestionId: proposalId,
+      rejectedBy: "alice",
+    });
+    expect(
+      (
+        await call(
+          exec,
+          { proposalId, body: "late reply" },
+          "reply_to_proposal",
+        )
+      ).error?.code,
+    ).toBe(ERR.CONFLICT);
+    const afterLateReply = resultJson(
+      await call(exec, { proposalId }, "get_proposal_result"),
+    );
+    expect(JSON.stringify(afterLateReply)).not.toContain("late reply");
+    expect(
+      (await call(exec, { proposalId, body: "   " }, "reply_to_proposal")).error
+        ?.code,
+    ).toBe(ERR.INVALID_PARAMS);
+  });
+
+  it("reports rejected and stale terminal outcomes", async () => {
+    const { store, exec } = await setup();
+    const rejectedId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nrejected addition`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    const staleId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nstale addition`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof rejectedId !== "number" || typeof staleId !== "number") {
+      throw new Error("missing proposal ids");
+    }
+    await store.rejectSuggestion({
+      suggestionId: rejectedId,
+      rejectedBy: "alice",
+      reviewerNote: "Not aligned with the collection.",
+    });
+    const staleHunk = (await store.listSuggestions(docSlug("doc-a")))
+      .find((suggestion) => suggestion.id === staleId)
+      ?.hunks.at(0);
+    if (staleHunk === undefined) throw new Error("missing stale hunk");
+    await store.setHunkDecision({
+      hunkId: staleHunk.id,
+      decision: "accepted",
+    });
+    await store.saveDocument({
+      slug: docSlug("doc-a"),
+      markdown: `${DOC_A}\n\nnew canonical head`,
+      clientVersion: 1,
+      changedBy: "alice",
+    });
+    await store.applySuggestion({ suggestionId: staleId, appliedBy: "alice" });
+
+    expect(
+      resultJson(
+        await call(exec, { proposalId: rejectedId }, "get_proposal_result"),
+      ),
+    ).toMatchObject({
+      outcome: "rejected",
+      reviewerNote: "Not aligned with the collection.",
+    });
+    expect(
+      resultJson(
+        await call(exec, { proposalId: staleId }, "get_proposal_result"),
+      ),
+    ).toMatchObject({ outcome: "stale" });
+  });
+
+  it("hands off a canonical review URL and supports bounded waits", async () => {
+    const { store, exec } = await setup();
+    const proposed = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nwait for this`,
+        baseDocVersion: 1,
+      }),
+    );
+    const proposalId = proposed.suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+    expect(proposed.reviewUrl).toBe(expectedReviewUrl(proposalId, "doc-a"));
+
+    expect(
+      resultJson(
+        await call(
+          exec,
+          { proposalId, timeoutSeconds: 0 },
+          "await_proposal_review",
+        ),
+      ),
+    ).toMatchObject({ outcome: "open", timedOut: true });
+
+    const startedAt = Date.now();
+    const waiting = call(
+      exec,
+      { proposalId, timeoutSeconds: 3 },
+      "await_proposal_review",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await store.rejectSuggestion({
+      suggestionId: proposalId,
+      rejectedBy: "alice",
+      reviewerNote: "Please take a different direction.",
+    });
+    expect(resultJson(await waiting)).toMatchObject({
+      outcome: "rejected",
+      timedOut: false,
+      reviewerNote: "Please take a different direction.",
+    });
+    expect(Date.now() - startedAt).toBeLessThan(2500);
+
+    expect(
+      (
+        await call(
+          exec,
+          { proposalId, timeoutSeconds: 26 },
+          "await_proposal_review",
+        )
+      ).error?.code,
+    ).toBe(ERR.INVALID_PARAMS);
+
+    const other = scopedExecutor(
+      store,
+      colSlug("col-a"),
+      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      asCallerRef("apikey:agent-b"),
+      TEST_LOCATION,
+    );
+    expect(
+      (
+        await call(
+          other,
+          { proposalId, timeoutSeconds: 0 },
+          "await_proposal_review",
+        )
+      ).error?.code,
+    ).toBe(ERR.NOT_FOUND);
+  });
+
+  it("await_proposal_review returns early for new reviewer feedback", async () => {
+    const { store, exec } = await setup();
+    const proposalId = resultJson(
+      await call(exec, {
+        slug: "doc-a",
+        proposedMarkdown: `${DOC_A}\n\nmessage-aware wait`,
+        baseDocVersion: 1,
+      }),
+    ).suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+
+    const startedAt = Date.now();
+    const waiting = call(
+      exec,
+      { proposalId, timeoutSeconds: 3, afterMessageId: 0 },
+      "await_proposal_review",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await store.addSuggestionMessage({
+      suggestionId: proposalId,
+      body: "Can you make this more specific?",
+      createdBy: "alice",
+      channel: "web",
+    });
+    expect(resultJson(await waiting)).toMatchObject({
+      outcome: "open",
+      messageReceived: true,
+      timedOut: false,
+      messages: [
+        {
+          role: "reviewer",
+          body: "Can you make this more specific?",
+        },
+      ],
+    });
+    expect(Date.now() - startedAt).toBeLessThan(2500);
   });
 
   it("CRITICAL: an agent bound to Collection A cannot suggest against a doc in Collection B", async () => {
@@ -179,6 +612,9 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     const json = resultJson(res);
     expect(json).toMatchObject({ created: true, slug: "brand-new" });
     expect(typeof json.suggestionId).toBe("number");
+    const proposalId = json.suggestionId;
+    if (typeof proposalId !== "number") throw new Error("missing proposal id");
+    expect(json.reviewUrl).toBe(expectedReviewUrl(proposalId));
 
     const proposals = await store.listCreateProposals();
     expect(proposals).toHaveLength(1);
@@ -190,6 +626,25 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     });
     // Nothing was created — the proposal is review state, not a document.
     expect(await store.getDocument(docSlug("brand-new"))).toBeUndefined();
+
+    expect(
+      await store.applyCreateProposal({
+        suggestionId: proposalId,
+        appliedBy: "alice",
+        reviewerNote: "Useful addition.",
+      }),
+    ).toMatchObject({ ok: true, docVersion: 1 });
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).toMatchObject({
+      kind: "create",
+      outcome: "applied",
+      resultingDocVersion: 1,
+      reviewerNote: "Useful addition.",
+    });
+    expect(
+      resultJson(await call(exec, { proposalId }, "get_proposal_result")),
+    ).not.toHaveProperty("reviewUrl");
   });
 
   it("baseDocVersion 0 with a fresh Corpus path derives the slug like the import path", async () => {
@@ -250,7 +705,13 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       exec,
     )) as {
       result: {
-        tools: { name: string; inputSchema?: { required?: string[] } }[];
+        tools: {
+          name: string;
+          inputSchema?: {
+            required?: string[];
+            properties?: Record<string, Record<string, unknown>>;
+          };
+        }[];
       };
     };
     const tool = res.result.tools.find((t) => t.name === "suggest_edit");
@@ -259,5 +720,40 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       "proposedMarkdown",
       "baseDocVersion",
     ]);
+    expect(tool?.inputSchema?.properties?.baseDocVersion).toMatchObject({
+      type: "integer",
+      minimum: 0,
+    });
+    const resultTool = res.result.tools.find(
+      (candidate) => candidate.name === "get_proposal_result",
+    );
+    expect(resultTool?.inputSchema?.properties?.proposalId).toMatchObject({
+      type: "integer",
+      minimum: 1,
+    });
+    const waitTool = res.result.tools.find(
+      (candidate) => candidate.name === "await_proposal_review",
+    );
+    expect(waitTool?.inputSchema?.properties).toMatchObject({
+      proposalId: { type: "integer", minimum: 1 },
+      timeoutSeconds: {
+        type: "integer",
+        minimum: 0,
+        maximum: 25,
+        default: 25,
+      },
+    });
+    expect(waitTool?.inputSchema?.properties?.afterMessageId).toMatchObject({
+      type: "integer",
+      minimum: 0,
+      default: 0,
+    });
+    const replyTool = res.result.tools.find(
+      (candidate) => candidate.name === "reply_to_proposal",
+    );
+    expect(replyTool?.inputSchema?.properties).toMatchObject({
+      proposalId: { type: "integer", minimum: 1 },
+      body: { type: "string", minLength: 1, maxLength: 2000 },
+    });
   });
 });

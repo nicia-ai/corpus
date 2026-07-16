@@ -2,7 +2,9 @@ import { useRouter } from "@tanstack/react-router";
 import { FilePlus2 } from "lucide-react";
 import { useState } from "react";
 
+import { Field } from "@/components/Field";
 import { Markdown } from "@/components/markdown/Markdown";
+import { ProposalConversation } from "@/components/review/ProposalConversation";
 import { ViaBadge } from "@/components/review/ReviewRail";
 import { Button } from "@/components/ui/Button";
 import { RelativeTime } from "@/components/ui/DateTime";
@@ -46,13 +48,14 @@ function ProposalCard({
 }>): React.ReactElement {
   const router = useRouter();
   const [preview, setPreview] = useState(false);
+  const [reviewerNote, setReviewerNote] = useState("");
   const {
     pending: applying,
     error: applyError,
     run: apply,
   } = useSubmit(async () => {
     const r = await applyCreateProposal({
-      data: { projectId, suggestionId: proposal.id },
+      data: { projectId, suggestionId: proposal.id, reviewerNote },
     });
     if (!r.ok) throw new Error(applyFailureMessage(r));
     showToast(`Created “${proposal.title}”.`);
@@ -64,7 +67,7 @@ function ProposalCard({
     run: reject,
   } = useSubmit(async () => {
     const r = await rejectSuggestion({
-      data: { projectId, suggestionId: proposal.id },
+      data: { projectId, suggestionId: proposal.id, reviewerNote },
     });
     // A concurrent apply/reject already resolved it — refresh so the
     // card reflects reality instead of toasting a false success.
@@ -78,7 +81,10 @@ function ProposalCard({
   const acting = applying || rejecting;
 
   return (
-    <article className={cardClass("space-y-3 px-4! py-3!")}>
+    <article
+      id={`proposal-${String(proposal.id)}`}
+      className={cardClass("space-y-3 px-4! py-3!")}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <FilePlus2 aria-hidden className="h-4 w-4 shrink-0 text-green-700" />
         <span className="min-w-0 truncate font-medium text-slate-900">
@@ -107,6 +113,21 @@ function ProposalCard({
           />
         </div>
       )}
+      <ProposalConversation
+        projectId={projectId}
+        proposalId={proposal.id}
+        messages={proposal.messages}
+        canReply
+        onChange={() => void router.invalidate()}
+      />
+      <Field
+        label="Reviewer note (optional)"
+        as="textarea"
+        rows={2}
+        required={false}
+        value={reviewerNote}
+        onChange={setReviewerNote}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button disabled={acting} onClick={() => void apply()}>
           Create document

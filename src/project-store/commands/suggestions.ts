@@ -26,6 +26,7 @@ import {
   type Hunk,
   type HunkOp,
   isCreateProposal,
+  type ProposalOutcome,
 } from "../../store/domain/suggestion";
 import {
   type CommandOutcome,
@@ -50,6 +51,14 @@ export type SuggestionHunkView = Readonly<{
   decision: HunkDecision;
 }>;
 
+export type SuggestionMessageView = Readonly<{
+  id: number;
+  body: string;
+  createdBy: string;
+  channel: CallerChannel;
+  createdAt: string;
+}>;
+
 export type SuggestionView = Readonly<{
   id: number;
   status: SuggestionStatus;
@@ -60,8 +69,37 @@ export type SuggestionView = Readonly<{
   // next to the author, recorded truth rather than inferred from createdBy.
   channel: CallerChannel;
   createdAt: string;
+  reviewerNote: string | null;
   hunks: readonly SuggestionHunkView[];
+  messages: readonly SuggestionMessageView[];
 }>;
+
+export type ProposalMessage = Readonly<{
+  id: number;
+  body: string;
+  role: "proposer" | "reviewer";
+  channel: CallerChannel;
+  createdAt: string;
+}>;
+
+export type { ProposalOutcome } from "../../store/domain/suggestion";
+
+export type ProposalResult = Readonly<
+  | { found: false }
+  | {
+      found: true;
+      proposalId: number;
+      kind: "edit" | "create";
+      documentSlug: string;
+      baseDocVersion: number;
+      outcome: ProposalOutcome;
+      resultingDocVersion?: number;
+      reviewerNote?: string;
+      resolvedAt?: string;
+      acceptedHunks: readonly SuggestionHunkView[];
+      messages: readonly ProposalMessage[];
+    }
+>;
 
 const toHunk = (h: SuggestionHunkRow): Hunk => ({
   ordinal: h.ordinal,
@@ -239,6 +277,7 @@ export type CreateProposalView = Readonly<{
   createdBy: string;
   channel: CallerChannel;
   createdAt: string;
+  messages: readonly SuggestionMessageView[];
 }>;
 
 export function createProposalView(
@@ -251,6 +290,7 @@ export function createProposalView(
     channel: CallerChannel;
     createdAt: string;
   }>,
+  messages: readonly SuggestionMessageView[] = [],
 ): CreateProposalView {
   const fallback =
     row.proposedPath === null
@@ -265,12 +305,61 @@ export function createProposalView(
     createdBy: row.createdBy,
     channel: row.channel,
     createdAt: row.createdAt,
+    messages,
   };
+}
+
+// — Proposal conversation ——————————————————————————————————————————
+
+export type AddSuggestionMessageInput = Readonly<{
+  suggestionId: number;
+  body: string;
+  createdBy: string;
+  channel: CallerChannel;
+  // MCP supplies this guard so ownership and the open-state check happen in
+  // the same transaction as the insert. A guessed proposal id is indistinct
+  // from a missing one and can never become a cross-caller write.
+  expectedCreatedBy?: string;
+}>;
+
+export type AddSuggestionMessageResult = Readonly<
+  | { ok: true; messageId: number; documentSlug: DocumentSlug }
+  | { ok: false; reason: "missing" | "not-open" }
+>;
+
+export async function addSuggestionMessageCommand(
+  ctx: ProjectCommandContext,
+  input: AddSuggestionMessageInput,
+): Promise<CommandOutcome<AddSuggestionMessageResult>> {
+  const proposal = await ctx.u.suggestions.get(input.suggestionId);
+  if (
+    proposal === undefined ||
+    (input.expectedCreatedBy !== undefined &&
+      proposal.createdBy !== input.expectedCreatedBy)
+  ) {
+    return commandOutcome({ ok: false, reason: "missing" });
+  }
+  if (proposal.status !== "open") {
+    return commandOutcome({ ok: false, reason: "not-open" });
+  }
+  const messageId = await ctx.u.suggestions.addMessage({
+    suggestionId: proposal.id,
+    body: input.body,
+    createdBy: input.createdBy,
+    channel: input.channel,
+    createdAt: ctx.now,
+  });
+  return commandOutcome({
+    ok: true,
+    messageId,
+    documentSlug: asDocumentSlug(proposal.documentSlug),
+  });
 }
 
 export type ApplyCreateProposalInput = Readonly<{
   suggestionId: number;
   appliedBy: string;
+  reviewerNote?: string;
 }>;
 
 export type ApplyCreateProposalResult = Readonly<
@@ -371,7 +460,16 @@ export async function applyCreateProposalCommand(
   }
   // saveDocumentCommand staled every open proposal for this slug
   // (including this one); resolve() then records THIS one's true outcome.
-  await ctx.u.suggestions.resolve(s.id, "applied", input.appliedBy, ctx.now);
+  await ctx.u.suggestions.resolve({
+    id: s.id,
+    status: "applied",
+    resolvedBy: input.appliedBy,
+    resolvedAt: ctx.now,
+    resultDocVersion: saved.result.docVersion,
+    ...(input.reviewerNote === undefined
+      ? {}
+      : { reviewerNote: input.reviewerNote }),
+  });
   return {
     result: {
       ok: true,
@@ -409,6 +507,7 @@ export async function setHunkDecisionCommand(
 export type ApplySuggestionInput = Readonly<{
   suggestionId: number;
   appliedBy: string;
+  reviewerNote?: string;
 }>;
 
 export type ApplySuggestionResult = Readonly<
@@ -466,7 +565,16 @@ export async function applySuggestionCommand(
     // version back to the suggestion (and the agent/human that proposed it).
     appliedFrom: { suggestionId: s.id, by: s.createdBy, channel: s.channel },
   });
-  await ctx.u.suggestions.resolve(s.id, "applied", input.appliedBy, ctx.now);
+  await ctx.u.suggestions.resolve({
+    id: s.id,
+    status: "applied",
+    resolvedBy: input.appliedBy,
+    resolvedAt: ctx.now,
+    resultDocVersion: saved.result.docVersion,
+    ...(input.reviewerNote === undefined
+      ? {}
+      : { reviewerNote: input.reviewerNote }),
+  });
   // The head just advanced, so every other open suggestion on this doc is now
   // off-base — mark them stale eagerly instead of leaving them "open" until
   // someone next tries to apply them (which is when the UI would otherwise
@@ -485,6 +593,7 @@ export async function applySuggestionCommand(
 export type RejectSuggestionInput = Readonly<{
   suggestionId: number;
   rejectedBy: string;
+  reviewerNote?: string;
 }>;
 
 // Reject is a terminal transition out of `open`; a suggestion already
@@ -498,12 +607,15 @@ export async function rejectSuggestionCommand(
 > {
   const s = await ctx.u.suggestions.get(input.suggestionId);
   if (s?.status !== "open") return commandOutcome({ ok: false });
-  await ctx.u.suggestions.resolve(
-    input.suggestionId,
-    "rejected",
-    input.rejectedBy,
-    ctx.now,
-  );
+  await ctx.u.suggestions.resolve({
+    id: input.suggestionId,
+    status: "rejected",
+    resolvedBy: input.rejectedBy,
+    resolvedAt: ctx.now,
+    ...(input.reviewerNote === undefined
+      ? {}
+      : { reviewerNote: input.reviewerNote }),
+  });
   return commandOutcome({
     ok: true,
     documentSlug: asDocumentSlug(s.documentSlug),

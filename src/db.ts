@@ -192,6 +192,11 @@ export const suggestion = sqliteTable(
     createdAt: text("created_at").notNull(),
     resolvedBy: text("resolved_by"),
     resolvedAt: text("resolved_at"),
+    // Human-facing outcome metadata returned to the originating agent.
+    // The version is set only when an apply creates a canonical version;
+    // the note is optional on apply/reject and remains null for stale rows.
+    resultDocVersion: integer("result_doc_version"),
+    reviewerNote: text("reviewer_note"),
     // Create-proposals only (baseDocVersion === 0 — a real document's head
     // is never below 1, so 0 is the airtight discriminant): the Corpus path
     // the proposed document should be created at (null = project root with
@@ -241,12 +246,35 @@ export const suggestionHunk = sqliteTable(
   ],
 );
 
+// A proposal-scoped conversation between its proposer and human reviewers.
+// This is deliberately separate from anchored document comments: MCP callers
+// can only see/reply to the proposals they created, never the document's
+// general review threads.
+export const suggestionMessage = sqliteTable(
+  "suggestion_message",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    suggestionId: integer("suggestion_id").notNull(),
+    body: text("body").notNull(),
+    createdBy: text("created_by").notNull(),
+    channel: text("channel", { enum: CALLER_CHANNELS }).notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("suggestion_message_suggestion").on(t.suggestionId)],
+);
+
 export type SuggestionRow = Readonly<typeof suggestion.$inferSelect>;
 export type NewSuggestion = Readonly<typeof suggestion.$inferInsert>;
 export type SuggestionStatus = SuggestionRow["status"];
 export type SuggestionHunkRow = Readonly<typeof suggestionHunk.$inferSelect>;
 export type NewSuggestionHunk = Readonly<typeof suggestionHunk.$inferInsert>;
 export type HunkDecision = SuggestionHunkRow["decision"];
+export type SuggestionMessageRow = Readonly<
+  typeof suggestionMessage.$inferSelect
+>;
+export type NewSuggestionMessage = Readonly<
+  typeof suggestionMessage.$inferInsert
+>;
 
 export type LedgerDb = DrizzleSqliteDODatabase<{
   contentBlobs: typeof contentBlobs;
@@ -258,6 +286,7 @@ export type LedgerDb = DrizzleSqliteDODatabase<{
   comment: typeof comment;
   suggestion: typeof suggestion;
   suggestionHunk: typeof suggestionHunk;
+  suggestionMessage: typeof suggestionMessage;
 }>;
 
 // The DDL for these tables is not hand-written: the table definitions

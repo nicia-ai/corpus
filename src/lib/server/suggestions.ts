@@ -7,15 +7,23 @@ import { resolveAuthorLabels } from "@/control/users";
 import { asDocumentSlug } from "@/ids";
 import type { CallerChannel } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
+import { proposalMessageSchema } from "@/lib/proposal-message";
+import { reviewerNoteSchema } from "@/lib/reviewer-note";
 import { changedBy, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
 import type {
   ApplyCreateProposalResult,
   ApplySuggestionResult,
+  AddSuggestionMessageResult,
   CreateSuggestionResult,
   SuggestionView,
 } from "@/project-store/commands/suggestions";
-import { utf8Bytes } from "@/util";
+import { compact, utf8Bytes } from "@/util";
+
+const ReviewDecisionInput = z.object({
+  suggestionId: z.number().int(),
+  reviewerNote: reviewerNoteSchema.optional(),
+});
 
 export type {
   ApplyCreateProposalResult,
@@ -42,7 +50,10 @@ export const listSuggestions = createServerFn({ method: "GET" })
     ];
     const names = await resolveAuthorLabels(
       connectControlDb(c.env.DB),
-      suggestions.map((s) => s.createdBy),
+      suggestions.flatMap((s) => [
+        s.createdBy,
+        ...s.messages.map((message) => message.createdBy),
+      ]),
     );
     return { suggestions, names: Object.fromEntries(names) };
   });
@@ -84,13 +95,16 @@ export const setHunkDecision = createServerFn({ method: "POST" })
 
 export const applySuggestion = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ suggestionId: z.number().int() }))
+  .validator(ReviewDecisionInput)
   .handler(async ({ data, context }): Promise<ApplySuggestionResult> => {
     const c = srv(context);
-    return storeOf(c).applySuggestion({
-      suggestionId: data.suggestionId,
-      appliedBy: changedBy(c),
-    });
+    return storeOf(c).applySuggestion(
+      compact({
+        suggestionId: data.suggestionId,
+        appliedBy: changedBy(c),
+        reviewerNote: data.reviewerNote,
+      }),
+    );
   });
 
 // A pending agent-proposed NEW document, with the author resolved to a
@@ -106,6 +120,13 @@ export type CreateProposalItem = Readonly<{
   authorLabel: string;
   channel: CallerChannel;
   createdAt: string;
+  messages: readonly Readonly<{
+    id: number;
+    body: string;
+    authorLabel: string;
+    channel: CallerChannel;
+    createdAt: string;
+  }>[];
 }>;
 
 export const listCreateProposals = createServerFn({ method: "GET" })
@@ -115,7 +136,10 @@ export const listCreateProposals = createServerFn({ method: "GET" })
     const proposals = await storeOf(c).listCreateProposals();
     const names = await resolveAuthorLabels(
       connectControlDb(c.env.DB),
-      proposals.map((p) => p.createdBy),
+      proposals.flatMap((proposal) => [
+        proposal.createdBy,
+        ...proposal.messages.map((message) => message.createdBy),
+      ]),
     );
     return proposals.map((p) => ({
       id: p.id,
@@ -126,12 +150,50 @@ export const listCreateProposals = createServerFn({ method: "GET" })
       authorLabel: names.get(p.createdBy) ?? p.createdBy,
       channel: p.channel,
       createdAt: p.createdAt,
+      messages: p.messages.map((message) => ({
+        id: message.id,
+        body: message.body,
+        authorLabel: names.get(message.createdBy) ?? message.createdBy,
+        channel: message.channel,
+        createdAt: message.createdAt,
+      })),
     }));
   });
 
+export const addProposalMessage = createServerFn({ method: "POST" })
+  .middleware([projectMiddleware])
+  .validator(
+    z.object({
+      suggestionId: z.number().int().positive(),
+      body: proposalMessageSchema,
+    }),
+  )
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<
+      Readonly<
+        | { ok: true; messageId: number }
+        | { ok: false; reason: "missing" | "not-open" }
+      >
+    > => {
+      const c = srv(context);
+      const result: AddSuggestionMessageResult = await storeOf(
+        c,
+      ).addSuggestionMessage({
+        suggestionId: data.suggestionId,
+        body: data.body,
+        createdBy: changedBy(c),
+        channel: "web",
+      });
+      return result.ok ? { ok: true, messageId: result.messageId } : result;
+    },
+  );
+
 export const applyCreateProposal = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ suggestionId: z.number().int() }))
+  .validator(ReviewDecisionInput)
   .handler(async ({ data, context }): Promise<ApplyCreateProposalResult> => {
     const c = srv(context);
     // Apply CREATES canonical markdown, so it owes the same quota check
@@ -151,19 +213,25 @@ export const applyCreateProposal = createServerFn({ method: "POST" })
         bytes: utf8Bytes(proposal.proposedMarkdown),
       });
     }
-    return storeOf(c).applyCreateProposal({
-      suggestionId: data.suggestionId,
-      appliedBy: changedBy(c),
-    });
+    return storeOf(c).applyCreateProposal(
+      compact({
+        suggestionId: data.suggestionId,
+        appliedBy: changedBy(c),
+        reviewerNote: data.reviewerNote,
+      }),
+    );
   });
 
 export const rejectSuggestion = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ suggestionId: z.number().int() }))
+  .validator(ReviewDecisionInput)
   .handler(async ({ data, context }): Promise<Readonly<{ ok: boolean }>> => {
     const c = srv(context);
-    return storeOf(c).rejectSuggestion({
-      suggestionId: data.suggestionId,
-      rejectedBy: changedBy(c),
-    });
+    return storeOf(c).rejectSuggestion(
+      compact({
+        suggestionId: data.suggestionId,
+        rejectedBy: changedBy(c),
+        reviewerNote: data.reviewerNote,
+      }),
+    );
   });

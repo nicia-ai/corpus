@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { asCollectionSlug, asDocumentSlug } from "../ids";
+import { proposalMessageSchema } from "../lib/proposal-message";
+import type { ProposalResult } from "../project-store/commands/suggestions";
 import { parseFrontmatter } from "../store/domain/frontmatter";
 import { CREATE_PROPOSAL_BASE_VERSION } from "../store/domain/suggestion";
 import { compact } from "../util";
@@ -18,6 +20,49 @@ const SuggestEditArgs = z.object({
   proposedMarkdown: z.string(),
   baseDocVersion: z.number().int().nonnegative(),
 });
+
+const GetProposalResultArgs = z.object({
+  proposalId: z.number().int().positive(),
+});
+
+const AwaitProposalReviewArgs = GetProposalResultArgs.extend({
+  timeoutSeconds: z.number().int().min(0).max(25).default(25),
+  afterMessageId: z.number().int().nonnegative().default(0),
+});
+
+const ReplyToProposalArgs = GetProposalResultArgs.extend({
+  body: proposalMessageSchema,
+});
+
+// One-second cadence keeps handoffs responsive while bounding a maximum wait
+// to 25 read-only status checks.
+const REVIEW_POLL_MS = 1000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type FoundProposalResult = Extract<ProposalResult, { found: true }>;
+
+function proposalReviewUrl(
+  exec: McpExecutor,
+  result: Pick<
+    FoundProposalResult,
+    "proposalId" | "kind" | "documentSlug" | "outcome"
+  >,
+): string | undefined {
+  if (result.kind === "create" && result.outcome !== "open") {
+    return undefined;
+  }
+  const projectId = encodeURIComponent(exec.projectId);
+  const reviewPath =
+    result.kind === "create"
+      ? `/p/${projectId}/documents`
+      : `/p/${projectId}/documents/${encodeURIComponent(result.documentSlug)}`;
+  const reviewUrl = new URL(reviewPath, `${exec.baseUrl}/`);
+  reviewUrl.hash = `proposal-${String(result.proposalId)}`;
+  return reviewUrl.toString();
+}
 
 // Create-proposals mint a NEW identifier, so unlike reads/edits (which
 // accept whatever slug already exists) the proposed slug is format-checked
@@ -65,6 +110,12 @@ async function proposeCreate(
           suggestionId: res.suggestionId,
           created: true,
           slug: res.slug,
+          reviewUrl: proposalReviewUrl(exec, {
+            proposalId: res.suggestionId,
+            kind: "create",
+            documentSlug: res.slug,
+            outcome: "open",
+          }),
           note: "new-document proposal filed; a human reviews and applies it",
         }),
       ),
@@ -166,6 +217,110 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
     return ok(id, textContent(JSON.stringify(result)));
   },
 
+  get_proposal_result: async ({ id, exec, params }) => {
+    const fields = GetProposalResultArgs.safeParse(params);
+    if (!fields.success) {
+      return err(
+        id,
+        ERR.INVALID_PARAMS,
+        "get_proposal_result needs a positive integer proposalId",
+      );
+    }
+    const result = await exec.proposalResult(
+      exec.callerRef,
+      fields.data.proposalId,
+    );
+    return result.found
+      ? ok(
+          id,
+          textContent(
+            JSON.stringify({
+              ...result,
+              reviewUrl: proposalReviewUrl(exec, result),
+            }),
+          ),
+        )
+      : err(id, ERR.NOT_FOUND, "unknown proposal");
+  },
+
+  await_proposal_review: async ({ id, exec, params }) => {
+    const fields = AwaitProposalReviewArgs.safeParse(params);
+    if (!fields.success) {
+      return err(
+        id,
+        ERR.INVALID_PARAMS,
+        "await_proposal_review needs a positive integer proposalId and optional timeoutSeconds from 0 to 25",
+      );
+    }
+    const deadline = Date.now() + fields.data.timeoutSeconds * 1000;
+    let result = await exec.proposalResult(
+      exec.callerRef,
+      fields.data.proposalId,
+    );
+    const hasNewMessage = (): boolean =>
+      result.found &&
+      result.messages.some(
+        (message) => message.id > fields.data.afterMessageId,
+      );
+    while (result.found && result.outcome === "open" && !hasNewMessage()) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      await delay(Math.min(REVIEW_POLL_MS, remainingMs));
+      result = await exec.proposalResult(
+        exec.callerRef,
+        fields.data.proposalId,
+      );
+    }
+    if (!result.found) return err(id, ERR.NOT_FOUND, "unknown proposal");
+    const messageReceived = hasNewMessage();
+    return ok(
+      id,
+      textContent(
+        JSON.stringify({
+          ...result,
+          reviewUrl: proposalReviewUrl(exec, result),
+          messageReceived,
+          timedOut: result.outcome === "open" && !messageReceived,
+        }),
+      ),
+    );
+  },
+
+  reply_to_proposal: async ({ id, exec, params }) => {
+    const fields = ReplyToProposalArgs.safeParse(params);
+    if (!fields.success) {
+      return err(
+        id,
+        ERR.INVALID_PARAMS,
+        "reply_to_proposal needs a positive integer proposalId and a non-empty body of at most 2000 characters",
+      );
+    }
+    const result = await exec.replyToProposal(
+      exec.callerRef,
+      fields.data.proposalId,
+      fields.data.body,
+    );
+    if (result.ok) {
+      return ok(
+        id,
+        textContent(
+          JSON.stringify({
+            proposalId: fields.data.proposalId,
+            messageId: result.messageId,
+            note: "reply added; the human reviewer retains decision control",
+          }),
+        ),
+      );
+    }
+    return result.reason === "missing"
+      ? err(id, ERR.NOT_FOUND, "unknown proposal")
+      : err(
+          id,
+          ERR.CONFLICT,
+          "proposal is already settled; file a new proposal if more changes are needed",
+        );
+  },
+
   suggest_edit: async ({ id, exec, params }) => {
     const fields = SuggestEditArgs.safeParse(params);
     if (!fields.success) {
@@ -206,6 +361,12 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
           JSON.stringify({
             suggestionId: res.suggestionId,
             hunkCount: res.hunkCount,
+            reviewUrl: proposalReviewUrl(exec, {
+              proposalId: res.suggestionId,
+              kind: "edit",
+              documentSlug: requested.slug,
+              outcome: "open",
+            }),
           }),
         ),
       );

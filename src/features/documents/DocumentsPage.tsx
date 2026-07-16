@@ -38,6 +38,7 @@ import {
 } from "@/lib/server/folders";
 import { searchDocuments, type SearchHit } from "@/lib/server/search";
 import type { CreateProposalItem } from "@/lib/server/suggestions";
+import { useCollab, type RealtimeChange } from "@/lib/use-collab";
 
 import { DocumentUploader } from "./DocumentUploader";
 import { ProposedDocuments } from "./ProposedDocuments";
@@ -77,6 +78,26 @@ export function DocumentsPage({
   proposals: readonly CreateProposalItem[];
 }>): React.ReactElement {
   const router = useRouter();
+  const refreshProposalReview = useCallback(
+    (change: RealtimeChange | undefined): void => {
+      if (
+        change?.action === "suggestion.created" ||
+        change?.action === "suggestion.replied" ||
+        change?.action === "suggestion.applied" ||
+        change?.action === "suggestion.rejected"
+      ) {
+        void router.invalidate({
+          filter: (match) => match.routeId === "/p/$projectId/documents/",
+        });
+      }
+    },
+    [router],
+  );
+  // The documents index is the canonical review surface for proposed NEW
+  // documents. Subscribe to project nudges (with no real document selected)
+  // so reviewer/agent messages and terminal decisions appear without a
+  // manual reload. This socket carries only invalidation signals, never data.
+  useCollab(projectId, "", refreshProposalReview);
 
   const { childFolders, docsByFolder } = useMemo(() => {
     const nextFolders = new Map<DropTarget, FolderRow[]>();

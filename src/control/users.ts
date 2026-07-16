@@ -40,7 +40,8 @@ export async function resolveUserNames(
 // Author labels for the review surfaces. A suggestion's `createdBy` is a
 // plain user id for a web edit, but for an agent proposal over MCP it is a
 // namespaced CallerRef: `apikey:<apiKeyId>` (label = the key's name) or
-// `oauth:<userId>` (label = the authorizing user). Humans resolve through
+// `oauth:<userId>:connection:<connectionId>` (label = the authorizing user).
+// Humans resolve through
 // resolveUserNames as before; agent refs get a human-readable label here so
 // the review panel can show "who" — the UI badges the agent kind separately
 // from the createdBy prefix.
@@ -49,11 +50,10 @@ export async function resolveAuthorLabels(
   authorIds: readonly string[],
 ): Promise<Map<string, string>> {
   // Resolve each author to the *human* behind it. A web edit's author is a
-  // bare user id; an agent caller is a CallerRef — `oauth:<userId>` (the user
-  // directly) or `apikey:<id>` (hop through api_key.userId to the key's
-  // owner). "How it arrived" is recorded separately (the suggestion's
-  // channel); this answers only "who". An api key with no resolvable owner
-  // falls back to the key's name.
+  // bare user id; an agent caller is a CallerRef — a Connection-scoped OAuth
+  // ref (which decodes to its user id) or `apikey:<id>` (hop through
+  // api_key.userId to the key's owner). "How it arrived" is recorded
+  // separately (the suggestion's channel); this answers only "who".
   const parsed = [...new Set(authorIds)].map((ref) => ({
     ref,
     ...parseCallerRef(ref),

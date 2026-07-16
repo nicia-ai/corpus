@@ -78,6 +78,9 @@ import {
 } from "./project-store/commands/import-link";
 import { seedExampleCommand } from "./project-store/commands/seed";
 import {
+  addSuggestionMessageCommand,
+  type AddSuggestionMessageInput,
+  type AddSuggestionMessageResult,
   applyCreateProposalCommand,
   type ApplyCreateProposalInput,
   type ApplyCreateProposalResult,
@@ -93,6 +96,7 @@ import {
   type CreateSuggestionInput,
   type CreateSuggestionResult,
   rejectSuggestionCommand,
+  type ProposalResult,
   type RejectSuggestionInput,
   setHunkDecisionCommand,
   type SetHunkDecisionInput,
@@ -164,7 +168,10 @@ import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
 import type { RetentionPolicy } from "./store/domain/retention";
 import { deriveSearchText } from "./store/domain/search";
-import { isCreateProposal } from "./store/domain/suggestion";
+import {
+  computeProposalOutcome,
+  isCreateProposal,
+} from "./store/domain/suggestion";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
 import type { GraphHandle } from "./store/handle";
@@ -1322,11 +1329,122 @@ export class ProjectStore extends DurableObject<Env> {
     );
   }
 
+  // Caller-scoped proposal result for MCP. Ownership is checked again in
+  // the DO (in addition to scopedExecutor's closure-bound identity) so a
+  // guessed id never reveals another caller's review state.
+  async proposalResult(
+    callerRef: CallerRef,
+    proposalId: number,
+  ): Promise<ProposalResult> {
+    const u = await this.read();
+    const proposal = await u.suggestions.get(proposalId);
+    if (proposal?.createdBy !== callerRef) {
+      return { found: false };
+    }
+    const [hunks, messages] = await Promise.all([
+      u.suggestions.hunksFor(proposal.id),
+      u.suggestions.messagesForSuggestions([proposal.id]),
+    ]);
+    // These are the hunks applied to the resulting document, not provisional
+    // marks on a still-open review. Keep them empty until application commits.
+    const acceptedHunks = hunks
+      .filter((h) => proposal.status === "applied" && h.decision === "accepted")
+      .map((h) => ({
+        id: h.id,
+        ordinal: h.ordinal,
+        op: h.op,
+        baseStart: h.baseStart,
+        baseEnd: h.baseEnd,
+        proposedText: h.proposedText,
+        decision: h.decision,
+      }));
+    const outcome = computeProposalOutcome(proposal.status, hunks);
+    return compact({
+      found: true as const,
+      proposalId: proposal.id,
+      kind: isCreateProposal(proposal)
+        ? ("create" as const)
+        : ("edit" as const),
+      documentSlug: proposal.documentSlug,
+      baseDocVersion: proposal.baseDocVersion,
+      outcome,
+      resultingDocVersion: proposal.resultDocVersion ?? undefined,
+      reviewerNote: proposal.reviewerNote ?? undefined,
+      resolvedAt: proposal.resolvedAt ?? undefined,
+      acceptedHunks,
+      messages: messages.map((message) => ({
+        id: message.id,
+        body: message.body,
+        role:
+          message.createdBy === proposal.createdBy
+            ? ("proposer" as const)
+            : ("reviewer" as const),
+        channel: message.channel,
+        createdAt: message.createdAt,
+      })),
+    });
+  }
+
+  async addSuggestionMessage(
+    input: AddSuggestionMessageInput,
+  ): Promise<AddSuggestionMessageResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(
+      now,
+      (ctx) => addSuggestionMessageCommand(ctx, input),
+      (out) =>
+        out.result.ok
+          ? {
+              area: "review",
+              action: "suggestion.replied",
+              actorId: input.createdBy,
+              docSlug: out.result.documentSlug,
+              channel: input.channel,
+            }
+          : undefined,
+    );
+    return outcome.result;
+  }
+
+  // Caller-scoped MCP reply. The expected creator guard is enforced inside
+  // the write transaction, so a guessed id cannot race into another caller's
+  // proposal and a terminal proposal cannot receive a late reply.
+  async replyToProposal(
+    callerRef: CallerRef,
+    proposalId: number,
+    body: string,
+  ): Promise<AddSuggestionMessageResult> {
+    return this.addSuggestionMessage({
+      suggestionId: proposalId,
+      body,
+      createdBy: callerRef,
+      channel: "mcp",
+      expectedCreatedBy: callerRef,
+    });
+  }
+
   // Open create-proposals for the review surface (humans only — never
   // reachable through the McpExecutor port).
   async listCreateProposals(): Promise<readonly CreateProposalView[]> {
     const u = await this.read();
-    return (await u.suggestions.openCreates()).map(createProposalView);
+    const proposals = await u.suggestions.openCreates();
+    const messages = await u.suggestions.messagesForSuggestions(
+      proposals.map((proposal) => proposal.id),
+    );
+    return proposals.map((proposal) =>
+      createProposalView(
+        proposal,
+        messages
+          .filter((message) => message.suggestionId === proposal.id)
+          .map((message) => ({
+            id: message.id,
+            body: message.body,
+            createdBy: message.createdBy,
+            channel: message.channel,
+            createdAt: message.createdAt,
+          })),
+      ),
+    );
   }
 
   async applyCreateProposal(
@@ -1375,9 +1493,11 @@ export class ProjectStore extends DurableObject<Env> {
     const suggestions = (await u.suggestions.forDoc(slug)).filter(
       (s) => !isCreateProposal(s),
     );
-    const hunks = await u.suggestions.hunksForSuggestions(
-      suggestions.map((s) => s.id),
-    );
+    const ids = suggestions.map((s) => s.id);
+    const [hunks, messages] = await Promise.all([
+      u.suggestions.hunksForSuggestions(ids),
+      u.suggestions.messagesForSuggestions(ids),
+    ]);
     return suggestions.map((s) => ({
       id: s.id,
       status: s.status,
@@ -1386,6 +1506,7 @@ export class ProjectStore extends DurableObject<Env> {
       createdBy: s.createdBy,
       channel: s.channel,
       createdAt: s.createdAt,
+      reviewerNote: s.reviewerNote,
       hunks: hunks
         .filter((h) => h.suggestionId === s.id)
         .map((h) => ({
@@ -1396,6 +1517,15 @@ export class ProjectStore extends DurableObject<Env> {
           baseEnd: h.baseEnd,
           proposedText: h.proposedText,
           decision: h.decision,
+        })),
+      messages: messages
+        .filter((message) => message.suggestionId === s.id)
+        .map((message) => ({
+          id: message.id,
+          body: message.body,
+          createdBy: message.createdBy,
+          channel: message.channel,
+          createdAt: message.createdAt,
         })),
     }));
   }

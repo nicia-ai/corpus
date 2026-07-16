@@ -401,6 +401,37 @@ export function DocumentEditor({
   const showReview = hasReviewItems && !reviewDismissedNow;
   const reviewComplete = hasReviewItems && reviewModel.activeCount === 0;
 
+  // A proposal review URL uses `#proposal-N`. On desktop, scroll the margin
+  // rail; on mobile, open the review sheet first and scroll its copy. The
+  // canonical fragment anchors render once below, outside the two responsive
+  // rail copies, so the DOM never contains duplicate ids.
+  useEffect(() => {
+    const match = /^#proposal-(\d+)$/u.exec(window.location.hash);
+    const proposalId = match?.[1];
+    if (proposalId === undefined) return;
+    const mobile = window.matchMedia("(max-width: 1023px)").matches;
+    let scrollFrame: number | undefined;
+    const openFrame = window.requestAnimationFrame(() => {
+      if (mobile) setMobileReviewOpen(true);
+      setReviewDismissed(false);
+      scrollFrame = window.requestAnimationFrame(() => {
+        const selector = `[data-proposal-id="${proposalId}"]`;
+        const root = mobile
+          ? document.querySelector<HTMLElement>(
+              '[role="dialog"][aria-label="Document review"]',
+            )
+          : document;
+        root?.querySelector<HTMLElement>(selector)?.scrollIntoView({
+          block: "center",
+        });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(openFrame);
+      if (scrollFrame !== undefined) window.cancelAnimationFrame(scrollFrame);
+    };
+  }, []);
+
   // A string signature of the open threads, so the comment marks memo can
   // skip the per-block remark parse (blockAnchorsToSourceRanges) when a
   // collab ping refreshes the loader (new array identity) but the open
@@ -893,6 +924,15 @@ export function DocumentEditor({
 
   return (
     <div className="max-w-7xl">
+      {reviewModel.items.map((item) =>
+        item.kind === "suggestion" ? (
+          <span
+            key={`proposal-anchor-${String(item.suggestion.id)}`}
+            id={`proposal-${String(item.suggestion.id)}`}
+            aria-hidden="true"
+          />
+        ) : null,
+      )}
       {renaming ? (
         <RenameField
           label="Title"
@@ -1051,6 +1091,10 @@ function collabToastMessage(
       return change.channel === "mcp"
         ? "An agent proposed an edit via MCP"
         : `${actor} suggested an edit`;
+    case "suggestion.replied":
+      return change.channel === "mcp"
+        ? "The proposing agent replied"
+        : `${actor} replied to a proposal`;
     case "suggestion.applied":
       return `${actor} applied accepted changes`;
     case "suggestion.rejected":
