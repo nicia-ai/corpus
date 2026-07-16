@@ -5,6 +5,7 @@ import type {
   ProjectId,
 } from "../ids";
 import type {
+  AddSuggestionMessageResult,
   CreateDocProposalResult,
   CreateSuggestionResult,
   ProposalResult,
@@ -115,4 +116,12 @@ export type McpExecutor = Readonly<{
     callerRef: CallerRef,
     proposalId: number,
   ) => Promise<ProposalResult>;
+  // Proposal-scoped conversation only. The DO accepts a reply when this
+  // caller created the still-open proposal; general document comments are
+  // intentionally absent from the MCP port.
+  replyToProposal: (
+    callerRef: CallerRef,
+    proposalId: number,
+    body: string,
+  ) => Promise<AddSuggestionMessageResult>;
 }>;

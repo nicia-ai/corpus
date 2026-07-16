@@ -116,6 +116,7 @@ the Connection's bound Collection:
 | `suggest_edit`          | Propose an edit to a document — or a NEW document (pass a fresh slug/path with `baseDocVersion: 0`). Always a reviewable suggestion a human applies; never an auto-applied write. |
 | `get_proposal_result`   | Check one of this caller's proposals for its human outcome, accepted hunks, resulting document version, and optional reviewer note. Other callers' proposals remain invisible.    |
 | `await_proposal_review` | Wait up to 25 seconds for one of this caller's open proposals to receive a human decision, returning early when it settles.                                                       |
+| `reply_to_proposal`     | Reply inside one of this caller's still-open proposals. It cannot access document comments, resolve feedback, or act on another caller's proposal.                                |
 
 The same data is also exposed as MCP **resources**:
 `collection://<slug>`, `collection://<slug>/outline`, and
@@ -132,12 +133,23 @@ export is the owner path (web UI), never the agent surface.
 
 After `suggest_edit` returns a `suggestionId` and canonical `reviewUrl`, hand
 the URL to the reviewer and pass the id to `await_proposal_review`. The wait
-returns as soon as a decision lands or after 25 seconds with `timedOut: true`;
-the agent can call it again without losing state. `get_proposal_result` is the
+returns as soon as a decision or new proposal message lands, or after 25
+seconds with `timedOut: true`; the agent can call it again without losing
+state. Pass the largest message id already seen as `afterMessageId` so each
+wait wakes only for newer feedback. `get_proposal_result` is the
 non-waiting form. Outcomes are `open`, `applied`,
 `partially_applied`, `rejected`, or `stale`, so an agent can distinguish a
 complete acceptance from a human-selected subset and continue from the
 resulting canonical version.
+
+Reviewers can also send proposal-scoped messages before deciding. Those
+messages appear in `get_proposal_result` and `await_proposal_review` as
+`role: "reviewer"` without a user id. The agent can answer with
+`reply_to_proposal`, then file a revised proposal with `suggest_edit` if the
+requested change warrants one. Only the human reviewer can settle the review;
+the reply tool neither resolves feedback nor changes canonical content. A
+revised proposal starts a new review thread; the settled predecessor remains an
+immutable audit record rather than silently carrying messages into new work.
 
 For anything beyond a small rules-style Collection, toggle **Always
 include** on for the documents the agent must always start from and

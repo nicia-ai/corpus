@@ -44,8 +44,9 @@ version history.
   threaded **comments** anchored to text that follow it across edits and
   moves; **suggestions** reviewed and applied per hunk; live **presence**
   of who's viewing; and a verifiable **edit history** any version can be
-  restored from. The full review layer stays off MCP and out of the bundle;
-  an originating agent can only retrieve its own proposal's settled outcome.
+  restored from. General document review stays off MCP and the full review
+  layer stays out of the bundle; an originating agent can only retrieve and
+  reply inside its own proposal.
 - **Collections** — an ordered set of documents assembled into one
   corpus, with a token-size estimate so you can see when a collection is
   too large for an agent to use well.
@@ -59,8 +60,11 @@ version history.
   `get_proposal_result`, the originating caller can retrieve the outcome,
   accepted hunks, resulting version, and optional reviewer note. The proposal
   response includes a canonical review URL, and `await_proposal_review`
-  provides a bounded human-handoff wait. Comments and unrelated suggestion
-  state remain off-MCP.
+  provides a bounded human-handoff wait. Proposal-scoped reviewer messages
+  come back with the result, and `reply_to_proposal` lets the agent answer
+  without exposing human identity or granting access to document comments.
+  Agents still cannot resolve feedback or apply a proposal; unrelated review
+  state remains off-MCP.
 - **CLI** — a Git-free `pull`/`push` tool (`pnpm corpus`) over a
   collection-scoped REST surface (`/api/v1/docs`), for editing documents
   from a terminal or CI with the same optimistic-concurrency contract as

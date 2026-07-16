@@ -52,6 +52,12 @@ export const ledgerMigrations: LedgerMigrationBundle = {
         "when": 1784151610362,
         "tag": "0005_messy_mauler",
         "breakpoints": true
+      },
+      {
+        "idx": 6,
+        "when": 1784153463017,
+        "tag": "0006_high_tana_nile",
+        "breakpoints": true
       }
     ]
   },
@@ -61,6 +67,7 @@ export const ledgerMigrations: LedgerMigrationBundle = {
     "m0002": "CREATE TABLE `suggestion` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`document_slug` text NOT NULL,\n\t`base_doc_version` integer NOT NULL,\n\t`proposed_markdown` text NOT NULL,\n\t`status` text NOT NULL,\n\t`created_by` text NOT NULL,\n\t`created_at` text NOT NULL,\n\t`resolved_by` text,\n\t`resolved_at` text,\n\tCONSTRAINT \"suggestion_status_valid\" CHECK(status in ('open', 'applied', 'rejected', 'stale'))\n);\n--> statement-breakpoint\nCREATE INDEX `suggestion_doc` ON `suggestion` (`document_slug`);--> statement-breakpoint\nCREATE TABLE `suggestion_hunk` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`suggestion_id` integer NOT NULL,\n\t`ordinal` integer NOT NULL,\n\t`op` text NOT NULL,\n\t`base_start` integer NOT NULL,\n\t`base_end` integer NOT NULL,\n\t`proposed_text` text NOT NULL,\n\t`decision` text NOT NULL,\n\tCONSTRAINT \"suggestion_hunk_op_valid\" CHECK(op in ('replace', 'insert', 'delete')),\n\tCONSTRAINT \"suggestion_hunk_decision_valid\" CHECK(decision in ('pending', 'accepted', 'rejected'))\n);\n--> statement-breakpoint\nCREATE INDEX `suggestion_hunk_suggestion` ON `suggestion_hunk` (`suggestion_id`);",
     "m0003": "ALTER TABLE `suggestion` ADD `channel` text DEFAULT 'web' NOT NULL;",
     "m0004": "ALTER TABLE `suggestion` ADD `proposed_path` text;--> statement-breakpoint\nALTER TABLE `suggestion` ADD `origin_collection_slug` text;",
-    "m0005": "ALTER TABLE `suggestion` ADD `result_doc_version` integer;--> statement-breakpoint\nALTER TABLE `suggestion` ADD `reviewer_note` text;"
+    "m0005": "ALTER TABLE `suggestion` ADD `result_doc_version` integer;--> statement-breakpoint\nALTER TABLE `suggestion` ADD `reviewer_note` text;",
+    "m0006": "CREATE TABLE `suggestion_message` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`suggestion_id` integer NOT NULL,\n\t`body` text NOT NULL,\n\t`created_by` text NOT NULL,\n\t`channel` text NOT NULL,\n\t`created_at` text NOT NULL\n);\n--> statement-breakpoint\nCREATE INDEX `suggestion_message_suggestion` ON `suggestion_message` (`suggestion_id`);"
   }
 };

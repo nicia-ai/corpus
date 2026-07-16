@@ -43,6 +43,7 @@ const REVIEW_ACTIONS = [
   "comment.replied",
   "comment.resolved",
   "suggestion.created",
+  "suggestion.replied",
   "suggestion.applied",
   "suggestion.rejected",
 ] as const;

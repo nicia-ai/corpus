@@ -1091,6 +1091,10 @@ function collabToastMessage(
       return change.channel === "mcp"
         ? "An agent proposed an edit via MCP"
         : `${actor} suggested an edit`;
+    case "suggestion.replied":
+      return change.channel === "mcp"
+        ? "The proposing agent replied"
+        : `${actor} replied to a proposal`;
     case "suggestion.applied":
       return `${actor} applied accepted changes`;
     case "suggestion.rejected":
