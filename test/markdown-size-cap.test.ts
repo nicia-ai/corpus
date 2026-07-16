@@ -166,11 +166,14 @@ describe("markdown byte cap — DO commands (the authority)", () => {
   });
 });
 
-// The shared transport pre-filter the server fns (saveDocument /
-// createSuggestion) and the REST/MCP schemas all reference. Length-based:
-// utf8Bytes(s) >= s.length, so exceeding it guarantees exceeding the byte
-// cap — sound, but the multi-byte case above is why the DO stays authority.
-describe("markdown byte cap — markdownBodyZ transport pre-filter", () => {
+// The transport pre-filter the REST and MCP schemas reference. The WEB
+// server fns intentionally do NOT use it — their validators keep plain
+// z.string() and the handlers call markdownTooLarge instead, so an
+// over-limit submission surfaces as a clean ValidationError rather than
+// serialized Zod issues. Length-based: utf8Bytes(s) >= s.length, so
+// exceeding it guarantees exceeding the byte cap — sound, but the
+// multi-byte case above is why the DO stays authority.
+describe("markdown byte cap — markdownBodyZ REST/MCP pre-filter", () => {
   it("rejects an over-length body with the shared message", () => {
     const r = markdownBodyZ.safeParse(OVERSIZED);
     expect(r.success).toBe(false);
