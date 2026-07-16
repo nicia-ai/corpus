@@ -17,20 +17,25 @@ import {
 // never reorders, so a moved block becomes an explicit delete + insert
 // pair — granular, faithful, reviewable; exactly what git shows.
 //
-// Two passes:
-//   1. LCS over exact block signatures (kind + whitespace-normalized
-//      text) — the unchanged skeleton. Byte comparison stays the
-//      caller's job: a signature match is NOT proof the bytes matched.
-//   2. Between consecutive anchors, pair the same-kind leftovers that
+// Three passes:
+//   1. Patience anchoring: signatures unique in BOTH sequences, kept in
+//      order via longest-increasing-subsequence — O((n+m) log) and, in
+//      prose (where almost every block is unique), it pins nearly the
+//      whole skeleton no matter how large the document is or how far
+//      apart the edits sit.
+//   2. LCS over exact block signatures inside each gap between patience
+//      anchors — catches repeated non-unique blocks (`---` breaks,
+//      duplicate bullets). Byte comparison stays the caller's job: a
+//      signature match is NOT proof the bytes matched.
+//   3. Between consecutive anchors, pair the same-kind leftovers that
 //      face each other as replaces when their idf-weighted token
 //      similarity clears the anchor matcher's threshold, so an in-place
 //      edit classifies as ONE replace hunk exactly as it did before.
 //
-// Pure, zero-IO. Both passes are O(n·m) DPs over block counts —
-// documents are hundreds of blocks and inputs are capped at 1 MB well
-// upstream. A pathological pair that would exceed MAX_DP_CELLS skips the
-// DP (greedy prefix/suffix anchors only) and leaves byte fidelity to the
-// diff's self-verification.
+// Pure, zero-IO. The gap DPs are O(n·m) over GAP sizes, which patience
+// keeps small for real documents; a pathological gap that would exceed
+// MAX_DP_CELLS is skipped (its blocks fall out as delete + insert) and
+// byte fidelity is left to the diff's self-verification.
 
 // For each proposed block index: the base block index shown at that
 // position, or undefined for an insertion. Defined values are strictly
@@ -38,7 +43,13 @@ import {
 // deletions.
 export type BlockAlignment = readonly (number | undefined)[];
 
-const MAX_DP_CELLS = 4_000_000;
+// Empirically calibrated (2026-07-16): the gap DPs cost ~1.2µs/cell on
+// dev hardware, so 160k cells (a 400×400-block gap between patience
+// anchors) bounds any single DP at ~200ms — and real gaps are tiny, so
+// the practical cost is milliseconds. The previous 4M ceiling admitted
+// ~5s pathological diffs on a serialized DO. Beyond the ceiling a gap is
+// left unpaired (delete + insert) and self-verification decides.
+const MAX_DP_CELLS = 160_000;
 
 export function alignBlocks(
   input: Readonly<{
@@ -76,19 +87,42 @@ export function alignBlocks(
     aligned[propHi] = baseHi;
   }
 
-  for (const [i, j] of lcsAnchors({ baseSigs, propSigs, lo, baseHi, propHi })) {
-    aligned[j] = i;
+  // Patience skeleton over the trimmed middle, then exact-match LCS
+  // inside each gap between consecutive patience anchors (the final
+  // iteration, against the trim boundary, covers the tail gap).
+  const anchors = patienceAnchors({ baseSigs, propSigs, lo, baseHi, propHi });
+  let gapBaseLo = lo;
+  let gapPropLo = lo;
+  const gaps: (readonly [number, number])[] = [
+    ...anchors,
+    [baseHi, propHi] as const,
+  ];
+  for (const [gapIndex, [bi, pj]] of gaps.entries()) {
+    for (const [i, j] of lcsAnchors({
+      baseSigs,
+      propSigs,
+      baseLo: gapBaseLo,
+      baseHi: bi,
+      propLo: gapPropLo,
+      propHi: pj,
+    })) {
+      aligned[j] = i;
+    }
+    if (gapIndex < anchors.length) aligned[pj] = bi; // a real anchor, not the boundary
+    gapBaseLo = bi + 1;
+    gapPropLo = pj + 1;
   }
 
   pairFacingLeftovers({ base, proposed, aligned });
   return aligned;
 }
 
-// Longest common subsequence of exact signatures over the untrimmed
-// middle, as strictly-increasing (base, proposed) index pairs. On a tie
-// the walk prefers consuming a base block — deletes surface before
-// inserts, the conventional diff shape.
-function lcsAnchors(
+// Signatures occurring exactly once in BOTH untrimmed middles, kept when
+// they appear in the same relative order (longest increasing subsequence
+// of base indices over proposed order). In prose nearly every block is
+// unique, so this pins the skeleton in O((n+m) log) regardless of how far
+// apart the edits sit — the trick patience diff is named for.
+function patienceAnchors(
   input: Readonly<{
     baseSigs: readonly string[];
     propSigs: readonly string[];
@@ -98,18 +132,91 @@ function lcsAnchors(
   }>,
 ): readonly (readonly [number, number])[] {
   const { baseSigs, propSigs, lo, baseHi, propHi } = input;
-  const n = baseHi - lo;
-  const m = propHi - lo;
-  if (n === 0 || m === 0 || n * m > MAX_DP_CELLS) return [];
+  const seen = new Map<
+    string,
+    {
+      baseCount: number;
+      baseIndex: number;
+      propCount: number;
+      propIndex: number;
+    }
+  >();
+  for (let i = lo; i < baseHi; i += 1) {
+    const sig = baseSigs[i] ?? "";
+    const e = seen.get(sig) ?? {
+      baseCount: 0,
+      baseIndex: 0,
+      propCount: 0,
+      propIndex: 0,
+    };
+    e.baseCount += 1;
+    e.baseIndex = i;
+    seen.set(sig, e);
+  }
+  for (let j = lo; j < propHi; j += 1) {
+    const e = seen.get(propSigs[j] ?? "");
+    if (e === undefined) continue;
+    e.propCount += 1;
+    e.propIndex = j;
+  }
+  const candidates = [...seen.values()]
+    .filter((e) => e.baseCount === 1 && e.propCount === 1)
+    .sort((a, b) => a.propIndex - b.propIndex);
+
+  // Longest STRICTLY increasing subsequence of baseIndex over proposed
+  // order — patience sorting with binary search, O(k log k).
+  const tailIndexes: number[] = []; // candidate index holding each pile's tail
+  const predecessor = new Array<number>(candidates.length).fill(-1);
+  candidates.forEach((c, k) => {
+    let low = 0;
+    let high = tailIndexes.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      const tail = candidates[tailIndexes[mid] ?? 0];
+      if ((tail?.baseIndex ?? 0) < c.baseIndex) low = mid + 1;
+      else high = mid;
+    }
+    predecessor[k] = low > 0 ? (tailIndexes[low - 1] ?? -1) : -1;
+    tailIndexes[low] = k;
+  });
+  const chain: (readonly [number, number])[] = [];
+  let at =
+    tailIndexes.length > 0 ? (tailIndexes[tailIndexes.length - 1] ?? -1) : -1;
+  while (at >= 0) {
+    const c = candidates[at];
+    if (c !== undefined) chain.push([c.baseIndex, c.propIndex]);
+    at = predecessor[at] ?? -1;
+  }
+  return chain.reverse();
+}
+
+// Longest common subsequence of exact signatures over one gap, as
+// strictly-increasing (base, proposed) index pairs. On a tie the walk
+// prefers consuming a base block — deletes surface before inserts, the
+// conventional diff shape.
+function lcsAnchors(
+  input: Readonly<{
+    baseSigs: readonly string[];
+    propSigs: readonly string[];
+    baseLo: number;
+    baseHi: number;
+    propLo: number;
+    propHi: number;
+  }>,
+): readonly (readonly [number, number])[] {
+  const { baseSigs, propSigs, baseLo, baseHi, propLo, propHi } = input;
+  const n = baseHi - baseLo;
+  const m = propHi - propLo;
+  if (n <= 0 || m <= 0 || n * m > MAX_DP_CELLS) return [];
   // Flattened (n+1)×(m+1) table; dp[x][y] = LCS length of
-  // baseSigs[lo+x..baseHi) vs propSigs[lo+y..propHi). Suffix-indexed so
-  // the pair walk runs forward through both sequences.
+  // baseSigs[baseLo+x..baseHi) vs propSigs[propLo+y..propHi).
+  // Suffix-indexed so the pair walk runs forward through both sequences.
   const width = m + 1;
   const dp = new Uint32Array((n + 1) * width);
   for (let x = n - 1; x >= 0; x -= 1) {
     for (let y = m - 1; y >= 0; y -= 1) {
       dp[x * width + y] =
-        baseSigs[lo + x] === propSigs[lo + y]
+        baseSigs[baseLo + x] === propSigs[propLo + y]
           ? (dp[(x + 1) * width + y + 1] ?? 0) + 1
           : Math.max(dp[(x + 1) * width + y] ?? 0, dp[x * width + y + 1] ?? 0);
     }
@@ -118,8 +225,8 @@ function lcsAnchors(
   let x = 0;
   let y = 0;
   while (x < n && y < m) {
-    if (baseSigs[lo + x] === propSigs[lo + y]) {
-      pairs.push([lo + x, lo + y]);
+    if (baseSigs[baseLo + x] === propSigs[propLo + y]) {
+      pairs.push([baseLo + x, propLo + y]);
       x += 1;
       y += 1;
     } else if ((dp[(x + 1) * width + y] ?? 0) >= (dp[x * width + y + 1] ?? 0)) {

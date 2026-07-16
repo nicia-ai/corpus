@@ -125,12 +125,22 @@ export type SuggestionDiff = Readonly<{
 // diff degrades to ONE whole-document hunk: the review loses per-block
 // granularity but can never silently drop or distort part of what the
 // proposer wrote. Correctness beats granularity.
+// Above this many hunks, per-hunk review is noise, not granularity — the
+// reviewer cannot meaningfully decide hundreds of cards, and the hunk-row
+// storage cost scales with the count. Degrade to one whole-document
+// decision instead. (Real proposals touch a handful of blocks; the cap
+// only fires on bulk rewrites.)
+export const MAX_HUNKS_PER_SUGGESTION = 100;
+
 export function diffSuggestion(base: string, proposed: string): SuggestionDiff {
   if (base === proposed) return { hunks: [], granularity: "block" };
   const hunks = blockHunks(base, proposed);
   // Note a zero-hunk block diff (a change entirely invisible to the block
   // lens) fails here too: reverting nothing returns the proposal.
-  if (applyHunks({ base, proposed, rejected: hunks }) === base) {
+  if (
+    hunks.length <= MAX_HUNKS_PER_SUGGESTION &&
+    applyHunks({ base, proposed, rejected: hunks }) === base
+  ) {
     return { hunks, granularity: "block" };
   }
   return {

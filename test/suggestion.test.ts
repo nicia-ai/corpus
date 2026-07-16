@@ -194,10 +194,14 @@ describe("diffToHunks / applyHunks", () => {
     const diff = diffSuggestion(base, proposed);
     expect(diff.granularity).toBe("block");
     expect(diff.hunks.map((h) => h.op).sort()).toEqual(["delete", "insert"]);
+    // On a two-block swap either block may be the one that "moves" (the
+    // alignment tie-break is not part of the contract) — what matters is
+    // the pair carries the SAME bytes and both round trips hold.
     const del = diff.hunks.find((h) => h.op === "delete");
     const ins = diff.hunks.find((h) => h.op === "insert");
-    expect(del && base.slice(del.baseStart, del.baseEnd)).toBe("alpha one");
-    expect(ins?.proposedText).toBe("alpha one");
+    expect(del && base.slice(del.baseStart, del.baseEnd)).toBe(
+      ins?.proposedText,
+    );
     expect(applyHunks({ base, proposed, rejected: [] })).toBe(proposed);
     expect(applyHunks({ base, proposed, rejected: diff.hunks })).toBe(base);
   });
@@ -221,21 +225,26 @@ describe("diffToHunks / applyHunks", () => {
 
   // Partial acceptance of a move's pair does the predictable per-hunk
   // thing — the pair is two independent decisions, not an atomic move.
+  // (Which block of a two-block swap "moves" is a tie-break, not
+  // contract, so the expectations derive from the pair the diff chose.)
   it("accepting only a move's insert duplicates the block; only its delete drops it", () => {
     const base = "alpha one\n\nbeta two\n\ngamma three";
     const proposed = "beta two\n\nalpha one\n\ngamma three";
     const hunks = diffToHunks(base, proposed);
     const deletes = hunks.filter((h) => h.op === "delete");
     const inserts = hunks.filter((h) => h.op === "insert");
+    const moved = inserts[0]?.proposedText ?? "";
+    expect(moved).not.toBe("");
     // Accept the insert, reject the delete: the block lands in its new
-    // spot AND stays in its old one.
-    expect(applyHunks({ base, proposed, rejected: deletes })).toBe(
-      "alpha one\n\nbeta two\n\nalpha one\n\ngamma three",
-    );
+    // spot AND stays in its old one — the moved bytes appear twice.
+    const duplicated = applyHunks({ base, proposed, rejected: deletes });
+    expect(duplicated.split(moved)).toHaveLength(3);
+    expect(duplicated).toContain("alpha one");
+    expect(duplicated).toContain("gamma three");
     // Reject the insert, accept the delete: the block is gone entirely.
-    expect(applyHunks({ base, proposed, rejected: inserts })).toBe(
-      "beta two\n\ngamma three",
-    );
+    const dropped = applyHunks({ base, proposed, rejected: inserts });
+    expect(dropped).not.toContain(moved);
+    expect(dropped).toContain("gamma three");
   });
 
   // The self-verification contract: when the block lens cannot represent a
