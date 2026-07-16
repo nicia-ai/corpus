@@ -107,6 +107,8 @@ const toHunk = (h: SuggestionHunkRow): Hunk => ({
   op: h.op,
   baseStart: h.baseStart,
   baseEnd: h.baseEnd,
+  propStart: h.propStart,
+  propEnd: h.propEnd,
   proposedText: h.proposedText,
   // Separator semantics live on the Hunk type (src/store/domain/suggestion.ts).
   leadSep: h.leadSep,
@@ -176,6 +178,8 @@ export async function createSuggestionCommand(
       op: h.op,
       baseStart: h.baseStart,
       baseEnd: h.baseEnd,
+      propStart: h.propStart,
+      propEnd: h.propEnd,
       proposedText: h.proposedText,
       leadSep: h.leadSep,
       trailSep: h.trailSep,

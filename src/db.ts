@@ -228,6 +228,11 @@ export const suggestionHunk = sqliteTable(
     op: text("op", { enum: HUNK_OPS }).notNull(),
     baseStart: integer("base_start").notNull(),
     baseEnd: integer("base_end").notNull(),
+    // Half-open range into the suggestion's stored proposedMarkdown —
+    // semantics on the canonical Hunk type in src/store/domain/suggestion.ts.
+    // The defaults exist only for the ADD COLUMN migration backfill.
+    propStart: integer("prop_start").notNull().default(0),
+    propEnd: integer("prop_end").notNull().default(0),
     proposedText: text("proposed_text").notNull(),
     // Separator bytes around the block in the proposed source; semantics
     // (incl. the '' legacy-row fallback) live on the canonical Hunk type in

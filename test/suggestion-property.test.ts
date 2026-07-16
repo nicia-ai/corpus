@@ -211,6 +211,21 @@ describe("suggestion hunks (property)", () => {
     );
   });
 
+  it("hunks carry faithful proposed-side ranges", () => {
+    fc.assert(
+      fc.property(scenarioArb, ({ base, proposed }) => {
+        for (const h of diffToHunks(base, proposed)) {
+          // The stored text is exactly the proposed slice (ranges into the
+          // two immutable blobs are the representation; the copy is a
+          // hydration convenience), and a delete's range is zero-width.
+          expect(proposed.slice(h.propStart, h.propEnd)).toBe(h.proposedText);
+          if (h.op === "delete") expect(h.propStart).toBe(h.propEnd);
+        }
+      }),
+      PROPERTY_RUNS,
+    );
+  });
+
   it("application is independent of hunk input order", () => {
     fc.assert(
       fc.property(scenarioArb, ({ base, proposed }) => {

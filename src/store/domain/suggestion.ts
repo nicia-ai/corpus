@@ -70,7 +70,18 @@ export type Hunk = Readonly<{
   // fence (a frontmatter prepend).
   baseStart: number;
   baseEnd: number;
-  // New source for replace / insert; empty for delete.
+  // Half-open range into the PROPOSED document (the suggestion's stored
+  // proposedMarkdown). The mirror of baseStart/baseEnd: ranges into two
+  // immutable blobs cannot lie, unlike copied strings — separators are
+  // derived by slicing the proposed bytes around these ranges. Zero-width
+  // at the junction point for `delete` (where the surviving neighbors meet
+  // in the proposed source), and for the frontmatter-region `replace` when
+  // the proposal strips the fence entirely.
+  propStart: number;
+  propEnd: number;
+  // New source for replace / insert; empty for delete. Always equals
+  // `proposed.slice(propStart, propEnd)` — stored so hydration for the
+  // review UI needs no re-slice.
   proposedText: string;
   // The separator bytes around this block in the PROPOSED source, captured
   // so applyHunks can splice what the proposer actually wrote instead of
@@ -96,6 +107,8 @@ const wholeDocumentHunk = (base: string, proposed: string): Hunk => ({
   op: "replace",
   baseStart: 0,
   baseEnd: base.length,
+  propStart: 0,
+  propEnd: proposed.length,
   proposedText: proposed,
   leadSep: "",
   trailSep: "",
@@ -160,6 +173,8 @@ function blockHunks(base: string, proposed: string): readonly Hunk[] {
       op: "replace",
       baseStart: 0,
       baseEnd: baseFmEnd,
+      propStart: 0,
+      propEnd: propFmEnd,
       proposedText: proposed.slice(0, propFmEnd),
       leadSep: "",
       trailSep: "",
@@ -218,6 +233,8 @@ function blockHunks(base: string, proposed: string): readonly Hunk[] {
           op: "replace",
           baseStart: bb.sourceStart,
           baseEnd: bb.sourceEnd,
+          propStart: pb.sourceStart,
+          propEnd: pb.sourceEnd,
           proposedText,
           leadSep: sepBefore(j),
           trailSep: sepAfter(j),
@@ -230,6 +247,8 @@ function blockHunks(base: string, proposed: string): readonly Hunk[] {
         op: "insert",
         baseStart: seam,
         baseEnd: seam,
+        propStart: pb.sourceStart,
+        propEnd: pb.sourceEnd,
         proposedText,
         leadSep: sepBefore(j),
         trailSep: sepAfter(j),
@@ -255,11 +274,21 @@ function blockHunks(base: string, proposed: string): readonly Hunk[] {
       lastCarriedProposed !== undefined
         ? sepAfter(lastCarriedProposed)
         : wsBetween(propFmEnd, proposedBlocks[0]?.sourceStart ?? propFmEnd);
+    // Zero-width proposed point where the deleted block WOULD sit: the end
+    // of the nearest surviving block's proposed source (before the junction
+    // whitespace), or the end of the frontmatter region when nothing
+    // survives before it.
+    const point =
+      lastCarriedProposed !== undefined
+        ? (proposedBlocks[lastCarriedProposed]?.sourceEnd ?? propFmEnd)
+        : propFmEnd;
     hunks.push({
       ordinal: (ordinal += 1),
       op: "delete",
       baseStart: bb.sourceStart,
       baseEnd: bb.sourceEnd,
+      propStart: point,
+      propEnd: point,
       proposedText: "",
       leadSep: junction,
       trailSep: "",
