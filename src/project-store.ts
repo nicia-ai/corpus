@@ -1506,6 +1506,7 @@ export class ProjectStore extends DurableObject<Env> {
       id: s.id,
       status: s.status,
       baseDocVersion: s.baseDocVersion,
+      granularity: s.granularity,
       proposedMarkdown: s.proposedMarkdown,
       createdBy: s.createdBy,
       channel: s.channel,

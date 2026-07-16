@@ -31,8 +31,16 @@ export class SuggestionRepo {
   }
 
   async addHunks(rows: readonly NewSuggestionHunk[]): Promise<void> {
-    if (rows.length === 0) return;
-    await this.db.insert(suggestionHunk).values([...rows]);
+    // SQLite-backed Durable Objects bind at most 100 parameters per query,
+    // and each hunk row binds 9 values (suggestionId, ordinal, op,
+    // baseStart, baseEnd, proposedText, propStart, propEnd, decision) —
+    // 12+ hunks in one INSERT overflow the limit. Batch at ⌊100/9⌋ = 11
+    // rows; addHunks always runs inside the DO write transaction, so the
+    // batches stay atomic.
+    const BATCH = 11;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      await this.db.insert(suggestionHunk).values(rows.slice(i, i + BATCH));
+    }
   }
 
   async addMessage(row: NewSuggestionMessage): Promise<number> {

@@ -1,0 +1,1 @@
+ALTER TABLE `suggestion` ADD `granularity` text DEFAULT 'block' NOT NULL;

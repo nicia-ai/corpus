@@ -16,6 +16,44 @@ async function seed(store: Store, slug: ReturnType<typeof docSlug>) {
 }
 
 describe("suggestions (DO + D1 integration)", () => {
+  // Regression: SQLite-backed DOs allow 100 bound parameters per query and
+  // a hunk row binds 9 values, so a single-statement insert of 12+ hunks
+  // overflowed the limit and failed the whole create. Hunk inserts batch
+  // at 11 rows; this proposal produces well past one batch.
+  it("stores a suggestion with more hunks than one insert batch", async () => {
+    const store = freshStore("sug");
+    const slug = docSlug("doc-many-hunks");
+    const paragraphs = Array.from(
+      { length: 14 },
+      (_, i) => `paragraph number ${String(i)} with stable body text`,
+    );
+    await store.saveDocument({
+      slug,
+      markdown: paragraphs.join("\n\n"),
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+
+    // Edit every paragraph → one replace hunk each (14 hunks, 126 bound
+    // parameters if inserted unbatched).
+    const proposed = paragraphs.map((p) => `${p} EDITED`).join("\n\n");
+    const r = await store.createSuggestion({
+      slug,
+      proposedMarkdown: proposed,
+      clientVersion: 1,
+      createdBy: "bob",
+    });
+    expect(r).toMatchObject({ ok: true, hunkCount: 14 });
+
+    const list = await store.listSuggestions(slug);
+    expect(list[0]?.hunks).toHaveLength(14);
+    expect(list[0]?.granularity).toBe("block");
+    // Ordinals intact across batches.
+    expect(list[0]?.hunks.map((h) => h.ordinal)).toEqual(
+      Array.from({ length: 14 }, (_, i) => i + 1),
+    );
+  });
+
   it("creates a suggestion, decomposes it into hunks, lists it", async () => {
     const store = freshStore("sug");
     const slug = docSlug("doc");
@@ -32,9 +70,36 @@ describe("suggestions (DO + D1 integration)", () => {
     const list = await store.listSuggestions(slug);
     expect(list).toHaveLength(1);
     expect(list[0]?.status).toBe("open");
+    expect(list[0]?.granularity).toBe("block");
     expect(list[0]?.hunks).toHaveLength(1);
     expect(list[0]?.hunks[0]?.op).toBe("insert");
     expect(list[0]?.hunks[0]?.decision).toBe("pending");
+  });
+
+  it("records whole-document granularity when the diff degrades", async () => {
+    const store = freshStore("sug");
+    const slug = docSlug("doc-degrade");
+    await store.saveDocument({
+      slug,
+      markdown: "- alpha item\n\n- beta item",
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+
+    // A spacing-only change (both blocks byte-identical) is invisible to
+    // the block lens, so the diff degrades to one whole-document hunk —
+    // and the row records that fact.
+    const r = await store.createSuggestion({
+      slug,
+      proposedMarkdown: "- alpha item\n- beta item",
+      clientVersion: 1,
+      createdBy: "bob",
+    });
+    expect(r).toMatchObject({ ok: true, hunkCount: 1 });
+
+    const list = await store.listSuggestions(slug);
+    expect(list[0]?.granularity).toBe("whole-document");
+    expect(list[0]?.hunks[0]?.op).toBe("replace");
   });
 
   it("accepts a hunk and applies it as a new version", async () => {

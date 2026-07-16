@@ -22,11 +22,12 @@ import {
 import {
   applyHunks,
   CREATE_PROPOSAL_BASE_VERSION,
-  diffToHunks,
+  diffSuggestion,
   type Hunk,
   type HunkOp,
   isCreateProposal,
   type ProposalOutcome,
+  type SuggestionGranularity,
 } from "../../store/domain/suggestion";
 import { markdownTooLarge } from "../../util";
 import {
@@ -64,6 +65,9 @@ export type SuggestionView = Readonly<{
   id: number;
   status: SuggestionStatus;
   baseDocVersion: number;
+  // Whether this proposal reviews per-block or as one whole-document hunk
+  // (the diff degraded) — see SUGGESTION_GRANULARITIES in the domain.
+  granularity: SuggestionGranularity;
   proposedMarkdown: string;
   createdBy: string;
   // How the proposal arrived (web / mcp / cli) — drives the "via" label
@@ -107,10 +111,9 @@ const toHunk = (h: SuggestionHunkRow): Hunk => ({
   op: h.op,
   baseStart: h.baseStart,
   baseEnd: h.baseEnd,
+  propStart: h.propStart,
+  propEnd: h.propEnd,
   proposedText: h.proposedText,
-  // Separator semantics live on the Hunk type (src/store/domain/suggestion.ts).
-  leadSep: h.leadSep,
-  trailSep: h.trailSep,
 });
 
 // — Create ———————————————————————————————————————————————————————————
@@ -152,7 +155,7 @@ export async function createSuggestionCommand(
     throw new ConflictError(head.docVersion);
   }
   const base = (await ctx.u.blobs.get(head.contentHash)) ?? "";
-  const hunks = diffToHunks(base, input.proposedMarkdown);
+  const { hunks, granularity } = diffSuggestion(base, input.proposedMarkdown);
   if (hunks.length === 0) {
     return commandOutcome({ ok: false, reason: "no-change" });
   }
@@ -168,6 +171,8 @@ export async function createSuggestionCommand(
     // runtime default.
     channel: input.channel ?? "web",
     createdAt: ctx.now,
+    // Observability: whether the diff degraded to the whole-document hunk.
+    granularity,
   });
   await ctx.u.suggestions.addHunks(
     hunks.map((h) => ({
@@ -176,9 +181,9 @@ export async function createSuggestionCommand(
       op: h.op,
       baseStart: h.baseStart,
       baseEnd: h.baseEnd,
+      propStart: h.propStart,
+      propEnd: h.propEnd,
       proposedText: h.proposedText,
-      leadSep: h.leadSep,
-      trailSep: h.trailSep,
       decision: "pending",
     })),
   );
@@ -574,22 +579,18 @@ export async function applySuggestionCommand(
     });
   }
   const allHunks = await ctx.u.suggestions.hunksFor(s.id);
-  const accepted = allHunks.filter((h) => h.decision === "accepted");
-  if (accepted.length === 0) {
+  if (!allHunks.some((h) => h.decision === "accepted")) {
     return commandOutcome({ ok: false, reason: "nothing-accepted" });
   }
-  // Every hunk accepted ⇒ the new version is the stored proposal VERBATIM.
-  // For rows created since diffToHunks became self-verifying the splice
-  // would produce the same bytes; this branch exists for LEGACY rows (empty
-  // separator columns, pre-0007) whose splice re-synthesizes joins — and it
-  // skips the base blob read on the most common apply outcome.
-  const newMarkdown =
-    accepted.length === allHunks.length
-      ? s.proposedMarkdown
-      : applyHunks(
-          (await ctx.u.blobs.get(head.contentHash)) ?? "",
-          accepted.map(toHunk),
-        );
+  // Rejected-revert: the new version is the stored proposal with every
+  // non-accepted hunk (rejected or still pending) reverted to base bytes.
+  // All-accepted is the degenerate case — zero reverts reproduce the
+  // proposal verbatim by construction, no special case needed.
+  const newMarkdown = applyHunks({
+    base: (await ctx.u.blobs.get(head.contentHash)) ?? "",
+    proposed: s.proposedMarkdown,
+    rejected: allHunks.filter((h) => h.decision !== "accepted").map(toHunk),
+  });
   const saved = await saveDocumentCommand(ctx, {
     slug,
     markdown: newMarkdown,
