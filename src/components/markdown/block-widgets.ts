@@ -362,7 +362,10 @@ class FrontmatterWidget extends WidgetType {
 // A frontmatter fence can only start at byte 0 with a `---` line. This
 // matches the OPEN regex in frontmatter.ts but without requiring a newline
 // (a line's .text excludes its terminator), so it's a cheap first-line filter.
-const OPEN_FENCE = /^---[ \t]*$/;
+// The opening frontmatter fence as a whole line (no newline — matches a
+// `state.doc.lineAt(0).text`). Exported so the editor's create-metadata paths
+// (MarkdownEditor) recognize a bare-`---` first line through the same pattern.
+export const OPEN_FENCE = /^---[ \t]*$/;
 
 type FrontmatterDecoration =
   | {

@@ -1,9 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
+import { AddMetadataButton } from "@/components/document/AddMetadataButton";
 import { DocumentActionBar } from "@/components/document/DocumentActionBar";
 import { RenameField } from "@/components/document/RenameField";
-import { MarkdownEditor } from "@/components/markdown/MarkdownEditor";
+import {
+  MarkdownEditor,
+  type MarkdownEditorHandle,
+} from "@/components/markdown/MarkdownEditor";
 import { BackLink } from "@/components/ui/BackLink";
 import { Button } from "@/components/ui/Button";
 import { textLinkClass } from "@/components/ui/text-link";
@@ -11,6 +15,7 @@ import { asProjectId } from "@/ids";
 import { track } from "@/lib/analytics";
 import { useSubmit } from "@/lib/forms";
 import { getDocumentRefs, saveDocument } from "@/lib/server/documents";
+import { hasFrontmatterFence } from "@/store/domain/frontmatter";
 import { defaultFilename } from "@/store/domain/paths";
 import { compact, slugify } from "@/util";
 
@@ -36,6 +41,7 @@ function NewDoc() {
   const nav = useNavigate();
   const projectId = asProjectId(Route.useParams().projectId);
   const docRefs = Route.useLoaderData();
+  const editorRef = useRef<MarkdownEditorHandle>(null);
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
   const [broken, setBroken] = useState(0);
@@ -128,11 +134,15 @@ function NewDoc() {
             >
               Rename file
             </button>
+            {!hasFrontmatterFence(markdown) && (
+              <AddMetadataButton editorRef={editorRef} />
+            )}
           </div>
         )}
         <MarkdownEditor
           value={markdown}
           onChange={setMarkdown}
+          editorRef={editorRef}
           docRefs={docRefs}
           selfSlug={slug}
           onBrokenChange={setBroken}

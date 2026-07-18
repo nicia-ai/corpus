@@ -47,6 +47,37 @@ export function frontmatterLength(raw: string): number {
   return parsed.ok ? raw.length - parsed.body.length : 0;
 }
 
+// The starter fence inserted by the editor's "Add metadata" affordance and its
+// leading-`---` input rule. A single `title:` key — the privileged convention
+// (frontmatterTitle / resolveTitle) — seeded empty. Returned with the caret
+// target right after `title: ` so both entry points (whole-document prepend and
+// input-rule completion) drop the cursor identically, ready for the author to
+// type the value. Leading blank lines of the existing body are folded away so
+// exactly one blank line separates the closing fence from the body.
+const STARTER_PREFIX = "---\ntitle: ";
+const STARTER_FENCE = `${STARTER_PREFIX}\n---\n`;
+
+export function documentWithStarterFrontmatter(
+  body: string,
+): Readonly<{ text: string; caret: number }> {
+  const rest = body.replace(/^\n+/, "");
+  return { text: `${STARTER_FENCE}\n${rest}`, caret: STARTER_PREFIX.length };
+}
+
+// Whether the document already opens with a frontmatter fence — an opener plus
+// a closing `---`, REGARDLESS of whether the YAML between is valid, empty, or a
+// non-mapping. This is the "don't offer to add a second fence" predicate: it
+// gates both the "Add metadata" affordance's visibility AND the insert guard,
+// so the two can never disagree (a keyless or malformed fence hides the button
+// and blocks the insert alike, instead of showing a dead button or stacking a
+// second fence). Cheaper than parsing: no YAML parse, just the fence regexes.
+export function hasFrontmatterFence(raw: string): boolean {
+  const open = OPEN.exec(raw);
+  if (open === null) return false;
+  const rest = raw.slice(open[0].length);
+  return CLOSE_AT_START.test(rest) || CLOSE_AFTER.test(rest);
+}
+
 export function parseFrontmatter(raw: string): FrontmatterParse {
   const open = OPEN.exec(raw);
   if (open === null) return plain(raw);
