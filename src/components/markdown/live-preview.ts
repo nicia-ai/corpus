@@ -43,7 +43,10 @@ type MdNode = Readonly<ReturnType<ReturnType<typeof syntaxTree>["resolve"]>>;
 // model includes padding but excludes margin, so a margin on a `.cm-line`
 // decoration desyncs its Y geometry from the paint and clicks land off-target.
 
-const HEADING_LEVEL: Readonly<Record<string, number>> = {
+// Lezer heading node name → level. Exported so the parser-conformance test
+// classifies headings through the exact table the editor uses (no second
+// encoding of which node names are headings).
+export const HEADING_LEVEL: Readonly<Record<string, number>> = {
   ATXHeading1: 1,
   ATXHeading2: 2,
   ATXHeading3: 3,
@@ -444,17 +447,29 @@ function decorateFencedCode(
   pushLineClass(decos, state, firstBody.from, lastBody.to, "cm-md-code-block");
 }
 
-// The frontmatter panel's reveal is a plain YAML-fence check, not a syntax
-// tree node — computed once here and reused by both the full and the
-// selection-scoped incremental recompute below.
-function frontmatterDecoration(
+// The fence region's decorations, owning BOTH of its visual states so the whole
+// region is managed here (a plain YAML-fence check, not a syntax tree node) and
+// swapped as one unit over [0, fm.to] by every caller below:
+//   - caret OUTSIDE  → the block-replace panel widget (collapsed).
+//   - caret INSIDE   → line classes marking the revealed raw YAML as mono
+//     source. Without a YAML sub-parser, mdHighlight tags a `key: value` line
+//     above the closing `---` as a Setext heading and sizes/bolds it; the
+//     `cm-md-frontmatter-src` theme rule resets that back to plain source.
+// Returned as a list (empty when there is no fence) so the caret-inside case can
+// carry one class per fence line. Kept OUT of the syntax-tree walk on purpose:
+// the fence spans two top-level nodes (a thematic break + a Setext heading), so
+// the windowed walk cannot manage it without leaking decorations past its
+// window — this single [0, fm.to] splice is the one owner.
+function frontmatterDecorations(
   state: EditorState,
   fm: ReturnType<typeof frontmatter>,
-): CmRange<Decoration> | undefined {
-  if (fm === undefined) return undefined;
-  return touchesSelection(state, fm.from, Math.max(fm.from, fm.to - 1))
-    ? undefined
-    : fm.deco;
+): CmRange<Decoration>[] {
+  if (fm === undefined) return [];
+  const end = Math.max(fm.from, fm.to - 1);
+  if (!touchesSelection(state, fm.from, end)) return [fm.deco];
+  const decos: CmRange<Decoration>[] = [];
+  pushLineClass(decos, state, fm.from, end, "cm-md-frontmatter-src");
+  return decos;
 }
 
 // Obsidian-style wikilinks, scanned from the window's text (no syntax
@@ -510,7 +525,7 @@ function decorateWikilinks(
 // narrower than the whole document (see updateForSelectionChange). `fm` is
 // threaded in rather than recomputed here — frontmatter() re-stringifies and
 // re-parses the whole document, so every caller computes it once per state
-// and shares it across this, frontmatterDecoration, and its own frontmatter
+// and shares it across this, frontmatterDecorations, and its own frontmatter
 // splice, instead of paying for it 2-4x per recompute.
 function computeDecorationsInRange(
   state: EditorState,
@@ -599,9 +614,9 @@ function computeDecorationsInRange(
 
 function computeDecorations(state: EditorState): DecorationSet {
   const fm = frontmatter(state);
-  const fmDeco = frontmatterDecoration(state, fm);
+  const fmDecos = frontmatterDecorations(state, fm);
   const decos = computeDecorationsInRange(state, 0, state.doc.length, fm);
-  return Decoration.set(fmDeco ? [fmDeco, ...decos] : decos, true);
+  return Decoration.set([...fmDecos, ...decos], true);
 }
 
 // Walk from `pos` up to the node whose PARENT is the tree's own root — the
@@ -667,22 +682,20 @@ function updateForSelectionChange(
     add: computeDecorationsInRange(tr.state, from, to, fm),
   });
 
-  // Frontmatter isn't part of the syntax-tree walk above (it's a separate
-  // YAML-fence check), so splice it in/out independently — only when its own
-  // reveal gate actually flips (the doc is unchanged here, so the fence
-  // itself, if any, is identical before and after — hence one `fm` computed
-  // above serves both the before and after check).
-  const before = frontmatterDecoration(tr.startState, fm);
-  const after = frontmatterDecoration(tr.state, fm);
-  if ((before === undefined) !== (after === undefined)) {
-    if (fm !== undefined) {
-      next = next.update({
-        filterFrom: 0,
-        filterTo: fm.to,
-        filter: () => false,
-        add: after ? [after] : [],
-      });
-    }
+  // The fence region isn't part of the syntax-tree walk (it's a separate
+  // YAML-fence check spanning two top-level nodes), so re-splice it as one unit
+  // whenever this selection change touches it — `from < fm.to` holds for both a
+  // reveal/collapse flip (the caret crossed the fence boundary) and an
+  // intra-fence caret move, and is false when the caret stays in the body (the
+  // fence keeps its decorations via structural sharing). This owns the whole
+  // [0, fm.to] region, so the widget/source swap never fights the walk above.
+  if (fm !== undefined && from < fm.to) {
+    next = next.update({
+      filterFrom: 0,
+      filterTo: fm.to,
+      filter: () => false,
+      add: frontmatterDecorations(tr.state, fm),
+    });
   }
   return next;
 }
@@ -730,17 +743,24 @@ function updateForDocChange(
   const afterFrontmatter = frontmatter(tr.state);
   if (beforeFrontmatter !== undefined || afterFrontmatter !== undefined) {
     const end = Math.max(beforeFrontmatter?.to ?? 0, afterFrontmatter?.to ?? 0);
-    if (from <= end) from = 0;
+    // Pull the whole fence region into the window so its single [0, fm.to]
+    // splice (below) both clears every stale fence decoration and re-adds the
+    // current state's — widening `to` too, since the fence's source line
+    // classes run past a change confined to the opening line.
+    if (from <= end) {
+      from = 0;
+      to = Math.max(to, end);
+    }
   }
 
   const add = computeDecorationsInRange(tr.state, from, to, afterFrontmatter);
-  const fmDeco =
-    from === 0 ? frontmatterDecoration(tr.state, afterFrontmatter) : undefined;
+  const fmDecos =
+    from === 0 ? frontmatterDecorations(tr.state, afterFrontmatter) : [];
   return value.map(tr.changes).update({
     filterFrom: from,
     filterTo: to,
     filter: () => false,
-    add: fmDeco === undefined ? add : [fmDeco, ...add],
+    add: [...fmDecos, ...add],
   });
 }
 

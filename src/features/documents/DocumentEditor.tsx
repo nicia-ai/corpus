@@ -3,6 +3,7 @@ import { CheckCircle2, MessageSquareText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProseDiff, DiffPanel } from "@/components/diff/Diff";
+import { AddMetadataButton } from "@/components/document/AddMetadataButton";
 import { DocHeader } from "@/components/document/DocHeader";
 import { DocumentActionBar } from "@/components/document/DocumentActionBar";
 import { RenameField } from "@/components/document/RenameField";
@@ -59,6 +60,7 @@ import {
 import { useCollab, type RealtimeChange } from "@/lib/use-collab";
 import { useFollowDocLink } from "@/lib/use-follow-doc-link";
 import { MIN_ANCHOR_CHARS } from "@/store/domain/anchor";
+import { hasFrontmatterFence } from "@/store/domain/frontmatter";
 
 // A transient remote-change cue, keyed by the blocks that moved. The page owns
 // this block-indexed shape; it maps the indexes to source ranges before handing
@@ -130,6 +132,9 @@ export function DocumentEditor({
   const [draftVersion, setDraftVersion] = useState(doc.docVersion);
   const [dirty, setDirty] = useState(false);
   const [broken, setBroken] = useState(0);
+  const [hasFrontmatter, setHasFrontmatter] = useState(() =>
+    hasFrontmatterFence(doc.markdown),
+  );
   // The version a save is optimistically checked against. Starts at the
   // loaded doc; after resolving a 409 without overwriting it advances to
   // the fetched head, so the next save doesn't immediately re-conflict.
@@ -847,6 +852,7 @@ export function DocumentEditor({
       >
         Rename file
       </button>
+      {!hasFrontmatter && <AddMetadataButton editorRef={editorRef} />}
     </div>
   );
 
@@ -996,6 +1002,7 @@ export function DocumentEditor({
             docRefs={docRefs}
             selfSlug={head.slug}
             onBrokenChange={setBroken}
+            onHasFrontmatterChange={setHasFrontmatter}
             ariaLabel={`Edit document body: ${head.title}`}
             onSave={() => void save(head, currentDraft())}
             onFollowLink={followLink}

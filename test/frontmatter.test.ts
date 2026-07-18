@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseFrontmatter } from "../src/store/domain/frontmatter";
+import {
+  documentWithStarterFrontmatter,
+  hasFrontmatterFence,
+  parseFrontmatter,
+} from "../src/store/domain/frontmatter";
 
 describe("parseFrontmatter (pure read-time lens)", () => {
   it("passes a fence-less document through untouched", () => {
@@ -85,5 +89,65 @@ describe("parseFrontmatter (pure read-time lens)", () => {
       frontmatter: undefined,
       body: raw,
     });
+  });
+});
+
+describe("documentWithStarterFrontmatter (Add-metadata insertion)", () => {
+  const CARET = "---\ntitle: ".length; // right after "title: "
+
+  it("seeds a title fence with one blank line before an empty body", () => {
+    const { text, caret } = documentWithStarterFrontmatter("");
+    expect(text).toBe("---\ntitle: \n---\n\n");
+    expect(caret).toBe(CARET);
+    expect(text.slice(0, caret)).toBe("---\ntitle: ");
+  });
+
+  it("wraps an existing body with exactly one separating blank line", () => {
+    const { text } = documentWithStarterFrontmatter("# Heading\n\nbody\n");
+    expect(text).toBe("---\ntitle: \n---\n\n# Heading\n\nbody\n");
+  });
+
+  it("folds away the body's leading blank lines (no double gap)", () => {
+    const { text } = documentWithStarterFrontmatter("\n\n\nbody");
+    expect(text).toBe("---\ntitle: \n---\n\nbody");
+  });
+
+  it("produces a document the parser recognizes as frontmatter", () => {
+    // The seeded fence must round-trip: both entry points rely on the inserted
+    // text parsing back as a real (empty-valued) `title` key.
+    const { text } = documentWithStarterFrontmatter("existing body");
+    const parsed = parseFrontmatter(text);
+    // The blank line separating the closing fence from the body is body bytes.
+    expect(parsed).toEqual({
+      ok: true,
+      frontmatter: { title: null },
+      body: "\nexisting body",
+    });
+    expect(hasFrontmatterFence(text)).toBe(true);
+  });
+});
+
+describe("hasFrontmatterFence (Add-metadata affordance gate)", () => {
+  it("is false for a fence-less document", () => {
+    expect(hasFrontmatterFence("# Title\n\nbody")).toBe(false);
+  });
+
+  it("is false for an unterminated opener (no closing ---)", () => {
+    expect(hasFrontmatterFence("---\nstill typing\n")).toBe(false);
+  });
+
+  // A fence EXISTS in all three of the next cases, so the button hides and the
+  // insert is blocked — the button gate and the no-stack guard agree, so a
+  // keyless/malformed fence can neither show a dead button nor be double-fenced.
+  it("is true for an empty (keyless) fence", () => {
+    expect(hasFrontmatterFence("---\n---\nbody")).toBe(true);
+  });
+
+  it("is true for a malformed fence (a non-mapping scalar)", () => {
+    expect(hasFrontmatterFence("---\njust a string\n---\nbody")).toBe(true);
+  });
+
+  it("is true for a keyed fence", () => {
+    expect(hasFrontmatterFence("---\ntitle: Hi\n---\nbody")).toBe(true);
   });
 });

@@ -32,13 +32,17 @@ import {
 import type { ReviewRailLayout } from "@/components/review/ReviewRail";
 import { hrefToDocSlug, isExternalHref } from "@/lib/doc-href";
 import {
+  documentWithStarterFrontmatter,
+  hasFrontmatterFence,
+} from "@/store/domain/frontmatter";
+import {
   scanWikilinks,
   splitWikiTarget,
   type WikiMatch,
 } from "@/store/domain/links";
 import { resolveWikiPath } from "@/store/domain/paths";
 
-import { frontmatter } from "./block-widgets";
+import { frontmatter, OPEN_FENCE } from "./block-widgets";
 import { markdownEditorHostClass } from "./host-class";
 import type { WikiResolve } from "./inline-spans";
 import {
@@ -320,6 +324,24 @@ const designTheme = EditorView.theme({
   // GFM tables stay raw source but in mono so the `|` columns line up (the
   // proportional body font renders them ragged otherwise).
   ".cm-md-table": { fontFamily: "var(--font-mono)", fontSize: "0.875em" },
+  // Revealed frontmatter (caret in the `---` fence): the YAML is raw source,
+  // so render it as a quiet mono block echoing the Metadata panel it replaces.
+  // The `span` reset overrides mdHighlight's heading sizing/weight/ink on the
+  // tokens the markdown parser mistakes for Setext headings — without it the
+  // metadata balloons into a big bold block the moment the caret lands.
+  ".cm-md-frontmatter-src": {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.875em",
+    fontWeight: "400",
+    color: "#334155",
+    background: "#f8fafc",
+    borderLeft: "2px solid #e2e8f0",
+  },
+  ".cm-md-frontmatter-src span": {
+    fontSize: "inherit",
+    fontWeight: "400",
+    color: "inherit",
+  },
   ".cm-md-hr": { paddingTop: "0.4em", paddingBottom: "0.4em" },
   ".cm-md-rule": {
     display: "inline-block",
@@ -386,6 +408,17 @@ function wikiFacetExtension(
   return resolver === undefined ? [] : wikiLinkResolver.of(resolver);
 }
 
+// Prepend a seeded `---\ntitle: \n---` fence to `body` and drop the caret after
+// `title: `. Shared by the imperative `addFrontmatter` handle and the
+// leading-`---` input rule so both produce byte-identical text and caret.
+function seedFrontmatter(cm: EditorView, body: string): void {
+  const { text, caret } = documentWithStarterFrontmatter(body);
+  cm.dispatch({
+    changes: { from: 0, to: cm.state.doc.length, insert: text },
+    selection: { anchor: caret },
+  });
+}
+
 const NO_DOCS: readonly DocRef[] = [];
 
 type Props = Readonly<{
@@ -407,6 +440,11 @@ type Props = Readonly<{
   // live-preview render + code highlighting are identical to the editor.
   readOnly?: boolean;
   onBrokenChange?: (count: number) => void;
+  // Fires when the document gains or loses a recognized frontmatter fence, so
+  // host chrome can toggle the "Add metadata" affordance. Only re-parses when
+  // the first line is a `---`, so a metadata-less document costs one regex per
+  // edit (never a full-document toString on the hot path).
+  onHasFrontmatterChange?: (present: boolean) => void;
   // Accessible name for the editing region (CodeMirror renders a label-less
   // contenteditable; a visible caption is not programmatically associated).
   ariaLabel?: string;
@@ -434,6 +472,10 @@ export type MarkdownEditorHandle = Readonly<{
   getValue: () => string;
   setValue: (next: string) => void;
   setCleanValue: (next: string) => void;
+  // Prepend a seeded `---\ntitle: \n---` fence and drop the caret after
+  // `title: `. A no-op when the document already carries frontmatter, so a
+  // stale affordance (or a double click) can never stack a second fence.
+  addFrontmatter: () => void;
 }>;
 
 export function MarkdownEditor({
@@ -447,6 +489,7 @@ export function MarkdownEditor({
   selfSlug = "",
   readOnly,
   onBrokenChange,
+  onHasFrontmatterChange,
   ariaLabel,
   ariaDescribedBy,
   onFollowLink,
@@ -475,6 +518,7 @@ export function MarkdownEditor({
   const onChangeRef = useRef(onChange);
   const onDirtyChangeRef = useRef(onDirtyChange);
   const onBrokenRef = useRef(onBrokenChange);
+  const onHasFrontmatterRef = useRef(onHasFrontmatterChange);
   const onFollowLinkRef = useRef(onFollowLink);
   const onSaveRef = useRef(onSave);
   const onReviewLayoutRef = useRef(onReviewLayoutChange);
@@ -482,10 +526,23 @@ export function MarkdownEditor({
     onChangeRef.current = onChange;
     onDirtyChangeRef.current = onDirtyChange;
     onBrokenRef.current = onBrokenChange;
+    onHasFrontmatterRef.current = onHasFrontmatterChange;
     onFollowLinkRef.current = onFollowLink;
     onSaveRef.current = onSave;
     onReviewLayoutRef.current = onReviewLayoutChange;
   });
+
+  // Report frontmatter presence. The first-line guard keeps a metadata-less
+  // document (the common case) off the full-document parse; React de-dups an
+  // unchanged value, so no flip-tracking is needed on this side.
+  const reportFrontmatter = useCallback((state: EditorState): void => {
+    const cb = onHasFrontmatterRef.current;
+    if (cb === undefined) return;
+    cb(
+      OPEN_FENCE.test(state.doc.lineAt(0).text) &&
+        hasFrontmatterFence(state.doc.toString()),
+    );
+  }, []);
 
   useImperativeHandle(
     editorRef,
@@ -500,6 +557,14 @@ export function MarkdownEditor({
       },
       setCleanValue: (next) => {
         cleanDoc.current = Text.of(next.split("\n"));
+      },
+      addFrontmatter: () => {
+        const cm = view.current;
+        if (cm === null) return;
+        const body = cm.state.doc.toString();
+        if (hasFrontmatterFence(body)) return;
+        seedFrontmatter(cm, body);
+        cm.focus();
       },
     }),
     [value],
@@ -615,6 +680,34 @@ export function MarkdownEditor({
                     return true;
                   },
                 },
+                // Typing `---` + Enter on the first line has no closing fence
+                // to complete, so the parser reads it as a thematic break, not
+                // frontmatter. Intercept that one keystroke — first line, caret
+                // at its end, exactly `---`, and nothing but whitespace after it
+                // — and complete a seeded fence. The empty-rest guard is what
+                // keeps this from hijacking Enter on a PRE-EXISTING leading `---`
+                // in a document that already has body content (there, the
+                // author wants a newline, or uses the "Add metadata" button).
+                {
+                  key: "Enter",
+                  run: (cm: EditorView): boolean => {
+                    const { doc, selection } = cm.state;
+                    const { head, empty } = selection.main;
+                    const line = doc.lineAt(head);
+                    if (
+                      !empty ||
+                      line.number !== 1 ||
+                      head !== line.to ||
+                      !OPEN_FENCE.test(line.text)
+                    ) {
+                      return false;
+                    }
+                    const rest = doc.sliceString(line.to);
+                    if (rest.trim() !== "") return false;
+                    seedFrontmatter(cm, rest);
+                    return true;
+                  },
+                },
               ]
             : []),
           ...defaultKeymap,
@@ -692,6 +785,7 @@ export function MarkdownEditor({
                 // Avoid allocating the whole document unless a controlled
                 // caller explicitly needs the new string.
                 onChangeRef.current?.(u.state.doc.toString());
+                reportFrontmatter(u.state);
               }),
             ]
           : [EditorState.readOnly.of(true), EditorView.editable.of(false)]),
@@ -705,6 +799,9 @@ export function MarkdownEditor({
     });
     view.current = cm;
     setMounted(true);
+    // Seed the host's initial "Add metadata" affordance state (and re-seed on
+    // each remount — the editor is version-keyed).
+    if (editing) reportFrontmatter(state);
     return () => {
       cm.destroy();
     };

@@ -225,6 +225,23 @@ describe("live preview: block widgets", () => {
     const es = preview("---\ntitle: Hi\n---\n\nbody", 5);
     expect(widgets(es).filter((e) => e.from === 0)).toHaveLength(0);
   });
+
+  it("tags revealed frontmatter as mono source, never a heading", () => {
+    // `title: Hi` above the closing `---` parses as a Setext heading, so
+    // without the source class mdHighlight would size/bold the revealed YAML
+    // into a big bold block. The fence is [0, 18); the caret at 5 reveals it.
+    const es = preview("---\ntitle: Hi\n---\n\nbody", 5);
+    const fenceLines = es.filter((e) => e.from < 18);
+    expect(fenceLines.some((e) => hasClass(e, "cm-md-frontmatter-src"))).toBe(
+      true,
+    );
+    expect(fenceLines.some((e) => hasClass(e, "cm-md-heading"))).toBe(false);
+  });
+
+  it("does not tag frontmatter as source when the panel is shown", () => {
+    const es = preview("---\ntitle: Hi\n---\n\nbody", 20);
+    expect(es.some((e) => hasClass(e, "cm-md-frontmatter-src"))).toBe(false);
+  });
 });
 
 describe("live preview: lists and tasks", () => {
@@ -441,6 +458,72 @@ describe("live preview: incremental selection updates", () => {
     expect(
       withClass(entries(state.field(livePreviewField)), "cm-md-link"),
     ).toHaveLength(1);
+  });
+
+  // The frontmatter fence is managed by a separate [0, fm.to] splice, not the
+  // syntax-tree walk, so its collapsed↔revealed swap has its own path. These
+  // exercise the TRANSITION (a moved caret), which the create-time `preview()`
+  // helper never does — it builds an already-revealed state.
+  const FM_DOC = "---\ntitle: Hi\n---\n\nbody";
+  const inBody = FM_DOC.indexOf("body");
+  const inFence = FM_DOC.indexOf("Hi");
+
+  function focusedAt(pos: number): EditorState {
+    const base = EditorState.create({
+      doc: FM_DOC,
+      selection: EditorSelection.single(pos),
+      extensions: [markdown({ base: markdownLanguage }), livePreview()],
+    });
+    return base.update({
+      selection: EditorSelection.single(pos),
+      effects: [setEditorFocused.of(true)],
+    }).state;
+  }
+
+  it("revealing a collapsed fence swaps the panel widget for mono source, not a heading", () => {
+    // Caret in the body: the fence is collapsed to its panel widget.
+    let state = focusedAt(inBody);
+    let field = entries(state.field(livePreviewField));
+    expect(widgets(field).some((e) => e.from === 0)).toBe(true);
+    expect(withClass(field, "cm-md-frontmatter-src")).toHaveLength(0);
+
+    // Move the caret into the fence: the widget is replaced by raw YAML tagged
+    // as mono source — NOT re-wiped by the [0, fm.to] splice into a big Setext
+    // heading (the regression this whole change set exists to prevent).
+    state = state.update({ selection: EditorSelection.single(inFence) }).state;
+    field = entries(state.field(livePreviewField));
+    expect(widgets(field).filter((e) => e.from === 0)).toHaveLength(0);
+    expect(withClass(field, "cm-md-frontmatter-src")).toHaveLength(3); // 3 fence lines
+    expect(withClass(field, "cm-md-heading")).toHaveLength(0);
+  });
+
+  it("moving the caret within a revealed fence does not duplicate the source decorations", () => {
+    let state = focusedAt(inBody);
+    state = state.update({ selection: EditorSelection.single(inFence) }).state;
+    // A second intra-fence move (no reveal flip) must not accumulate line
+    // classes: the splice window is anchored at fm.from, outside this move's
+    // top-level window, so a naive push would leak an uncleared duplicate.
+    state = state.update({
+      selection: EditorSelection.single(inFence + 1),
+    }).state;
+    expect(
+      withClass(
+        entries(state.field(livePreviewField)),
+        "cm-md-frontmatter-src",
+      ),
+    ).toHaveLength(3);
+  });
+
+  it("collapsing the fence again restores the panel widget", () => {
+    let state = focusedAt(inFence);
+    expect(
+      withClass(entries(state.field(livePreviewField)), "cm-md-frontmatter-src")
+        .length,
+    ).toBeGreaterThan(0);
+    state = state.update({ selection: EditorSelection.single(inBody) }).state;
+    const field = entries(state.field(livePreviewField));
+    expect(widgets(field).some((e) => e.from === 0)).toBe(true);
+    expect(withClass(field, "cm-md-frontmatter-src")).toHaveLength(0);
   });
 });
 
