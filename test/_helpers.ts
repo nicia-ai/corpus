@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { z } from "zod";
 
 import { getAuth } from "../src/auth.server";
 import { connectControlDb } from "../src/control/db";
@@ -49,6 +50,8 @@ export async function signUp(prefix = "u"): Promise<UserId> {
   return asUserId(res.user.id);
 }
 
+const signUpResponseZ = z.object({ user: z.object({ id: z.string().min(1) }) });
+
 // Sign up AND return a session cookie header, so a test can drive
 // authenticated Better Auth server APIs (org plugin: createOrganization,
 // createInvitation, acceptInvitation). emailAndPassword auto-signs-in on
@@ -66,7 +69,10 @@ export async function signUpSession(
     .getSetCookie()
     .map((c) => c.split(";")[0])
     .join("; ");
-  const body = await res.json();
+  // `res.json()` is `unknown`; parse rather than assert so a change to the
+  // Better Auth signup response shape fails here with a readable message
+  // instead of surfacing as an undefined userId deep in a later assertion.
+  const body = signUpResponseZ.parse(await res.json());
   return {
     userId: asUserId(body.user.id),
     email,

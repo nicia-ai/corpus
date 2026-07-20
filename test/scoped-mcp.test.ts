@@ -101,6 +101,12 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
     suggestCreate: () =>
       Promise.resolve({ ok: false as const, reason: "invalid" as const }),
     proposalResult: () => Promise.resolve({ found: false }),
+    replyToProposal: (_callerRef, proposalId) =>
+      Promise.resolve({
+        ok: true as const,
+        messageId: proposalId,
+        documentSlug: asDocumentSlug("brand-voice"),
+      }),
     collectionOutline: (slug) =>
       slug === "marketing"
         ? Promise.resolve({
@@ -319,7 +325,6 @@ describe("respondMcp bound-Collection preflight", () => {
 describe("north-star: bound credential confinement (server side)", () => {
   it("Marketing key sees only Marketing; HR key sees only HR (no Handbook leak)", async () => {
     const ownerUserId = await signUp("ns");
-    const db = connectControlDb(env.DB);
     const org = await createOrg(ownerUserId, "North-Star Co");
     const store = storeFor(env, org.projectId);
 

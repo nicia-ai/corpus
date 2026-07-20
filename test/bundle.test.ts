@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { asFolderSlug } from "../src/ids";
 import {
   type Bundle,
   type BundleFolder,
@@ -97,7 +98,7 @@ describe("bundle domain (pure)", () => {
     for (const [child, parent] of [
       ["a-b", "a"],
       ["a-b-c", "a-b"],
-    ]) {
+    ] as const) {
       expect(ordered.indexOf(parent)).toBeLessThan(ordered.indexOf(child));
     }
     expect([...ordered].sort()).toEqual(["a", "a-b", "a-b-c", "z"]);
@@ -268,7 +269,12 @@ describe("bundle round-trip (the alignment contract)", () => {
       name: "Team",
       changedBy: "u",
     });
-    await a.attachFolderToCollection(colSlug("team"), bFolder.slug, 1, "u");
+    await a.attachFolderToCollection(
+      colSlug("team"),
+      asFolderSlug(bFolder.slug),
+      1,
+      "u",
+    );
 
     const b1 = await a.exportBundle(SOURCE);
 
@@ -316,7 +322,12 @@ describe("bundle round-trip (the alignment contract)", () => {
     });
     const folderA = (await a.listFolders()).find((f) => f.name === "a");
     if (folderA === undefined) throw new Error("folder a missing");
-    await a.attachFolderToCollection(colSlug("team"), folderA.slug, 1, "u");
+    await a.attachFolderToCollection(
+      colSlug("team"),
+      asFolderSlug(folderA.slug),
+      1,
+      "u",
+    );
 
     // Added AFTER the folder→collection link, with no explicit
     // collection action — readCollection shows it, so the bundle must
@@ -363,14 +374,21 @@ describe("bundle round-trip (the alignment contract)", () => {
     });
     const folderA = (await a.listFolders()).find((f) => f.name === "a");
     if (folderA === undefined) throw new Error("folder a missing");
-    await a.attachFolderToCollection(colSlug("team"), folderA.slug, 1, "u");
+    await a.attachFolderToCollection(
+      colSlug("team"),
+      asFolderSlug(folderA.slug),
+      1,
+      "u",
+    );
 
     const before = await a.exportBundle(SOURCE);
     expect(
       before.manifest.collections.find((c) => c.slug === "team")?.members,
     ).toHaveLength(1);
 
-    expect((await a.deleteFolder(folderA.slug, "u")).ok).toBe(true);
+    expect((await a.deleteFolder(asFolderSlug(folderA.slug), "u")).ok).toBe(
+      true,
+    );
 
     // readCollection and exportBundle must agree: the link is gone.
     const live = await a.readCollection(colSlug("team"));

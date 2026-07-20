@@ -103,8 +103,11 @@ describe("team management — Better Auth org plugin ⇄ tenancy", () => {
   });
 
   it.each([
-    ["not-configured", { sent: false as const, reason: "not-configured" }],
-    ["send-failed", { sent: false as const, reason: "send-failed" }],
+    [
+      "not-configured",
+      { sent: false as const, reason: "not-configured" as const },
+    ],
+    ["send-failed", { sent: false as const, reason: "send-failed" as const }],
     ["sent", { sent: true as const }],
   ])(
     "creates the invitation before reporting invite email %s",

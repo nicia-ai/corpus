@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { asFolderSlug, type FolderSlug } from "../src/ids";
+
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const ws = () => freshStore("flink");
@@ -8,10 +10,10 @@ const by = "u";
 async function folderSlug(
   store: ReturnType<typeof ws>,
   name: string,
-): Promise<string> {
+): Promise<FolderSlug> {
   const f = (await store.listFolders()).find((x) => x.name === name);
   if (f === undefined) throw new Error(`folder ${name} not found`);
-  return f.slug;
+  return asFolderSlug(f.slug);
 }
 
 // setup.md (in a/guide) links every flavour of relative target, plus

@@ -26,7 +26,6 @@ import { createOrg, signUp } from "./_helpers";
 // inserts mirror what Better Auth would persist after an authorize +
 // token + consent — without driving the full handshake.
 async function seedGrantFootprint(
-  organizationId: string,
   userId: string,
   connectionId: string,
 ): Promise<string> {
@@ -148,7 +147,7 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
     });
     // Footprint: a refresh token + consent referencing the Connection,
     // plus an api_key on it.
-    await seedGrantFootprint(org.organizationId, userId, id);
+    await seedGrantFootprint(userId, id);
     await db.insert(apiKey).values({
       userId,
       organizationId: org.organizationId,
@@ -221,8 +220,8 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
       projectId: org.projectId,
       collectionSlug: asCollectionSlug("b"),
     });
-    await seedGrantFootprint(org.organizationId, userId, idA);
-    await seedGrantFootprint(org.organizationId, userId, idB);
+    await seedGrantFootprint(userId, idA);
+    await seedGrantFootprint(userId, idB);
 
     await deleteConnection(db, {
       connectionId: idA,
@@ -268,7 +267,7 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
         tokenPrefix: "cck_bbbbbbbb",
       },
     ]);
-    await seedGrantFootprint(org.organizationId, userId, id);
+    await seedGrantFootprint(userId, id);
     const [row] = await listProjectConnections(db, org.projectId);
     expect(row?.apiKeyCount).toBe(2);
     expect(row?.activeGrantCount).toBe(1);
