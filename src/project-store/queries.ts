@@ -1,7 +1,4 @@
-import type { Store } from "@nicia-ai/typegraph";
-
 import { assembleCollection, type AssembledCollection } from "../corpus";
-import type { CanonicalGraph } from "../graph";
 import {
   asCollectionSlug,
   asDocumentSlug,
@@ -26,6 +23,7 @@ import {
   verifyChain,
   type VerifyResult,
 } from "../store/domain/verify";
+import type { CorpusStore } from "../store/handle";
 import type {
   CollectionDocView,
   CollectionMeta,
@@ -112,7 +110,7 @@ const SEARCH_MIN_QUERY = 2;
 // depth. Path is derived per hit (≤ SEARCH_RESULT_LIMIT), never over the
 // whole corpus.
 export async function searchDocumentsProjection(
-  store: Store<CanonicalGraph>,
+  store: CorpusStore,
   u: ProjectUnit,
   query: string,
 ): Promise<readonly DocumentSearchHit[]> {

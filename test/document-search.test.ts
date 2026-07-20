@@ -1,10 +1,9 @@
-import type { Store } from "@nicia-ai/typegraph";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import type { CanonicalGraph } from "@/graph";
 import { asFolderSlug } from "@/ids";
 import { toSafeFulltextQuery } from "@/store/domain/search";
+import type { CorpusStore } from "@/store/handle";
 
 import { docSlug, freshStore } from "./_helpers";
 
@@ -155,7 +154,7 @@ describe("searchDocuments", () => {
     // correct backfill must span more than one transaction.
     await runInDurableObject(store, async (instance) => {
       const inst = instance as unknown as {
-        ensureStore(): Promise<Store<CanonicalGraph>>;
+        ensureStore(): Promise<CorpusStore>;
       };
       const s = await inst.ensureStore();
       await s.transaction(async (tx) => {

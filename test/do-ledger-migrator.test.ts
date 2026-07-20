@@ -1,8 +1,7 @@
-import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 import { ledgerMigrations } from "../drizzle-do/migrations";
-import { TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY } from "../src/project-store";
 
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
@@ -70,25 +69,16 @@ describe("DO ledger Drizzle migrator", () => {
     expect(await store.verifyHistory()).toEqual({ ok: true });
   });
 
-  it("rebuilds pre-0.35 traversal indexes and materializes Corpus lookup indexes", async () => {
+  // Corpus used to hand-rebuild the two edge traversal indexes via a
+  // marker-guarded physical migration, because TypeGraph's bootstrap could
+  // not replace a same-name index that had a different column list. Since
+  // 0.37 those are TypeGraph *system-index declarations* that its own
+  // bootstrap materializes, so the hand-rolled migration is gone. This pins
+  // the column lists we depend on: TypeGraph matches existing indexes by
+  // NAME ONLY and never compares columns, so a silent upstream change to
+  // either list would not self-heal — it has to fail here instead.
+  it("TypeGraph bootstrap materializes the traversal and Corpus lookup indexes", async () => {
     const store = project();
-    await store.listDocuments();
-
-    // Replace the current indexes with the pre-0.35 column lists, then clear
-    // Corpus's physical-migration marker to simulate an existing deployed DO.
-    await runInDurableObject(store, async (_instance, state) => {
-      state.storage.sql.exec("DROP INDEX typegraph_edges_from_idx");
-      state.storage.sql.exec(`CREATE INDEX typegraph_edges_from_idx
-        ON typegraph_edges
-        (graph_id, from_kind, from_id, kind, to_kind, deleted_at, valid_to)`);
-      state.storage.sql.exec("DROP INDEX typegraph_edges_to_idx");
-      state.storage.sql.exec(`CREATE INDEX typegraph_edges_to_idx
-        ON typegraph_edges
-        (graph_id, to_kind, to_id, kind, from_kind, deleted_at, valid_to)`);
-      await state.storage.delete(TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY);
-    });
-
-    await evictDurableObject(store);
     await store.listDocuments();
 
     await runInDurableObject(store, (_instance, state) => {
