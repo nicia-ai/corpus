@@ -54,6 +54,21 @@ Every change must pass `pnpm check` — the single gate CI also runs:
 `package.json`; do not re-list its steps in CI or docs — reference
 `pnpm check`.
 
+Both `lint` scripts set `NODE_OPTIONS=--max-old-space-size=8192`. This
+is load-bearing, not cargo cult: type-aware linting over
+`tsconfig.eslint.json` needs ~7 GiB and Node's default heap dies partway
+through with a V8 stack trace rather than a lint error. Measured on this
+tree: 6144 OOMs, 8192 completes at ~7.8 GiB peak.
+
+The cost is type-aware linting itself, not this repo's types — `tsc` over
+the _same_ project peaks at 1.3 GiB in 5s. Type-aware rules query the
+checker per node, so the checker's caches grow monotonically across
+files and are never released: any single directory lints in ~1.3 GiB,
+the whole tree needs ~7.8. Two things measured and ruled out, so nobody
+re-tries them: switching to `projectService` (same ceiling, ~2x faster)
+and disabling the most expensive rule, `no-deprecated` (no change).
+The real lever is linting fewer files type-aware, not a bigger heap.
+
 The migration checks run unconditionally as part of `pnpm check`, but
 the regeneration remedies are conditional: when `src/db.ts` changes,
 `pnpm db:generate:do`; when `src/event-log-db.ts` changes,
