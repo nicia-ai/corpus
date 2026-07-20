@@ -240,6 +240,191 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
   });
 });
 
+// — Write-side scope: identity pinning.
+//
+// Every write on the port takes a `callerRef` the caller supplies, but the
+// authoritative one is the credential the request authenticated with, closed
+// over by `scopedExecutor`. If a supplied ref that differs from the pinned one
+// reached the DO, one connection's agent could author — or read the result of
+// — a proposal as another. The DO re-checks ownership, but this is the outer
+// gate and it is the only one the read paths get.
+//
+// These stubs SUCCEED. That matters: the shared `stubExec()` returns canned
+// failures for the writes, so asserting "wrong ref → failure" against it would
+// pass whether or not the guard exists. Each test also asserts the inner
+// executor was never reached, so a denial can only have come from the guard.
+
+const PINNED = asCallerRef("apikey:pinned");
+const IMPOSTOR = asCallerRef("apikey:impostor");
+
+function writeStub(calls: string[]): ReturnType<typeof stubExec> {
+  return {
+    ...stubExec(),
+    suggestEdit: (callerRef) => {
+      calls.push(`suggestEdit:${callerRef}`);
+      return Promise.resolve({
+        ok: true as const,
+        suggestionId: 1,
+        hunkCount: 1,
+      });
+    },
+    suggestCreate: (callerRef, input) => {
+      calls.push(`suggestCreate:${callerRef}:${input.originCollectionSlug}`);
+      return Promise.resolve({
+        ok: true as const,
+        suggestionId: 2,
+        slug: "new-doc",
+      });
+    },
+    proposalResult: (callerRef, proposalId) => {
+      calls.push(`proposalResult:${callerRef}`);
+      return Promise.resolve({
+        found: true as const,
+        proposalId,
+        kind: "edit" as const,
+        documentSlug: "brand-voice",
+        baseDocVersion: 1,
+        outcome: "applied" as const,
+        acceptedHunks: [],
+        rejectedHunks: [],
+        messages: [],
+      });
+    },
+    replyToProposal: (callerRef, proposalId) => {
+      calls.push(`replyToProposal:${callerRef}`);
+      return Promise.resolve({
+        ok: true as const,
+        messageId: proposalId,
+        documentSlug: asDocumentSlug("brand-voice"),
+      });
+    },
+  };
+}
+
+const pinnedExec = (calls: string[]) =>
+  scopedExecutor(
+    writeStub(calls),
+    asCollectionSlug("marketing"),
+    ["brand-voice"],
+    PINNED,
+    TEST_LOCATION,
+  );
+
+describe("scopedExecutor pins caller identity on every write", () => {
+  it("suggestEdit: pinned ref reaches the DO, impostor is refused before it", async () => {
+    const calls: string[] = [];
+    const exec = pinnedExec(calls);
+    const slug = asDocumentSlug("brand-voice");
+
+    // Positive control — without this, the negative assertion below could
+    // pass because the plumbing is broken rather than because it is guarded.
+    expect(await exec.suggestEdit(PINNED, slug, "# new", 1)).toEqual({
+      ok: true,
+      suggestionId: 1,
+      hunkCount: 1,
+    });
+    expect(calls).toEqual([`suggestEdit:${PINNED}`]);
+
+    expect(await exec.suggestEdit(IMPOSTOR, slug, "# new", 1)).toEqual({
+      ok: false,
+      reason: "missing",
+    });
+    // Unchanged: the impostor call never reached the inner executor.
+    expect(calls).toEqual([`suggestEdit:${PINNED}`]);
+  });
+
+  it("suggestEdit: the pinned ref is forwarded, never the supplied one", async () => {
+    const calls: string[] = [];
+    // A member slug with the pinned ref is the only path through; the guard
+    // rejects on ref mismatch before membership is consulted, so the DO can
+    // never be handed a caller-chosen author.
+    await pinnedExec(calls).suggestEdit(
+      PINNED,
+      asDocumentSlug("brand-voice"),
+      "# new",
+      1,
+    );
+    expect(calls).toEqual([`suggestEdit:${PINNED}`]);
+  });
+
+  it("suggestEdit: a non-member slug is refused even with the pinned ref", async () => {
+    const calls: string[] = [];
+    expect(
+      await pinnedExec(calls).suggestEdit(
+        PINNED,
+        asDocumentSlug("salaries"),
+        "# new",
+        1,
+      ),
+    ).toEqual({ ok: false, reason: "missing" });
+    expect(calls).toEqual([]);
+  });
+
+  it("suggestCreate: impostor refused as `invalid`, inner never reached", async () => {
+    const calls: string[] = [];
+    const exec = pinnedExec(calls);
+    const input = {
+      slug: asDocumentSlug("new-doc"),
+      proposedMarkdown: "# New",
+    };
+
+    expect(await exec.suggestCreate(PINNED, input)).toEqual({
+      ok: true,
+      suggestionId: 2,
+      slug: "new-doc",
+    });
+    expect(await exec.suggestCreate(IMPOSTOR, input)).toEqual({
+      ok: false,
+      reason: "invalid",
+    });
+    expect(calls).toEqual([`suggestCreate:${PINNED}:marketing`]);
+  });
+
+  it("suggestCreate: a caller-supplied originCollectionSlug is overwritten", async () => {
+    const calls: string[] = [];
+    // Scope pinning, not identity pinning: an applied create-proposal must
+    // attach to the bound Collection, so whatever the agent asks for here is
+    // discarded. Without this, an agent could seed a document into a
+    // Collection its credential cannot even read.
+    await pinnedExec(calls).suggestCreate(PINNED, {
+      slug: asDocumentSlug("new-doc"),
+      proposedMarkdown: "# New",
+      originCollectionSlug: asCollectionSlug("hr"),
+    });
+    expect(calls).toEqual([`suggestCreate:${PINNED}:marketing`]);
+  });
+
+  it("proposalResult: impostor gets `found:false`, inner never reached", async () => {
+    const calls: string[] = [];
+    const exec = pinnedExec(calls);
+
+    expect(await exec.proposalResult(PINNED, 7)).toMatchObject({
+      found: true,
+      proposalId: 7,
+    });
+    expect(await exec.proposalResult(IMPOSTOR, 7)).toEqual({ found: false });
+    // `found:false` is deliberately the same shape a genuinely unknown
+    // proposal returns — an impostor cannot probe for which ids exist.
+    expect(calls).toEqual([`proposalResult:${PINNED}`]);
+  });
+
+  it("replyToProposal: impostor refused as `missing`, inner never reached", async () => {
+    const calls: string[] = [];
+    const exec = pinnedExec(calls);
+
+    expect(await exec.replyToProposal(PINNED, 7, "looks good")).toEqual({
+      ok: true,
+      messageId: 7,
+      documentSlug: "brand-voice",
+    });
+    expect(await exec.replyToProposal(IMPOSTOR, 7, "looks good")).toEqual({
+      ok: false,
+      reason: "missing",
+    });
+    expect(calls).toEqual([`replyToProposal:${PINNED}`]);
+  });
+});
+
 // — export_bundle is not on the agent surface (it's an owner path).
 
 describe("export_bundle absent from the MCP surface", () => {

@@ -461,8 +461,21 @@ function SuggestionCard({
             <ViaBadge channel={suggestion.channel} />
           </div>
           <div className="text-sm text-slate-500">
-            proposed {suggestion.hunks.length} change
-            {suggestion.hunks.length === 1 ? "" : "s"}
+            {suggestion.granularity === "whole-document" ? (
+              // The differ could not produce a faithful per-block split, so
+              // the proposal collapsed to one hunk spanning the document.
+              // Counting that as "1 change" reads like a one-line edit while
+              // the reviewer is actually making an all-or-nothing call on the
+              // whole file — say so (PRODUCT.md: make correctness legible).
+              // Text, not a wash: the accessibility rule forbids hue alone,
+              // and the whole body is already painted for this case.
+              <>proposed a whole-document change — accept or reject as one</>
+            ) : (
+              <>
+                proposed {suggestion.hunks.length} change
+                {suggestion.hunks.length === 1 ? "" : "s"}
+              </>
+            )}
           </div>
         </div>
         <StatusBadge
