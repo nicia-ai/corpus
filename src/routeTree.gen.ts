@@ -9,45 +9,35 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SignUpRouteImport } from './routes/sign-up'
-import { Route as SignInRouteImport } from './routes/sign-in'
-import { Route as ConsentRouteImport } from './routes/consent'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as AdminRouteRouteImport } from './routes/admin/route'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as ConsentRouteImport } from './routes/consent'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
-import { Route as InviteInvitationIdRouteImport } from './routes/invite.$invitationId'
-import { Route as ConnectSelectRouteImport } from './routes/connect.select'
 import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
+import { Route as ConnectSelectRouteImport } from './routes/connect.select'
+import { Route as InviteInvitationIdRouteImport } from './routes/invite.$invitationId'
 import { Route as PProjectIdRouteRouteImport } from './routes/p/$projectId/route'
 import { Route as PProjectIdIndexRouteImport } from './routes/p/$projectId/index'
-import { Route as PProjectIdTeamRouteImport } from './routes/p/$projectId/team'
-import { Route as PProjectIdSettingsRouteImport } from './routes/p/$projectId/settings'
-import { Route as PProjectIdImportRouteImport } from './routes/p/$projectId/import'
 import { Route as PProjectIdChangesRouteImport } from './routes/p/$projectId/changes'
-import { Route as PProjectIdDocumentsIndexRouteImport } from './routes/p/$projectId/documents/index'
+import { Route as PProjectIdImportRouteImport } from './routes/p/$projectId/import'
+import { Route as PProjectIdSettingsRouteImport } from './routes/p/$projectId/settings'
+import { Route as PProjectIdTeamRouteImport } from './routes/p/$projectId/team'
 import { Route as PProjectIdCollectionsIndexRouteImport } from './routes/p/$projectId/collections/index'
-import { Route as PProjectIdDocumentsNewRouteImport } from './routes/p/$projectId/documents/new'
 import { Route as PProjectIdCollectionsSlugRouteImport } from './routes/p/$projectId/collections/$slug'
+import { Route as PProjectIdDocumentsIndexRouteImport } from './routes/p/$projectId/documents/index'
 import { Route as PProjectIdDocumentsSlugRouteRouteImport } from './routes/p/$projectId/documents/$slug/route'
+import { Route as PProjectIdDocumentsNewRouteImport } from './routes/p/$projectId/documents/new'
+import { Route as PProjectIdCollectionsSlugActivityRouteImport } from './routes/p/$projectId/collections/$slug_.activity'
+import { Route as PProjectIdConnectorsMcpSetupRouteImport } from './routes/p/$projectId/connectors/mcp/setup'
 import { Route as PProjectIdDocumentsSlugIndexRouteImport } from './routes/p/$projectId/documents/$slug/index'
 import { Route as PProjectIdDocumentsSlugVersionsRouteImport } from './routes/p/$projectId/documents/$slug/versions'
-import { Route as PProjectIdConnectorsMcpSetupRouteImport } from './routes/p/$projectId/connectors/mcp/setup'
-import { Route as PProjectIdCollectionsSlugActivityRouteImport } from './routes/p/$projectId/collections/$slug_.activity'
 
-const SignUpRoute = SignUpRouteImport.update({
-  id: '/sign-up',
-  path: '/sign-up',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SignInRoute = SignInRouteImport.update({
-  id: '/sign-in',
-  path: '/sign-in',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConsentRoute = ConsentRouteImport.update({
-  id: '/consent',
-  path: '/consent',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SplatRoute = SplatRouteImport.update({
@@ -60,9 +50,19 @@ const AdminRouteRoute = AdminRouteRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const ConsentRoute = ConsentRouteImport.update({
+  id: '/consent',
+  path: '/consent',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpRoute = SignUpRouteImport.update({
+  id: '/sign-up',
+  path: '/sign-up',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -70,20 +70,20 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminRouteRoute,
 } as any)
-const InviteInvitationIdRoute = InviteInvitationIdRouteImport.update({
-  id: '/invite/$invitationId',
-  path: '/invite/$invitationId',
-  getParentRoute: () => rootRouteImport,
+const AdminProjectsRoute = AdminProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AdminRouteRoute,
 } as any)
 const ConnectSelectRoute = ConnectSelectRouteImport.update({
   id: '/connect/select',
   path: '/connect/select',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminProjectsRoute = AdminProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => AdminRouteRoute,
+const InviteInvitationIdRoute = InviteInvitationIdRouteImport.update({
+  id: '/invite/$invitationId',
+  path: '/invite/$invitationId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const PProjectIdRouteRoute = PProjectIdRouteRouteImport.update({
   id: '/p/$projectId',
@@ -95,14 +95,9 @@ const PProjectIdIndexRoute = PProjectIdIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
-const PProjectIdTeamRoute = PProjectIdTeamRouteImport.update({
-  id: '/team',
-  path: '/team',
-  getParentRoute: () => PProjectIdRouteRoute,
-} as any)
-const PProjectIdSettingsRoute = PProjectIdSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
+const PProjectIdChangesRoute = PProjectIdChangesRouteImport.update({
+  id: '/changes',
+  path: '/changes',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
 const PProjectIdImportRoute = PProjectIdImportRouteImport.update({
@@ -110,21 +105,38 @@ const PProjectIdImportRoute = PProjectIdImportRouteImport.update({
   path: '/import',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
-const PProjectIdChangesRoute = PProjectIdChangesRouteImport.update({
-  id: '/changes',
-  path: '/changes',
+const PProjectIdSettingsRoute = PProjectIdSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
+const PProjectIdTeamRoute = PProjectIdTeamRouteImport.update({
+  id: '/team',
+  path: '/team',
+  getParentRoute: () => PProjectIdRouteRoute,
+} as any)
+const PProjectIdCollectionsIndexRoute =
+  PProjectIdCollectionsIndexRouteImport.update({
+    id: '/collections/',
+    path: '/collections/',
+    getParentRoute: () => PProjectIdRouteRoute,
+  } as any)
+const PProjectIdCollectionsSlugRoute =
+  PProjectIdCollectionsSlugRouteImport.update({
+    id: '/collections/$slug',
+    path: '/collections/$slug',
+    getParentRoute: () => PProjectIdRouteRoute,
+  } as any)
 const PProjectIdDocumentsIndexRoute =
   PProjectIdDocumentsIndexRouteImport.update({
     id: '/documents/',
     path: '/documents/',
     getParentRoute: () => PProjectIdRouteRoute,
   } as any)
-const PProjectIdCollectionsIndexRoute =
-  PProjectIdCollectionsIndexRouteImport.update({
-    id: '/collections/',
-    path: '/collections/',
+const PProjectIdDocumentsSlugRouteRoute =
+  PProjectIdDocumentsSlugRouteRouteImport.update({
+    id: '/documents/$slug',
+    path: '/documents/$slug',
     getParentRoute: () => PProjectIdRouteRoute,
   } as any)
 const PProjectIdDocumentsNewRoute = PProjectIdDocumentsNewRouteImport.update({
@@ -132,16 +144,16 @@ const PProjectIdDocumentsNewRoute = PProjectIdDocumentsNewRouteImport.update({
   path: '/documents/new',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
-const PProjectIdCollectionsSlugRoute =
-  PProjectIdCollectionsSlugRouteImport.update({
-    id: '/collections/$slug',
-    path: '/collections/$slug',
+const PProjectIdCollectionsSlugActivityRoute =
+  PProjectIdCollectionsSlugActivityRouteImport.update({
+    id: '/collections/$slug_/activity',
+    path: '/collections/$slug/activity',
     getParentRoute: () => PProjectIdRouteRoute,
   } as any)
-const PProjectIdDocumentsSlugRouteRoute =
-  PProjectIdDocumentsSlugRouteRouteImport.update({
-    id: '/documents/$slug',
-    path: '/documents/$slug',
+const PProjectIdConnectorsMcpSetupRoute =
+  PProjectIdConnectorsMcpSetupRouteImport.update({
+    id: '/connectors/mcp/setup',
+    path: '/connectors/mcp/setup',
     getParentRoute: () => PProjectIdRouteRoute,
   } as any)
 const PProjectIdDocumentsSlugIndexRoute =
@@ -155,18 +167,6 @@ const PProjectIdDocumentsSlugVersionsRoute =
     id: '/versions',
     path: '/versions',
     getParentRoute: () => PProjectIdDocumentsSlugRouteRoute,
-  } as any)
-const PProjectIdConnectorsMcpSetupRoute =
-  PProjectIdConnectorsMcpSetupRouteImport.update({
-    id: '/connectors/mcp/setup',
-    path: '/connectors/mcp/setup',
-    getParentRoute: () => PProjectIdRouteRoute,
-  } as any)
-const PProjectIdCollectionsSlugActivityRoute =
-  PProjectIdCollectionsSlugActivityRouteImport.update({
-    id: '/collections/$slug_/activity',
-    path: '/collections/$slug/activity',
-    getParentRoute: () => PProjectIdRouteRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -343,25 +343,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/sign-up': {
-      id: '/sign-up'
-      path: '/sign-up'
-      fullPath: '/sign-up'
-      preLoaderRoute: typeof SignUpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sign-in': {
-      id: '/sign-in'
-      path: '/sign-in'
-      fullPath: '/sign-in'
-      preLoaderRoute: typeof SignInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/consent': {
-      id: '/consent'
-      path: '/consent'
-      fullPath: '/consent'
-      preLoaderRoute: typeof ConsentRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$': {
@@ -378,11 +364,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/consent': {
+      id: '/consent'
+      path: '/consent'
+      fullPath: '/consent'
+      preLoaderRoute: typeof ConsentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up': {
+      id: '/sign-up'
+      path: '/sign-up'
+      fullPath: '/sign-up'
+      preLoaderRoute: typeof SignUpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -392,12 +392,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRouteRoute
     }
-    '/invite/$invitationId': {
-      id: '/invite/$invitationId'
-      path: '/invite/$invitationId'
-      fullPath: '/invite/$invitationId'
-      preLoaderRoute: typeof InviteInvitationIdRouteImport
-      parentRoute: typeof rootRouteImport
+    '/admin/projects': {
+      id: '/admin/projects'
+      path: '/projects'
+      fullPath: '/admin/projects'
+      preLoaderRoute: typeof AdminProjectsRouteImport
+      parentRoute: typeof AdminRouteRoute
     }
     '/connect/select': {
       id: '/connect/select'
@@ -406,12 +406,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectSelectRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin/projects': {
-      id: '/admin/projects'
-      path: '/projects'
-      fullPath: '/admin/projects'
-      preLoaderRoute: typeof AdminProjectsRouteImport
-      parentRoute: typeof AdminRouteRoute
+    '/invite/$invitationId': {
+      id: '/invite/$invitationId'
+      path: '/invite/$invitationId'
+      fullPath: '/invite/$invitationId'
+      preLoaderRoute: typeof InviteInvitationIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/p/$projectId': {
       id: '/p/$projectId'
@@ -427,18 +427,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdIndexRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
-    '/p/$projectId/team': {
-      id: '/p/$projectId/team'
-      path: '/team'
-      fullPath: '/p/$projectId/team'
-      preLoaderRoute: typeof PProjectIdTeamRouteImport
-      parentRoute: typeof PProjectIdRouteRoute
-    }
-    '/p/$projectId/settings': {
-      id: '/p/$projectId/settings'
-      path: '/settings'
-      fullPath: '/p/$projectId/settings'
-      preLoaderRoute: typeof PProjectIdSettingsRouteImport
+    '/p/$projectId/changes': {
+      id: '/p/$projectId/changes'
+      path: '/changes'
+      fullPath: '/p/$projectId/changes'
+      preLoaderRoute: typeof PProjectIdChangesRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
     '/p/$projectId/import': {
@@ -448,18 +441,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdImportRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
-    '/p/$projectId/changes': {
-      id: '/p/$projectId/changes'
-      path: '/changes'
-      fullPath: '/p/$projectId/changes'
-      preLoaderRoute: typeof PProjectIdChangesRouteImport
+    '/p/$projectId/settings': {
+      id: '/p/$projectId/settings'
+      path: '/settings'
+      fullPath: '/p/$projectId/settings'
+      preLoaderRoute: typeof PProjectIdSettingsRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
-    '/p/$projectId/documents/': {
-      id: '/p/$projectId/documents/'
-      path: '/documents'
-      fullPath: '/p/$projectId/documents/'
-      preLoaderRoute: typeof PProjectIdDocumentsIndexRouteImport
+    '/p/$projectId/team': {
+      id: '/p/$projectId/team'
+      path: '/team'
+      fullPath: '/p/$projectId/team'
+      preLoaderRoute: typeof PProjectIdTeamRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
     '/p/$projectId/collections/': {
@@ -469,13 +462,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdCollectionsIndexRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
-    '/p/$projectId/documents/new': {
-      id: '/p/$projectId/documents/new'
-      path: '/documents/new'
-      fullPath: '/p/$projectId/documents/new'
-      preLoaderRoute: typeof PProjectIdDocumentsNewRouteImport
-      parentRoute: typeof PProjectIdRouteRoute
-    }
     '/p/$projectId/collections/$slug': {
       id: '/p/$projectId/collections/$slug'
       path: '/collections/$slug'
@@ -483,11 +469,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdCollectionsSlugRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
+    '/p/$projectId/documents/': {
+      id: '/p/$projectId/documents/'
+      path: '/documents'
+      fullPath: '/p/$projectId/documents/'
+      preLoaderRoute: typeof PProjectIdDocumentsIndexRouteImport
+      parentRoute: typeof PProjectIdRouteRoute
+    }
     '/p/$projectId/documents/$slug': {
       id: '/p/$projectId/documents/$slug'
       path: '/documents/$slug'
       fullPath: '/p/$projectId/documents/$slug'
       preLoaderRoute: typeof PProjectIdDocumentsSlugRouteRouteImport
+      parentRoute: typeof PProjectIdRouteRoute
+    }
+    '/p/$projectId/documents/new': {
+      id: '/p/$projectId/documents/new'
+      path: '/documents/new'
+      fullPath: '/p/$projectId/documents/new'
+      preLoaderRoute: typeof PProjectIdDocumentsNewRouteImport
+      parentRoute: typeof PProjectIdRouteRoute
+    }
+    '/p/$projectId/collections/$slug_/activity': {
+      id: '/p/$projectId/collections/$slug_/activity'
+      path: '/collections/$slug/activity'
+      fullPath: '/p/$projectId/collections/$slug/activity'
+      preLoaderRoute: typeof PProjectIdCollectionsSlugActivityRouteImport
+      parentRoute: typeof PProjectIdRouteRoute
+    }
+    '/p/$projectId/connectors/mcp/setup': {
+      id: '/p/$projectId/connectors/mcp/setup'
+      path: '/connectors/mcp/setup'
+      fullPath: '/p/$projectId/connectors/mcp/setup'
+      preLoaderRoute: typeof PProjectIdConnectorsMcpSetupRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
     '/p/$projectId/documents/$slug/': {
@@ -503,20 +517,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/p/$projectId/documents/$slug/versions'
       preLoaderRoute: typeof PProjectIdDocumentsSlugVersionsRouteImport
       parentRoute: typeof PProjectIdDocumentsSlugRouteRoute
-    }
-    '/p/$projectId/connectors/mcp/setup': {
-      id: '/p/$projectId/connectors/mcp/setup'
-      path: '/connectors/mcp/setup'
-      fullPath: '/p/$projectId/connectors/mcp/setup'
-      preLoaderRoute: typeof PProjectIdConnectorsMcpSetupRouteImport
-      parentRoute: typeof PProjectIdRouteRoute
-    }
-    '/p/$projectId/collections/$slug_/activity': {
-      id: '/p/$projectId/collections/$slug_/activity'
-      path: '/collections/$slug/activity'
-      fullPath: '/p/$projectId/collections/$slug/activity'
-      preLoaderRoute: typeof PProjectIdCollectionsSlugActivityRouteImport
-      parentRoute: typeof PProjectIdRouteRoute
     }
   }
 }

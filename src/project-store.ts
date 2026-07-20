@@ -1,5 +1,5 @@
-import { createStoreWithSchema, type Store } from "@nicia-ai/typegraph";
-import { createSqliteBackend } from "@nicia-ai/typegraph/sqlite";
+import { createAdapterStoreWithSchema } from "@nicia-ai/typegraph";
+import { createSqliteBackend } from "@nicia-ai/typegraph/adapters/drizzle/sqlite";
 import { DurableObject } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -9,7 +9,7 @@ import { ledgerMigrations } from "../drizzle-do/migrations";
 import type { AssembledCollection } from "./corpus";
 import type { LedgerDb } from "./db";
 import { ConflictError, isUniqueViolation, RollbackProbe } from "./errors";
-import { type CanonicalGraph, canonicalGraph } from "./graph";
+import { canonicalGraph } from "./graph";
 import {
   asCollectionSlug,
   asDocumentSlug,
@@ -175,7 +175,7 @@ import {
 } from "./store/domain/suggestion";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
-import type { GraphHandle } from "./store/handle";
+import type { CorpusStore, GraphHandle } from "./store/handle";
 import { BlobStore } from "./store/repos/blob-store";
 import { BlockMapRepo } from "./store/repos/block-map";
 import { ChangeLog, type RecentChange } from "./store/repos/change-log";
@@ -227,24 +227,6 @@ const SEARCH_BACKFILL_KEY = "search:backfilled:v1";
 // Documents reindexed per backfill transaction — bounds the work (blob reads
 // + node updates) in any single transaction for an unbounded legacy project.
 const SEARCH_BACKFILL_BATCH = 100;
-
-// TypeGraph 0.35 widened its built-in traversal indexes so the actual
-// traversal SQL is index-only. Its idempotent bootstrap cannot replace an
-// existing same-name index with a different column list, so every pre-0.35
-// ProjectStore needs this one-time physical migration. Keep the marker in DO
-// storage rather than the TypeGraph schema document: this is a database-level
-// migration, not a graph-model evolution.
-export const TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY =
-  "typegraph-physical-schema:0.35-edge-covering-indexes";
-
-const TYPEGRAPH_035_EDGE_INDEX_STATEMENTS = [
-  "DROP INDEX IF EXISTS typegraph_edges_from_idx",
-  `CREATE INDEX typegraph_edges_from_idx ON typegraph_edges
-    (graph_id, from_kind, from_id, kind, to_kind, deleted_at, valid_from, valid_to, to_id)`,
-  "DROP INDEX IF EXISTS typegraph_edges_to_idx",
-  `CREATE INDEX typegraph_edges_to_idx ON typegraph_edges
-    (graph_id, to_kind, to_id, kind, from_kind, deleted_at, valid_from, valid_to, from_id)`,
-] as const;
 
 // Maps a committed command's outcome to the real-time change to broadcast,
 // or undefined to fall back to the domain-derived change. Always a function
@@ -341,8 +323,8 @@ function realtimeChangeFromDomain(
 // sibling per-Project EventLogStore after commit. The EventLogStore gives the
 // audit stream a queryable source of truth without splitting the save tx.
 export class ProjectStore extends DurableObject<Env> {
-  private store: Store<CanonicalGraph> | undefined;
-  private initPromise: Promise<Store<CanonicalGraph>> | undefined;
+  private store: CorpusStore | undefined;
+  private initPromise: Promise<CorpusStore> | undefined;
   // The DO's storage is stable for its lifetime, so the read-side ledger
   // handle is built once (writes use the tx-scoped handle).
   private ledger: LedgerDb | undefined;
@@ -587,21 +569,17 @@ export class ProjectStore extends DurableObject<Env> {
   // own DO transaction, BEFORE TypeGraph init, so it never touches a
   // TypeGraph enlisted transaction. TypeGraph then bootstraps its own
   // node/edge tables.
-  private async ensureStore(): Promise<Store<CanonicalGraph>> {
+  private async ensureStore(): Promise<CorpusStore> {
     if (this.store) return this.store;
     this.initPromise ??= (async () => {
       await migrate(this.ledgerDb(), ledgerMigrations);
       const backend = createSqliteBackend(drizzle(this.ctx.storage));
-      const [store] = await createStoreWithSchema(canonicalGraph, backend);
-      await this.migrateTypeGraph035PhysicalSchema();
+      const [store] = await createAdapterStoreWithSchema(
+        canonicalGraph,
+        backend,
+      );
       const materialized = await store.materializeIndexes({
         stopOnError: true,
-        // Cloudflare Durable Object SQLite rejects TypeGraph's
-        // `PRAGMA analysis_limit` statistics-refresh prelude with
-        // SQLITE_AUTH. These equality-prefix indexes do not depend on
-        // skip-scan statistics, so materialize them without the unsupported
-        // maintenance verb.
-        refreshStatistics: false,
       });
       const incomplete = materialized.results.find(
         (result) =>
@@ -622,23 +600,6 @@ export class ProjectStore extends DurableObject<Env> {
     return this.initPromise;
   }
 
-  private async migrateTypeGraph035PhysicalSchema(): Promise<void> {
-    if (
-      await this.ctx.storage.get<boolean>(
-        TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY,
-      )
-    ) {
-      return;
-    }
-    // `sql.exec` is synchronous inside one DO turn. The marker is written only
-    // after both indexes exist; an interrupted migration safely retries the
-    // idempotent drop/create sequence on the next activation.
-    for (const statement of TYPEGRAPH_035_EDGE_INDEX_STATEMENTS) {
-      this.ctx.storage.sql.exec(statement);
-    }
-    await this.ctx.storage.put(TYPEGRAPH_035_EDGE_INDEX_MIGRATION_KEY, true);
-  }
-
   private unit(graph: GraphHandle, ledger: LedgerDb): Unit {
     return {
       docs: new DocumentRepo(graph),
@@ -654,10 +615,21 @@ export class ProjectStore extends DurableObject<Env> {
     };
   }
 
-  // The only place a transaction opens.
+  // The only place a transaction opens. The atomic graph+ledger write rides
+  // TypeGraph's native transaction handle, and since 0.39 the non-available
+  // `sqlAvailability` arms omit `sql` outright — so this narrowing is what
+  // makes `tx.sql` reachable at all, and it doubles as a fail-loud guard for
+  // a backend that stops offering raw SQL.
   private async write<T>(fn: (u: Unit) => Promise<T>): Promise<T> {
     const store = await this.ensureStore();
-    return store.transaction((tx) => fn(this.unit(tx, asLedgerDb(tx.sql))));
+    return store.transaction((tx) => {
+      if (tx.sqlAvailability !== "available") {
+        throw new Error(
+          `ProjectStore requires a SQL-backed transaction; TypeGraph reported sqlAvailability="${tx.sqlAvailability}"`,
+        );
+      }
+      return fn(this.unit(tx, asLedgerDb(tx.sql)));
+    });
   }
 
   // Non-transactional unit for reads — same repo API, storage handle.

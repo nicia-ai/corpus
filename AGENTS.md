@@ -196,6 +196,28 @@ responsibility.
 - `kind` is reserved node metadata — use a domain-specific prop name.
 - `Node` / `Edge` shapes are flat (not under `.props`).
 - Look entities up with `find({ where })`, not `findByConstraint`.
+- Corpus binds to the **adapter** surface, not the portable one. Since
+  0.38 TypeGraph's default `Store` / `TransactionContext` are portable
+  and deliberately withhold the native handle; only
+  `createAdapterStoreWithSchema` + `AdapterStore` / `AdapterTransactionContext`
+  expose `tx.sql`, which the atomic graph+ledger write depends on. The
+  aliases live in `src/store/handle.ts` (`CorpusStore`,
+  `CorpusTransaction`) — bind to those, never to bare `Store<…>`.
+  Bring-your-own-connection backends import from
+  `@nicia-ai/typegraph/adapters/drizzle/sqlite` (the old `/sqlite`
+  entrypoint was removed, not deprecated).
+- `tx.sql` is gated by the `tx.sqlAvailability` discriminant
+  (`"available" | "history" | "revisionTracking" | "unavailable"`).
+  Since 0.39 the non-available arms **omit** `sql` entirely, so
+  narrowing on the discriminant is what makes `tx.sql` reachable at
+  all — reading it unnarrowed is a compile error, not a silent
+  `T | undefined`. `ProjectStore.write()` narrows once, at the single
+  point a transaction opens.
+- Statistics refresh needs no DO-SQLite workaround. TypeGraph 0.39
+  tolerates Durable Object SQLite's `SQLITE_AUTH` rejection of the
+  performance-only `PRAGMA analysis_limit` and proceeds with scoped
+  `ANALYZE`; do not re-add `refreshStatistics: false` to
+  `materializeIndexes`.
 
 ## Durable Object migrations
 
@@ -210,10 +232,12 @@ drizzle-kit owns this DDL; no hand-written DDL. Baselines are
 regenerated, not migrated forward — safe only because there is no
 production data. TypeGraph bootstraps its own node / edge tables and
 materializes the indexes declared in `canonicalGraph` from `ensureStore`.
-Physical upgrades to TypeGraph-owned indexes that its idempotent bootstrap
-cannot replace also run there, guarded by a Durable Object storage marker;
-do not model them as a Drizzle or `wrangler.jsonc` migration. Regression
-coverage lives in `test/do-ledger-migrator.test.ts`. `drizzle/`,
+TypeGraph's own base-relation indexes are system-index declarations it
+materializes at bootstrap — Corpus hand-rolls no physical index DDL. Note
+it matches existing indexes by **name only** and never compares columns,
+so it will silently adopt an index whose column list has drifted rather
+than rebuild it; `test/do-ledger-migrator.test.ts` pins the traversal
+column lists so an upstream change fails loudly instead. `drizzle/`,
 `drizzle-do/`, `drizzle-event-log/` are prettier-ignored so `pnpm format`
 can't desync the byte-for-byte check.
 
