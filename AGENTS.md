@@ -275,10 +275,19 @@ the model, not the test**.
 
 ## Testing
 
-`vitest.config.ts` uses vitest-pool-workers with real Worker bindings,
+`vite.config.ts` uses vitest-pool-workers with real Worker bindings,
 `isolatedStorage: false`. D1 migrations applied via
 `test/apply-migrations.ts`. `test/_helpers.ts` carries a per-module
 `SALT` so user emails don't collide across test files sharing D1.
+
+Tests are typechecked. `tsconfig.json` covers `src/` only, so `test/`
+gets its own `tsconfig.test.json` (same strict options, plus the
+`@cloudflare/vitest-pool-workers/types` needed for `cloudflare:test`),
+and `pnpm typecheck` runs both projects. Test code is held to the same
+rules as `src/` — brand ids through the `as*` constructors, no `any` /
+`@ts-expect-error` to silence a mock that has drifted from its port.
+A mock that no longer matches its interface is a real signal: fix the
+mock, and check whether the drift means the new member is untested.
 
 ## TypeScript conventions
 

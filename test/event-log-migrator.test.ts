@@ -117,7 +117,12 @@ describe("EventLogStore Drizzle migrator", () => {
       );
     }
 
-    const tail = await log.iterate({ sinceMonotonicId: ids[1] });
+    // `noUncheckedIndexedAccess` types ids[1] as possibly-undefined; the loop
+    // above appended five, so assert that rather than defaulting past a real
+    // seeding failure and silently iterating from the head.
+    const since = ids[1];
+    if (since === undefined) throw new Error("expected 5 appended event ids");
+    const tail = await log.iterate({ sinceMonotonicId: since });
     expect(tail.map((e) => e.monotonicId)).toEqual([ids[2], ids[3], ids[4]]);
 
     const page = await log.iterate({ limit: 2 });

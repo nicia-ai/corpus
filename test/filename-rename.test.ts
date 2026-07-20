@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { asFolderSlug, type FolderSlug } from "../src/ids";
+
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const ws = () => freshStore("fname");
@@ -8,10 +10,10 @@ const by = "u";
 async function folderSlug(
   store: ReturnType<typeof ws>,
   name: string,
-): Promise<string> {
+): Promise<FolderSlug> {
   const f = (await store.listFolders()).find((x) => x.name === name);
   if (f === undefined) throw new Error(`folder ${name} not found`);
-  return f.slug;
+  return asFolderSlug(f.slug);
 }
 
 const countReordered = async (store: ReturnType<typeof ws>): Promise<number> =>
@@ -33,7 +35,7 @@ describe("renameFilename — head-only, distinct event", () => {
       changedBy: "alice",
     });
     if (!r1.ok) throw new Error("import failed");
-    const slug = r1.slug;
+    const slug = docSlug(r1.slug);
     await w.importDocumentAtPath({
       path: "a/notes.md",
       markdown: "# N v2",
@@ -66,7 +68,7 @@ describe("renameFilename — head-only, distinct event", () => {
     });
     if (!r1.ok) throw new Error("import failed");
     await w.renameFilename({
-      slug: r1.slug,
+      slug: docSlug(r1.slug),
       filename: "policy-v2.md",
       changedBy: "dave",
     });
@@ -89,7 +91,7 @@ describe("renameFilename — head-only, distinct event", () => {
     const evtId = await w.lastEventId();
     expect(
       await w.renameFilename({
-        slug: r1.slug,
+        slug: docSlug(r1.slug),
         filename: "icp.md",
         changedBy: by,
       }),
@@ -114,12 +116,12 @@ describe("renameFilename — cross-type sibling-namespace collision", () => {
     if (!rb.ok) throw new Error("import failed");
     expect(
       await w.renameFilename({
-        slug: rb.slug,
+        slug: docSlug(rb.slug),
         filename: "a.md",
         changedBy: by,
       }),
     ).toEqual({ ok: false, reason: "segment-collision" });
-    expect((await w.getDocument(rb.slug))?.filename).toBe("b.md");
+    expect((await w.getDocument(docSlug(rb.slug)))?.filename).toBe("b.md");
   });
 
   it("rejects a doc-vs-folder clash at the root", async () => {
@@ -138,7 +140,7 @@ describe("renameFilename — cross-type sibling-namespace collision", () => {
     if (!rr.ok) throw new Error("import failed");
     expect(
       await w.renameFilename({
-        slug: rr.slug,
+        slug: docSlug(rr.slug),
         filename: "guide",
         changedBy: by,
       }),
@@ -183,7 +185,7 @@ describe("renameFilename — path-map fan-out (title rename does NOT)", () => {
 
     // Title rename is display-only → NOT a path-map mutation.
     await w.renameDocument({
-      slug: rs.slug,
+      slug: docSlug(rs.slug),
       title: "Setup Guide",
       changedBy: by,
     });
@@ -192,7 +194,7 @@ describe("renameFilename — path-map fan-out (title rename does NOT)", () => {
     // Filename rename shifts the path map → exactly one fan-out event
     // for the single linking collection, plus the distinct doc event.
     await w.renameFilename({
-      slug: rs.slug,
+      slug: docSlug(rs.slug),
       filename: "setup-guide.md",
       changedBy: by,
     });

@@ -51,12 +51,14 @@ const suggestion = (
   id,
   status: "open",
   baseDocVersion,
+  granularity: "block",
   proposedMarkdown: "next",
   createdBy: "agent",
   channel: "mcp",
   createdAt: "2026-06-08T00:00:00Z",
   reviewerNote: null,
   hunks: [hunk],
+  messages: [],
 });
 
 const hunk = (

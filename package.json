@@ -40,7 +40,7 @@
     "verify": "tsx scripts/verify.ts",
     "corpus": "tsx cli/corpus.ts",
     "postinstall": "wrangler types",
-    "typecheck": "wrangler types && tsc --noEmit",
+    "typecheck": "wrangler types && tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "types": "wrangler types",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

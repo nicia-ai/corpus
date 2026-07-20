@@ -100,7 +100,7 @@ describe("MCP API-key auth path", () => {
     const dj = (await docs.json()) as {
       result: { content: { text: string }[] };
     };
-    expect(dj.result.content[0].text).toBe("[]");
+    expect(dj.result.content[0]?.text).toBe("[]");
   });
 
   it("rejects an unknown cck_ token with 401", async () => {

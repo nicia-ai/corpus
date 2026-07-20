@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asFolderSlug } from "../src/ids";
+import { asFolderSlug, type FolderSlug } from "../src/ids";
 
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
@@ -10,10 +10,10 @@ const by = "u";
 async function folderSlugByName(
   store: ReturnType<typeof ws>,
   name: string,
-): Promise<string> {
+): Promise<FolderSlug> {
   const f = (await store.listFolders()).find((x) => x.name === name);
   if (f === undefined) throw new Error(`folder ${name} not found`);
-  return f.slug;
+  return asFolderSlug(f.slug);
 }
 
 describe("folder→collection links — shared resolver expansion", () => {

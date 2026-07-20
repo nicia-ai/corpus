@@ -234,6 +234,8 @@ describe("MCP JSON-RPC dispatcher", () => {
     suggestCreate: () =>
       Promise.resolve({ ok: false as const, reason: "invalid" as const }),
     proposalResult: () => Promise.resolve({ found: false as const }),
+    replyToProposal: () =>
+      Promise.resolve({ ok: false as const, reason: "missing" as const }),
     listCollections: async () => [{ slug: "c1", name: "C1" }],
     listDocuments: async () => [
       { slug: "d1", title: "D1", docVersion: 1, size: 3, path: "docs/d1.md" },

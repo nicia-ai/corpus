@@ -25,6 +25,7 @@ function executor(): McpExecutor {
     suggestEdit: unused,
     suggestCreate: unused,
     proposalResult: unused,
+    replyToProposal: unused,
     listCollections: unused,
     listDocuments: unused,
     readCollection: unused,
@@ -58,9 +59,10 @@ function call(name: string, args: Record<string, unknown>) {
 }
 
 function resultJson(res: unknown): unknown {
-  const text = (res as { result: { content: { text: string }[] } }).result
-    .content[0].text;
-  return JSON.parse(text);
+  const block = (res as { result: { content: { text: string }[] } }).result
+    .content[0];
+  if (block === undefined) throw new Error("MCP result carried no content");
+  return JSON.parse(block.text);
 }
 
 describe("read_document_meta MCP tool", () => {
@@ -99,6 +101,6 @@ describe("read_document_meta MCP tool", () => {
     const res = (await call("read_document", { slug: "runbook" })) as {
       result: { content: { text: string }[] };
     };
-    expect(res.result.content[0].text).toBe(DOC_WITH_FM);
+    expect(res.result.content[0]?.text).toBe(DOC_WITH_FM);
   });
 });

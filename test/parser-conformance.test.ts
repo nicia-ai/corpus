@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { HEADING_LEVEL } from "../src/components/markdown/live-preview";
 import { parseBlocks, processor } from "../src/store/domain/block-parse";
 import { frontmatterLength } from "../src/store/domain/frontmatter";
+import { compact } from "../src/util";
 
 // Parser conformance: the editor and the reader see the same document.
 //
@@ -47,7 +48,10 @@ function remarkBlocks(markdown: string): readonly Block[] {
   let h = 0;
   return parseBlocks(markdown).map((b) =>
     b.kind === "heading"
-      ? { kind: b.kind, level: levels[h++] }
+      ? // `level` is optional under exactOptionalPropertyTypes, so drop the
+        // key when the mdast walk yielded no depth rather than setting it
+        // to an explicit undefined (AGENTS.md: assemble with `compact()`).
+        compact({ kind: b.kind, level: levels[h++] })
       : { kind: b.kind },
   );
 }

@@ -157,7 +157,7 @@ async function applyOp(
     case "place-doc": {
       const folder =
         op.folder === "root" ? null : await folderSlug(store, op.folder);
-      if (op.folder === "root" || folder !== undefined) {
+      if (folder !== undefined) {
         await store.placeDocumentInFolder(docSlug(op.doc), folder, "prop");
       }
       return;

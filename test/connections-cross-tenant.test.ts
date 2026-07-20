@@ -34,7 +34,6 @@ import { createOrg, signUp } from "./_helpers";
 // reference_id-keyed token/consent rows). These tests prove the scope.
 
 async function seedRefreshToken(
-  organizationId: string,
   userId: string,
   connectionId: string,
 ): Promise<void> {
@@ -118,7 +117,7 @@ describe("Connection admin scoping — cross-tenant guard", () => {
       projectId: orgB.projectId,
       collectionSlug: asCollectionSlug("bob-vault"),
     });
-    await seedRefreshToken(orgB.organizationId, bob, bobConn);
+    await seedRefreshToken(bob, bobConn);
 
     // Cross-project delete: must early-return before the cascade. If the
     // SELECT-then-cascade guard regressed, the refresh-token revoke would
