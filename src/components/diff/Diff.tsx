@@ -1,4 +1,4 @@
-import type { DiffLine } from "@/lib/diff";
+import type { DiffLine } from "@nicia-ai/prose-diff";
 
 // Line-level diff rendering shared by the save-conflict merge and the
 // version-history compare. `DiffPanel` is the raw side-by-side source pane

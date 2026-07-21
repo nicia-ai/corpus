@@ -1,3 +1,4 @@
+import { lineDiff, type DiffLine } from "@nicia-ai/prose-diff";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import {
   ChevronDown,
@@ -21,7 +22,6 @@ import { cardClass } from "@/components/ui/Surface";
 import { showToast } from "@/components/ui/Toast";
 import type { ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
-import { lineDiff, type DiffLine } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
 import {
   type DocSnapshot,
