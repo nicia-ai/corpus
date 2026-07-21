@@ -1,27 +1,30 @@
+import {
+  asBlockId as asEngineBlockId,
+  type Block,
+  type BlockId as EngineBlockId,
+  matchBlocks,
+  type MatchedBlock,
+  type MatchResult,
+  type NextBlock,
+} from "@nicia-ai/prose-diff";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { asBlockId, type BlockId } from "../src/ids";
+import { asBlockId } from "../src/ids";
 import {
   type Anchor,
   rebaseAnchors,
   resolveAnchor,
   type RebaseResult,
 } from "../src/store/domain/anchor";
-import {
-  type Block,
-  matchBlocks,
-  type MatchResult,
-  type NextBlock,
-} from "../src/store/domain/block-match";
 
 function block(id: string, text: string): Block {
-  return { id: asBlockId(id), kind: "paragraph", text };
+  return { id: asEngineBlockId(id), kind: "paragraph", text };
 }
 
-function minter(): () => BlockId {
+function minter(): () => EngineBlockId {
   let n = 0;
-  return () => asBlockId(`mint-${(n += 1).toString()}`);
+  return () => asEngineBlockId(`mint-${(n += 1).toString()}`);
 }
 
 function rebaseOneAnchor(anchor: Anchor, match: MatchResult): RebaseResult {
@@ -31,10 +34,21 @@ function rebaseOneAnchor(anchor: Anchor, match: MatchResult): RebaseResult {
   return first;
 }
 
+// Find a matched block by (either brand's) id, widened to plain string —
+// `MatchedBlock.id` is the engine's own BlockId, `Anchor.blockId` is
+// Corpus's; both widen to `string` so this compares across the brand
+// boundary without a cast.
+function findById(
+  blocks: readonly MatchedBlock[],
+  id: string,
+): MatchedBlock | undefined {
+  return blocks.find((b) => b.id === id);
+}
+
 // Text the rebased anchor now slices to — the safety check.
 function slice(result: RebaseResult, match: MatchResult): string | undefined {
   if (result.status !== "anchored") return undefined;
-  const target = match.blocks.find((b) => b.id === result.anchor.blockId);
+  const target = findById(match.blocks, result.anchor.blockId);
   return target?.text.slice(result.anchor.start, result.anchor.end);
 }
 
@@ -308,7 +322,7 @@ describe("rebaseAnchors safety (property)", () => {
 
           // Safety: an anchored result always slices to the exact quote.
           if (r.status === "anchored") {
-            const target2 = match.blocks.find((b) => b.id === r.anchor.blockId);
+            const target2 = findById(match.blocks, r.anchor.blockId);
             expect(target2?.text.slice(r.anchor.start, r.anchor.end)).toBe(
               exact,
             );

@@ -1,3 +1,4 @@
+import { CREATE_PROPOSAL_BASE_VERSION } from "@nicia-ai/prose-diff";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import {
@@ -14,7 +15,6 @@ import {
   type SuggestionRow,
   type SuggestionStatus,
 } from "../../db";
-import { CREATE_PROPOSAL_BASE_VERSION } from "../domain/suggestion";
 
 // Per-hunk suggestions, as a repository. Non-canonical review layer
 // (off-bundle, off-MCP). All row/status types inferred from the schema, so

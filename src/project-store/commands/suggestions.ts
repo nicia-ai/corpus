@@ -1,3 +1,14 @@
+import {
+  applyHunks,
+  CREATE_PROPOSAL_BASE_VERSION,
+  diffSuggestion,
+  type Hunk,
+  type HunkOp,
+  isCreateProposal,
+  type ProposalOutcome,
+  type SuggestionGranularity,
+} from "@nicia-ai/prose-diff";
+
 import type {
   HunkDecision,
   SuggestionHunkRow,
@@ -19,16 +30,6 @@ import {
   pathSegments,
   stripExtension,
 } from "../../store/domain/paths";
-import {
-  applyHunks,
-  CREATE_PROPOSAL_BASE_VERSION,
-  diffSuggestion,
-  type Hunk,
-  type HunkOp,
-  isCreateProposal,
-  type ProposalOutcome,
-  type SuggestionGranularity,
-} from "../../store/domain/suggestion";
 import { markdownTooLarge } from "../../util";
 import {
   type CommandOutcome,
@@ -87,7 +88,7 @@ export type ProposalMessage = Readonly<{
   createdAt: string;
 }>;
 
-export type { ProposalOutcome } from "../../store/domain/suggestion";
+export type { ProposalOutcome } from "@nicia-ai/prose-diff";
 
 export type ProposalResult = Readonly<
   | { found: false }

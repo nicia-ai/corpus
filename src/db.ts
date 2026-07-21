@@ -1,3 +1,8 @@
+import {
+  type BlockKind,
+  HUNK_OPS,
+  SUGGESTION_GRANULARITIES,
+} from "@nicia-ai/prose-diff";
 import { sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import {
@@ -11,8 +16,6 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import { CALLER_CHANNELS } from "./ids";
-import type { BlockKind } from "./store/domain/block-match";
-import { HUNK_OPS, SUGGESTION_GRANULARITIES } from "./store/domain/suggestion";
 
 // Content-addressed blob store, co-located in the DO's SQLite (NOT R2):
 // keeping it here preserves the single atomic tx (blob + DocumentVersion
@@ -194,7 +197,7 @@ export const suggestion = sqliteTable(
     // per-hunk review) or `whole-document` (the self-verification failed
     // and the diff degraded to one all-or-nothing hunk). Recorded at
     // create time so degradation frequency is observable; semantics on
-    // SUGGESTION_GRANULARITIES in src/store/domain/suggestion.ts. The
+    // SUGGESTION_GRANULARITIES in @nicia-ai/prose-diff's suggestion.ts. The
     // default covers the ADD COLUMN backfill and hunkless create-proposals.
     granularity: text("granularity", { enum: SUGGESTION_GRANULARITIES })
       .notNull()
@@ -238,7 +241,7 @@ export const suggestionHunk = sqliteTable(
     baseStart: integer("base_start").notNull(),
     baseEnd: integer("base_end").notNull(),
     // Half-open range into the suggestion's stored proposedMarkdown —
-    // semantics on the canonical Hunk type in src/store/domain/suggestion.ts.
+    // semantics on the canonical Hunk type in @nicia-ai/prose-diff's suggestion.ts.
     // The defaults exist only for the ADD COLUMN migration backfill.
     propStart: integer("prop_start").notNull().default(0),
     propEnd: integer("prop_end").notNull().default(0),

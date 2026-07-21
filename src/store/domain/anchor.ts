@@ -1,6 +1,6 @@
-import type { BlockId } from "../../ids";
+import type { MatchedBlock, MatchResult } from "@nicia-ai/prose-diff";
 
-import type { MatchedBlock, MatchResult } from "./block-match";
+import { asBlockId, type BlockId } from "../../ids";
 
 // Anchors: how a comment or suggestion pins to a location in a document,
 // and how that pin survives an edit. Pure, zero-IO.
@@ -45,13 +45,18 @@ export type RebaseResult = Readonly<
 >;
 
 // Capture an anchor over [start, end) of a block's text, with context.
+//
+// `id` is plain `string`, not the branded `BlockId`: callers pass either a
+// Corpus block-map entry or a `@nicia-ai/prose-diff` `Block`/`MatchedBlock`
+// (its own, differently-branded `BlockId`) — this is the trust boundary
+// that re-brands into Corpus's own id.
 export function resolveAnchor(
-  block: Readonly<{ id: BlockId; text: string }>,
+  block: Readonly<{ id: string; text: string }>,
   start: number,
   end: number,
 ): Anchor {
   return {
-    blockId: block.id,
+    blockId: asBlockId(block.id),
     start,
     end,
     quote: {
@@ -73,14 +78,17 @@ export function rebaseAnchors(
 }
 
 type RebaseIndex = Readonly<{
-  // prev block id → the new block the matcher carried it to.
-  carried: ReadonlyMap<BlockId, MatchedBlock>;
+  // prev block id → the new block the matcher carried it to. Keyed by
+  // plain string (not the engine's own branded BlockId): both an Anchor's
+  // Corpus-branded id and the engine's branded id widen to plain string,
+  // so lookups work across the brand boundary without a cast.
+  carried: ReadonlyMap<string, MatchedBlock>;
   // all new blocks, in document order, for cross-block recovery.
   blocks: readonly MatchedBlock[];
 }>;
 
 function buildIndex(match: MatchResult): RebaseIndex {
-  const carried = new Map<BlockId, MatchedBlock>();
+  const carried = new Map<string, MatchedBlock>();
   for (const block of match.blocks) {
     const { origin } = block;
     if (origin.status === "unchanged" || origin.status === "modified") {

@@ -1,16 +1,17 @@
-import type { BlockMapEntry, CommentThreadRow, StoredBlockMap } from "../../db";
-import { asBlockId, type BlockId } from "../../ids";
-import { type Anchor, rebaseAnchors } from "../../store/domain/anchor";
 import {
+  asBlockId,
+  BLOCK_PARSER_VERSION,
   type Block,
+  type BlockId,
   matchBlocks,
   type MatchedBlock,
   type MatchResult,
-} from "../../store/domain/block-match";
-import {
-  BLOCK_PARSER_VERSION,
   parseBlocks,
-} from "../../store/domain/block-parse";
+} from "@nicia-ai/prose-diff";
+
+import type { BlockMapEntry, CommentThreadRow, StoredBlockMap } from "../../db";
+import { asBlockId as asCorpusBlockId } from "../../ids";
+import { type Anchor, rebaseAnchors } from "../../store/domain/anchor";
 import type { DocumentNode } from "../../store/repos/document-repo";
 import type { ProjectCommandContext } from "../command";
 
@@ -48,7 +49,7 @@ const toEntries = (blocks: readonly MatchedBlock[]): readonly BlockMapEntry[] =>
   blocks.map((b) => ({ id: b.id, kind: b.kind }));
 
 const threadToAnchor = (t: CommentThreadRow): Anchor => ({
-  blockId: asBlockId(t.anchorBlockId),
+  blockId: asCorpusBlockId(t.anchorBlockId),
   start: t.anchorStart,
   end: t.anchorEnd,
   quote: { prefix: t.quotePrefix, exact: t.quoteExact, suffix: t.quoteSuffix },

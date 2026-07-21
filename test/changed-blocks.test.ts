@@ -1,7 +1,7 @@
+import { parseBlocksWithRanges } from "@nicia-ai/prose-diff";
 import { describe, expect, it } from "vitest";
 
 import { changedBlockIndexes } from "../src/lib/changed-blocks";
-import { parseBlocksWithRanges } from "../src/store/domain/block-parse";
 
 function blocks(markdown: string) {
   return parseBlocksWithRanges(markdown).map((block, index) => ({

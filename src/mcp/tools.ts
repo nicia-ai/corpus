@@ -1,10 +1,10 @@
+import { CREATE_PROPOSAL_BASE_VERSION } from "@nicia-ai/prose-diff";
 import { z } from "zod";
 
 import { asCollectionSlug, asDocumentSlug } from "../ids";
 import { proposalMessageSchema } from "../lib/proposal-message";
 import type { ProposalResult } from "../project-store/commands/suggestions";
 import { parseFrontmatter } from "../store/domain/frontmatter";
-import { CREATE_PROPOSAL_BASE_VERSION } from "../store/domain/suggestion";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "../util";
 
 import type { McpExecutor } from "./executor";
