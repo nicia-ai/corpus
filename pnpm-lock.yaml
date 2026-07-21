@@ -40,8 +40,8 @@ importers:
         specifier: ^1.2.3
         version: 1.2.3
       '@nicia-ai/prose-diff':
-        specifier: file:../prose-diff
-        version: file:../prose-diff
+        specifier: ^0.2.0
+        version: 0.2.0
       '@nicia-ai/typegraph':
         specifier: ^0.40.0
         version: 0.40.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.3)(pg@8.20.0))(pg@8.20.0)(zod@4.4.3)
@@ -1243,8 +1243,8 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@nicia-ai/prose-diff@file:../prose-diff':
-    resolution: {directory: ../prose-diff, type: directory}
+  '@nicia-ai/prose-diff@0.2.0':
+    resolution: {integrity: sha512-DwDktnCXkb5pS/y1M95qtklwmCe0ztfqus8dkhDGTec1jcFi5ic21GgRRZfbyoN9VXWmEoDDCcJQCmyy2wHWmw==}
     engines: {node: '>=22'}
 
   '@nicia-ai/typegraph@0.40.0':
@@ -4986,7 +4986,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.3
     optional: true
 
-  '@nicia-ai/prose-diff@file:../prose-diff':
+  '@nicia-ai/prose-diff@0.2.0':
     dependencies:
       mdast-util-to-string: 4.0.0
       remark-gfm: 4.0.1
