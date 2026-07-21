@@ -5,6 +5,7 @@ import {
   computeProposalOutcome,
   diffSuggestion,
   diffToHunks,
+  MAX_HUNKS_PER_SUGGESTION,
 } from "../src/store/domain/suggestion";
 
 describe("diffToHunks / applyHunks", () => {
@@ -204,6 +205,42 @@ describe("diffToHunks / applyHunks", () => {
     );
     expect(applyHunks({ base, proposed, rejected: [] })).toBe(proposed);
     expect(applyHunks({ base, proposed, rejected: diff.hunks })).toBe(base);
+  });
+
+  // The OTHER degradation trigger. The self-verification branch is covered
+  // above and in suggestions.test.ts; this is the hunk cap, which nothing
+  // exercised — a bulk rewrite whose per-block diff is perfectly faithful
+  // but too numerous to review as cards.
+  it("degrades to whole-document once the hunk cap is exceeded", () => {
+    const blocks = (suffix: string) =>
+      Array.from(
+        { length: MAX_HUNKS_PER_SUGGESTION + 5 },
+        (_, i) => `para ${String(i)}${suffix}`,
+      ).join("\n\n");
+    const base = blocks("");
+    const proposed = blocks(" EDITED");
+
+    // The paired test below is the control: the identical construction at
+    // exactly the cap stays granular, so count is the only variable and
+    // this really is the cap firing, not a verification failure.
+    const diff = diffSuggestion(base, proposed);
+    expect(diff.granularity).toBe("whole-document");
+    expect(diff.hunks).toHaveLength(1);
+    expect(diff.hunks[0]?.op).toBe("replace");
+    // Degraded, but still byte-faithful in both directions.
+    expect(applyHunks({ base, proposed, rejected: [] })).toBe(proposed);
+    expect(applyHunks({ base, proposed, rejected: diff.hunks })).toBe(base);
+  });
+
+  it("stays granular just under the hunk cap", () => {
+    const blocks = (suffix: string) =>
+      Array.from(
+        { length: MAX_HUNKS_PER_SUGGESTION },
+        (_, i) => `para ${String(i)}${suffix}`,
+      ).join("\n\n");
+    const diff = diffSuggestion(blocks(""), blocks(" EDITED"));
+    expect(diff.granularity).toBe("block");
+    expect(diff.hunks).toHaveLength(MAX_HUNKS_PER_SUGGESTION);
   });
 
   it("a move alongside an edit stays granular (each decidable on its own)", () => {
