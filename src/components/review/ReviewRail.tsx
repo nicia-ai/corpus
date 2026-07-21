@@ -1,3 +1,4 @@
+import { lineDiff, type DiffLine } from "@nicia-ai/prose-diff";
 import { Check, MessageSquare, PencilLine, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -8,7 +9,6 @@ import { Button } from "@/components/ui/Button";
 import { cardClass } from "@/components/ui/Surface";
 import type { CallerChannel, ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
-import { lineDiff, type DiffLine } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
 import type { CommentAnchorEvidence, ReviewItem } from "@/lib/review-items";
 import { placeReviewRailItems } from "@/lib/review-rail-layout";

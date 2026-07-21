@@ -21,11 +21,6 @@ export type UserId = Id<"UserId">;
 export type DocumentSlug = Id<"DocumentSlug">;
 export type CollectionSlug = Id<"CollectionSlug">;
 export type FolderSlug = Id<"FolderSlug">;
-// A block within a document version. Block ids are derived, non-canonical
-// side state (not part of the bundle / MCP surface): minted by the block
-// matcher when a new block appears and carried forward across versions so
-// comment / suggestion anchors survive edits and moves.
-export type BlockId = Id<"BlockId">;
 export type ApiKeyId = Id<"ApiKeyId">;
 export type ConnectionId = Id<"ConnectionId">;
 // Better Auth organization-plugin entities: a `member` row id and an
@@ -56,7 +51,6 @@ export const asDocumentSlug = (s: string): DocumentSlug => s as DocumentSlug;
 export const asCollectionSlug = (s: string): CollectionSlug =>
   s as CollectionSlug;
 export const asFolderSlug = (s: string): FolderSlug => s as FolderSlug;
-export const asBlockId = (s: string): BlockId => s as BlockId;
 export const asCallerRef = (s: string): CallerRef => s as CallerRef;
 
 // Construct a CallerRef from an API key id. The single sanctioned site

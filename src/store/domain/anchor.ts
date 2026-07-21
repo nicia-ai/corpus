@@ -1,6 +1,4 @@
-import type { BlockId } from "../../ids";
-
-import type { MatchedBlock, MatchResult } from "./block-match";
+import type { BlockId, MatchedBlock, MatchResult } from "@nicia-ai/prose-diff";
 
 // Anchors: how a comment or suggestion pins to a location in a document,
 // and how that pin survives an edit. Pure, zero-IO.

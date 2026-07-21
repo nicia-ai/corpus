@@ -1,3 +1,4 @@
+import { processor } from "@nicia-ai/prose-diff";
 import type { Nodes } from "mdast";
 
 import {
@@ -5,12 +6,11 @@ import {
   type AnchorQuote,
   exactSpans,
 } from "@/lib/text-anchor";
-import { processor } from "@/store/domain/block-parse";
 
 // The boundary adapter between the CodeMirror editor (which addresses the
 // document in MARKDOWN SOURCE offsets) and the comment anchor model (which
 // addresses a block in PLAIN-TEXT offsets — `block.text = mdastToString(node)`,
-// markers stripped; see src/store/domain/block-parse.ts). The server anchor
+// markers stripped; see @nicia-ai/prose-diff's block-parse.ts). The server anchor
 // model, rebase, and quote recovery all stay in plain text and are untouched;
 // this module only translates an editor selection into the `createComment`
 // inputs and back into a source range to paint.

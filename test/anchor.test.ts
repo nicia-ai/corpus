@@ -1,19 +1,20 @@
+import {
+  asBlockId,
+  type Block,
+  type BlockId,
+  matchBlocks,
+  type MatchResult,
+  type NextBlock,
+} from "@nicia-ai/prose-diff";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { asBlockId, type BlockId } from "../src/ids";
 import {
   type Anchor,
   rebaseAnchors,
   resolveAnchor,
   type RebaseResult,
 } from "../src/store/domain/anchor";
-import {
-  type Block,
-  matchBlocks,
-  type MatchResult,
-  type NextBlock,
-} from "../src/store/domain/block-match";
 
 function block(id: string, text: string): Block {
   return { id: asBlockId(id), kind: "paragraph", text };

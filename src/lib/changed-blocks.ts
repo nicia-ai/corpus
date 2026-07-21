@@ -1,5 +1,4 @@
-import { diffSequences } from "@/lib/diff";
-import { parseBlocksWithRanges } from "@/store/domain/block-parse";
+import { diffSequences, parseBlocksWithRanges } from "@nicia-ai/prose-diff";
 
 type ComparableBlock = Readonly<{
   index: number;

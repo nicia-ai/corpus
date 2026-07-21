@@ -1,9 +1,9 @@
 import { markdownLanguage } from "@codemirror/lang-markdown";
+import { parseBlocks, processor } from "@nicia-ai/prose-diff";
 import type { Heading } from "mdast";
 import { describe, expect, it } from "vitest";
 
 import { HEADING_LEVEL } from "../src/components/markdown/live-preview";
-import { parseBlocks, processor } from "../src/store/domain/block-parse";
 import { frontmatterLength } from "../src/store/domain/frontmatter";
 import { compact } from "../src/util";
 

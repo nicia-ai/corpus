@@ -1,3 +1,4 @@
+import { parseBlocksWithRanges } from "@nicia-ai/prose-diff";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -5,7 +6,6 @@ import {
   sourceRangeToBlockAnchor,
 } from "../src/lib/block-offsets";
 import type { AnchorBlock } from "../src/lib/text-anchor";
-import { parseBlocksWithRanges } from "../src/store/domain/block-parse";
 
 // Build the blocks the editor would hand the adapter, from real parsed block
 // ranges (so source offsets are exactly what the block model uses).

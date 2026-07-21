@@ -1,8 +1,9 @@
+import type { BlockKind } from "@nicia-ai/prose-diff";
+
 import type { CommentStatus } from "../../db";
 import { ConflictError } from "../../errors";
 import { asDocumentSlug, type DocumentSlug } from "../../ids";
 import { MIN_ANCHOR_CHARS, resolveAnchor } from "../../store/domain/anchor";
-import type { BlockKind } from "../../store/domain/block-match";
 import {
   type CommandOutcome,
   commandOutcome,

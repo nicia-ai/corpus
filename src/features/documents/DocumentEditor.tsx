@@ -1,3 +1,4 @@
+import { lineDiff } from "@nicia-ai/prose-diff";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { CheckCircle2, MessageSquareText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -33,7 +34,6 @@ import {
   sourceRangeToBlockAnchor,
 } from "@/lib/block-offsets";
 import { cn } from "@/lib/cn";
-import { lineDiff } from "@/lib/diff";
 import { useSubmit } from "@/lib/forms";
 import { buildReviewModel, type ReviewModel } from "@/lib/review-items";
 import {

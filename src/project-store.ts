@@ -1,3 +1,9 @@
+import {
+  BLOCK_PARSER_VERSION,
+  computeProposalOutcome,
+  isCreateProposal,
+  parseBlocksWithRanges,
+} from "@nicia-ai/prose-diff";
 import { createAdapterStoreWithSchema } from "@nicia-ai/typegraph";
 import { createSqliteBackend } from "@nicia-ai/typegraph/adapters/drizzle/sqlite";
 import { DurableObject } from "cloudflare:workers";
@@ -155,10 +161,6 @@ import {
 } from "./project-store/queries";
 import { reapExpiredRecords } from "./project-store/retention";
 import type { ProjectUnit } from "./project-store/unit";
-import {
-  BLOCK_PARSER_VERSION,
-  parseBlocksWithRanges,
-} from "./store/domain/block-parse";
 import type { Bundle, BundleSource } from "./store/domain/bundle";
 import {
   DEFAULT_COLLECTION_DELIVERY,
@@ -169,10 +171,6 @@ import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
 import type { RetentionPolicy } from "./store/domain/retention";
 import { deriveSearchText } from "./store/domain/search";
-import {
-  computeProposalOutcome,
-  isCreateProposal,
-} from "./store/domain/suggestion";
 import type { VerifyResult } from "./store/domain/verify";
 import { collectionVersionSnapshot } from "./store/domain/versions";
 import type { CorpusStore, GraphHandle } from "./store/handle";
