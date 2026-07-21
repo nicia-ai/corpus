@@ -23,7 +23,6 @@ export default defineConfig(async (configEnv: ConfigEnv) => {
     ? [
         cloudflareTest({
           wrangler: { configPath: "./wrangler.jsonc" },
-          isolatedStorage: false,
           miniflare: {
             // Read at config time, applied per test file in the setup
             // file (official vitest-pool-workers D1 pattern).

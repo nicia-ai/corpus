@@ -32,9 +32,14 @@ export {
   asDocumentSlug as docSlug,
 } from "../src/ids";
 
-// Test storage (D1 + DO) is shared across files. A per-module salt makes
-// emails / project ids unique across files without each caller needing a
-// distinct prefix (each test file isolate loads this module fresh).
+// vitest-pool-workers isolates storage per test FILE (each file is its own
+// Worker isolate with its own D1 + DO storage; verified — a row written in
+// one file is invisible in another). Within a file the counter `n` alone
+// guarantees unique emails / ids. The per-module salt is defense in depth:
+// it keeps identifiers unique even if that isolation is ever weakened (e.g.
+// a future pool option that shares storage), at no cost. NB the removed
+// `isolatedStorage: false` in vite.config.ts never enabled sharing — the
+// pool dropped that option and its schema silently strips it.
 const SALT = Math.random().toString(36).slice(2, 8);
 let n = 0;
 
