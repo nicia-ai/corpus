@@ -7,5 +7,5 @@
       "@cloudflare/vitest-pool-workers/types"
     ]
   },
-  "include": ["test/**/*.ts", "worker-configuration.d.ts"]
+  "include": ["test/**/*.ts", "*.config.ts", "worker-configuration.d.ts"]
 }
