@@ -10,7 +10,6 @@ import {
 } from "@nicia-ai/prose-diff";
 
 import type { BlockMapEntry, CommentThreadRow, StoredBlockMap } from "../../db";
-import { asBlockId as asCorpusBlockId } from "../../ids";
 import { type Anchor, rebaseAnchors } from "../../store/domain/anchor";
 import type { DocumentNode } from "../../store/repos/document-repo";
 import type { ProjectCommandContext } from "../command";
@@ -49,7 +48,7 @@ const toEntries = (blocks: readonly MatchedBlock[]): readonly BlockMapEntry[] =>
   blocks.map((b) => ({ id: b.id, kind: b.kind }));
 
 const threadToAnchor = (t: CommentThreadRow): Anchor => ({
-  blockId: asCorpusBlockId(t.anchorBlockId),
+  blockId: asBlockId(t.anchorBlockId),
   start: t.anchorStart,
   end: t.anchorEnd,
   quote: { prefix: t.quotePrefix, exact: t.quoteExact, suffix: t.quoteSuffix },
