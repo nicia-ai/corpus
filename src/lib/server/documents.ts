@@ -177,6 +177,9 @@ export const saveDocument = createServerFn({ method: "POST" })
         .min(1)
         .refine((v) => !v.includes("/"), "filename cannot contain a path")
         .optional(),
+      // Create directly in this folder, atomically with the save (the "New
+      // document in this folder" deep link). Only meaningful on create.
+      folderSlug: z.string().min(1).optional(),
       clientVersion: z.number().int().nonnegative(),
     }),
   )
@@ -205,6 +208,10 @@ export const saveDocument = createServerFn({ method: "POST" })
         markdown: data.markdown,
         title: data.title,
         filename: data.filename,
+        folderSlug:
+          data.folderSlug === undefined
+            ? undefined
+            : asFolderSlug(data.folderSlug),
         clientVersion: data.clientVersion,
         changedBy: changedBy(c),
       }),

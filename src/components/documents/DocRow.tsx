@@ -62,13 +62,15 @@ function DocRowComponent({
           className="size-5 accent-blue-600"
         />
       </label>
-      <FileText className="size-4 shrink-0 text-slate-400" aria-hidden />
+      <span title="Markdown document" className="flex shrink-0">
+        <FileText className="size-4 text-slate-400" aria-hidden />
+      </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <Link
             to="/p/$projectId/documents/$slug"
             params={{ projectId, slug: doc.slug }}
-            className="inline-flex min-h-11 min-w-0 items-center truncate font-medium text-blue-600 hover:underline"
+            className="inline-flex min-w-0 items-center truncate font-medium text-blue-600 hover:underline"
           >
             {doc.title}
           </Link>
@@ -116,7 +118,7 @@ function DocRowComponent({
                 setEditing(true);
               }}
               title="Rename file"
-              className="hidden min-h-11 max-w-48 truncate font-mono text-slate-400 hover:text-slate-900 sm:inline"
+              className="hidden max-w-48 truncate font-mono text-slate-400 hover:text-slate-900 sm:inline"
             >
               {doc.filename}
             </button>

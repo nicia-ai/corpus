@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ChevronRight,
+  FilePlus,
   Folder as FolderIcon,
   FolderInput,
   FolderPlus,
@@ -17,9 +18,9 @@ import { treeIndent } from "@/lib/tree";
 import { IconButton } from "./RowActions";
 
 // One folder row in the documents tree: collapse toggle, name (with
-// inline rename), and hover-revealed actions for add-subfolder /
-// move / rename / delete. The drag handle is the whole row, so the
-// rename input disables draggable while editing.
+// inline rename), and hover-revealed actions for new-document /
+// add-subfolder / move / rename / delete. The drag handle is the whole
+// row, so the rename input disables draggable while editing.
 type FolderHeaderProps = Readonly<{
   folder: FolderRow;
   depth: number;
@@ -29,6 +30,7 @@ type FolderHeaderProps = Readonly<{
   onDragStart: (slug: FolderRow["slug"]) => void;
   onDragOver: (slug: FolderRow["slug"], e: React.DragEvent) => void;
   onDrop: (slug: FolderRow["slug"], e: React.DragEvent) => void;
+  onAddDocument: (slug: FolderRow["slug"]) => void;
   onAddChild: (slug: FolderRow["slug"]) => void;
   onMove: (slug: FolderRow["slug"]) => void;
   onRename: (slug: FolderRow["slug"], name: string) => Promise<void>;
@@ -44,6 +46,7 @@ function FolderHeaderComponent({
   onDragStart,
   onDragOver,
   onDrop,
+  onAddDocument,
   onAddChild,
   onMove,
   onRename,
@@ -52,6 +55,7 @@ function FolderHeaderComponent({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(folder.name);
   const [confirming, setConfirming] = useState(false);
+  const toggleLabel = open ? "Collapse folder" : "Expand folder";
 
   return (
     <div
@@ -71,7 +75,8 @@ function FolderHeaderComponent({
       <button
         type="button"
         onClick={() => onToggle(folder.slug)}
-        aria-label={open ? "Collapse" : "Expand"}
+        aria-label={toggleLabel}
+        title={toggleLabel}
         className="grid size-11 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100"
       >
         {open ? (
@@ -133,6 +138,12 @@ function FolderHeaderComponent({
         </span>
       ) : (
         <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          <IconButton
+            label="New document"
+            onClick={() => onAddDocument(folder.slug)}
+          >
+            <FilePlus className="size-4" />
+          </IconButton>
           <IconButton
             label="New subfolder"
             onClick={() => onAddChild(folder.slug)}

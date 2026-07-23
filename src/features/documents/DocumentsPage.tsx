@@ -317,6 +317,16 @@ export function DocumentsPage({
     },
     [],
   );
+  const onFolderAddDocument = useCallback(
+    (slug: FolderSlug): void => {
+      void router.navigate({
+        to: "/p/$projectId/documents/new",
+        params: { projectId },
+        search: { folder: slug },
+      });
+    },
+    [projectId, router],
+  );
   const onFolderAddChild = useCallback((slug: FolderSlug): void => {
     setExpanded((current) => new Set(current).add(slug));
     setCreatingIn(slug);
@@ -385,6 +395,7 @@ export function DocumentsPage({
           onDragStart={onFolderDragStart}
           onDragOver={onFolderDragOver}
           onDrop={commitDrop}
+          onAddDocument={onFolderAddDocument}
           onAddChild={onFolderAddChild}
           onMove={onFolderMove}
           onRename={onFolderRename}

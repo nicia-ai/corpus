@@ -41,6 +41,7 @@ export function RenameField({
         value={value}
         onChange={setValue}
         mono={mono ?? false}
+        autoFocus
       />
       {hint !== undefined && <p className="text-sm text-slate-500">{hint}</p>}
       <div className="flex items-center gap-3">
