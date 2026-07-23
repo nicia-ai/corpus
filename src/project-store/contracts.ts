@@ -1,4 +1,4 @@
-import type { CollectionSlug, DocumentSlug } from "../ids";
+import type { CollectionSlug, DocumentSlug, FolderSlug } from "../ids";
 import type { CollectionDelivery } from "../store/domain/collection-expand";
 import type { LinkKind } from "../store/domain/links";
 
@@ -9,6 +9,13 @@ export type SaveDocumentInput = Readonly<{
   /** Original basename incl. extension. Defaults to `<slug>.md` for
    * editor-created docs; bulk uploads pass the real basename. */
   filename?: string;
+  /** Create the document directly in this folder (null / absent = project
+   * root), atomically with the save — the "New document in this folder"
+   * path. Also scopes the brand-new-filename collision check to that
+   * folder's sibling namespace. Create-only (`clientVersion === 0`): on an
+   * update it is inert, since moving a document is `placeDocumentInFolder`'s
+   * job. Editor / REST saves omit it (root). */
+  folderSlug?: FolderSlug | null;
   /** Version the client loaded. Must equal the server head, else 409. */
   clientVersion: number;
   changedBy: string;

@@ -966,9 +966,30 @@ export class ProjectStore extends DurableObject<Env> {
   async saveDocument(input: SaveDocumentInput): Promise<SaveResult> {
     const now = new Date().toISOString();
     try {
-      const outcome = await this.writeCommand(now, (ctx) =>
-        saveDocumentCommand(ctx, input),
-      );
+      const outcome = await this.writeCommand(now, async (ctx) => {
+        const saved = await saveDocumentCommand(ctx, input);
+        // Folder placement rides the same transaction as the save, so a
+        // "create in this folder" either lands there or not at all — no
+        // window where the doc exists at root (mirrors the import path).
+        // Placement is create-only: `clientVersion === 0` is the create
+        // signal, and moving an existing document is `placeDocumentInFolder`'s
+        // job, so a stray `folderSlug` on an update stays inert rather than
+        // silently relocating the document. `undefined` = the editor/REST
+        // save paths, which never folder-place.
+        if (input.folderSlug === undefined || input.clientVersion !== 0) {
+          return saved;
+        }
+        const placed = await placeDocumentInFolderCommand(ctx, {
+          documentSlug: input.slug,
+          folderSlug: input.folderSlug,
+          changedBy: input.changedBy,
+        });
+        // A segment collision in the target folder rolls the whole unit
+        // back; FilenameCollision maps to `segmentCollision` in saveError,
+        // the same result the filename check surfaces.
+        if (!placed.result.ok) throw new FilenameCollision();
+        return { ...saved, changes: [...saved.changes, ...placed.changes] };
+      });
       return { ok: true, docVersion: outcome.result.docVersion };
     } catch (err) {
       return this.saveError(err, input);

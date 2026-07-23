@@ -11,7 +11,7 @@ import {
 import { BackLink } from "@/components/ui/BackLink";
 import { Button } from "@/components/ui/Button";
 import { textLinkClass } from "@/components/ui/text-link";
-import { asProjectId } from "@/ids";
+import { asFolderSlug, asProjectId, type FolderSlug } from "@/ids";
 import { track } from "@/lib/analytics";
 import { useSubmit } from "@/lib/forms";
 import { getDocumentRefs, saveDocument } from "@/lib/server/documents";
@@ -21,6 +21,13 @@ import { compact, slugify } from "@/util";
 
 export const Route = createFileRoute("/p/$projectId/documents/new")({
   component: NewDoc,
+  // Optional target folder: the "New document" action on a folder row deep-links
+  // here with `?folder=<slug>`, so the created document lands in that folder
+  // instead of at the root. Absent/blank = root (the top-level "Document" button).
+  validateSearch: (search: Record<string, unknown>): { folder?: FolderSlug } =>
+    typeof search.folder === "string" && search.folder.length > 0
+      ? { folder: asFolderSlug(search.folder) }
+      : {},
   // Slugs feed the editor's broken-link linter. The new-document page is
   // always an authoring surface (unlike a read view), so the list loads up
   // front here. The linter is purely cosmetic and "never blocks Save", so a
@@ -40,6 +47,7 @@ export const Route = createFileRoute("/p/$projectId/documents/new")({
 function NewDoc() {
   const nav = useNavigate();
   const projectId = asProjectId(Route.useParams().projectId);
+  const { folder } = Route.useSearch();
   const docRefs = Route.useLoaderData();
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const [title, setTitle] = useState("");
@@ -68,6 +76,9 @@ function NewDoc() {
         title,
         markdown,
         filename,
+        // The document is created directly in the target folder in one atomic
+        // transaction (server-side), so it never briefly lands at the root.
+        folderSlug: folder,
         clientVersion: 0,
       }),
     });
