@@ -190,15 +190,6 @@ responsibility.
   `src/control/env.server.ts`); production sets it via `wrangler secret put`.
 - Verify library APIs against the installed version + current docs —
   training data lags these fast-moving deps.
-- `pnpm.overrides` pins `kysely` to `0.28.17` — a build workaround, not a
-  real dependency (Corpus uses Drizzle/D1, never kysely). kysely 0.29.x
-  dropped `DEFAULT_MIGRATION_TABLE` / `DEFAULT_MIGRATION_LOCK_TABLE` from
-  its package-root barrel, but `@better-auth/kysely-adapter` still imports
-  them from bare `"kysely"`, and better-auth doesn't tree-shake the unused
-  adapter — so `pnpm build` breaks even though we never touch kysely
-  (`typecheck` passes; the `.d.ts` still declares them). Upstream:
-  https://github.com/better-auth/better-auth/issues/9868. Remove the pin
-  once better-auth ships a fix; don't float kysely to 0.29+ before then.
 
 ## TypeGraph (`@nicia-ai/typegraph`)
 
@@ -211,6 +202,14 @@ responsibility.
 - `kind` is reserved node metadata — use a domain-specific prop name.
 - `Node` / `Edge` shapes are flat (not under `.props`).
 - Look entities up with `find({ where })`, not `findByConstraint`.
+- Reading the edges of a SET of nodes goes through `bulkFindFrom` /
+  `bulkFindTo` (0.44+), never `findFrom` / `findTo` per item: they widen
+  `from_id = ?` to `from_id IN (…)`, so a whole-tree walk costs a
+  statement per bind-budget chunk instead of one per node. Results are
+  grouped parallel to the input. `FolderRepo.parentEdgesOf` /
+  `docFolderEdgesOf` are the shape to copy; `limitPerInput: 1` when the
+  question is only "does a link exist". A backend without
+  `findEdgesByEndpointSet` throws rather than silently looping.
 - Corpus binds to the **adapter** surface, not the portable one. Since
   0.38 TypeGraph's default `Store` / `TransactionContext` are portable
   and deliberately withhold the native handle; only
@@ -303,6 +302,15 @@ rules as `src/` — brand ids through the `as*` constructors, no `any` /
 `@ts-expect-error` to silence a mock that has drifted from its port.
 A mock that no longer matches its interface is a real signal: fix the
 mock, and check whether the drift means the new member is untested.
+
+Cost regressions get their own keeper. `setGraphStatementSinkForTest`
+(`src/store/statement-log.ts`) is a module-level seam on the graph
+backend's drizzle logger, so a test observes the SQL issued **inside**
+the DO. `test/bulk-edge-reads.test.ts` uses it to assert that an
+operation's statement count is the same at 3 items as at 12 — the only
+way a reintroduced per-item read shows up, since it returns identical
+data. Assert invariance across N, never an absolute count (a TypeGraph
+change moves the absolute number and nothing is wrong).
 
 ## TypeScript conventions
 

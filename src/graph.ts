@@ -24,6 +24,8 @@ export const FOLDER_BY_SLUG = "FolderBySlug";
 export const DOCUMENT_VERSION_BY_SLUG_VERSION = "DocumentVersionBySlugVersion";
 export const COLLECTION_VERSION_BY_SLUG_VERSION =
   "CollectionVersionBySlugVersion";
+export const DOCUMENT_SLUG_INDEX = "corpus_document_slug_idx";
+export const FOLDER_SLUG_INDEX = "corpus_folder_slug_idx";
 
 // A canonical document. The node holds only the mutable head pointer;
 // content is content-addressed in `content_blobs` (src/db.ts) and
@@ -197,7 +199,7 @@ export const includesFolder = defineEdge("includes_folder", {
 // sequence field after the slug so a slug-only history scan uses the same
 // key prefix.
 const documentSlugIndex = defineNodeIndex(Document, {
-  name: "corpus_document_slug_idx",
+  name: DOCUMENT_SLUG_INDEX,
   fields: ["slug"],
 });
 const documentVersionIndex = defineNodeIndex(DocumentVersion, {
@@ -213,7 +215,7 @@ const collectionVersionIndex = defineNodeIndex(CollectionVersion, {
   fields: ["collectionSlug", "collectionVersion"],
 });
 const folderSlugIndex = defineNodeIndex(Folder, {
-  name: "corpus_folder_slug_idx",
+  name: FOLDER_SLUG_INDEX,
   fields: ["slug"],
 });
 

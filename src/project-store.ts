@@ -194,6 +194,7 @@ import {
 import { InstrumentationOutbox } from "./store/repos/instrumentation-outbox";
 import { SuggestionRepo } from "./store/repos/suggestion";
 import { VersionRepo } from "./store/repos/version-repo";
+import { graphStatementLogger } from "./store/statement-log";
 import { compact, sha256, slugify } from "./util";
 
 export type {
@@ -571,7 +572,9 @@ export class ProjectStore extends DurableObject<Env> {
     if (this.store) return this.store;
     this.initPromise ??= (async () => {
       await migrate(this.ledgerDb(), ledgerMigrations);
-      const backend = createSqliteBackend(drizzle(this.ctx.storage));
+      const backend = createSqliteBackend(
+        drizzle(this.ctx.storage, { logger: graphStatementLogger }),
+      );
       const [store] = await createAdapterStoreWithSchema(
         canonicalGraph,
         backend,

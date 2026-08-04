@@ -120,13 +120,18 @@ export class VersionRepo {
       cutoffIso: args.cutoffIso,
       pinned: args.pinned,
     });
-    for (const id of plan.deleteIds) {
+    const deletions = plan.deleteIds.flatMap((id) => {
       const node = byId.get(id);
-      if (node === undefined) continue;
-      const edges = await this.g.edges.versions_of.findTo({
-        kind: "DocumentVersion",
+      return node === undefined ? [] : [node];
+    });
+    const edgeGroups = await this.g.edges.versions_of.bulkFindTo(
+      deletions.map((node) => ({
+        kind: "DocumentVersion" as const,
         id: node.id,
-      });
+      })),
+    );
+    for (const [i, node] of deletions.entries()) {
+      const edges = edgeGroups[i] ?? [];
       for (const e of edges) await this.g.edges.versions_of.hardDelete(e.id);
       await this.g.nodes.DocumentVersion.hardDelete(node.id);
     }
