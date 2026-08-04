@@ -118,6 +118,40 @@ export class FolderRepo {
     return edge;
   }
 
+  // The same inbound parent edge, but for a SET of folders in one read:
+  // `bulkFindTo` widens `to_id = ?` into `to_id IN (...)`, so a caller
+  // that already holds every folder pays a statement per bind-budget
+  // chunk instead of one per folder. Keyed by folder id; single-parent
+  // means at most one edge each, so an absent key IS "at the root".
+  private async parentEdgesOf(folders: readonly FolderNode[]) {
+    const grouped = await this.g.edges.folder_child.bulkFindTo(
+      folders.map((f) => ({ kind: "Folder" as const, id: f.id })),
+      { limitPerInput: 1 },
+    );
+    return new Map(
+      folders.flatMap((f, i) => {
+        const edge = grouped[i]?.[0];
+        return edge === undefined ? [] : [[f.id, edge] as const];
+      }),
+    );
+  }
+
+  // `docFolderEdge` for a SET of documents (`bulkFindFrom`, the `from`
+  // mirror of `parentEdgesOf`). Keyed by document id; an absent key is a
+  // document with no home folder, i.e. one sitting at the root.
+  private async docFolderEdgesOf(docs: readonly DocumentNode[]) {
+    const grouped = await this.g.edges.in_folder.bulkFindFrom(
+      docs.map((d) => ({ kind: "Document" as const, id: d.id })),
+      { limitPerInput: 1 },
+    );
+    return new Map(
+      docs.flatMap((d, i) => {
+        const edge = grouped[i]?.[0];
+        return edge === undefined ? [] : [[d.id, edge] as const];
+      }),
+    );
+  }
+
   private async parentSlugOf(node: FolderNode): Promise<string | null> {
     const edge = await this.parentEdge(node);
     if (edge === undefined) return null;
@@ -166,13 +200,10 @@ export class FolderRepo {
     // whole set; a named parent is an indexed point lookup, no scan.
     if (parentSlug === null) {
       const folders = await findAll((w) => this.g.nodes.Folder.find(w));
-      const roots: { node: FolderNode; position: number }[] = [];
-      for (const f of folders) {
-        if ((await this.parentEdge(f)) === undefined) {
-          roots.push({ node: f, position: 0 });
-        }
-      }
-      return roots;
+      const parents = await this.parentEdgesOf(folders);
+      return folders
+        .filter((f) => !parents.has(f.id))
+        .map((node) => ({ node, position: 0 }));
     }
     const parent = await this.nodeBySlug(parentSlug);
     if (parent === undefined) return [];
@@ -180,12 +211,15 @@ export class FolderRepo {
       kind: "Folder",
       id: parent.id,
     });
-    const out: { node: FolderNode; position: number }[] = [];
-    for (const e of edges) {
-      const child = await this.g.nodes.Folder.getById(e.toId);
-      if (child !== undefined) out.push({ node: child, position: e.position });
-    }
-    return out;
+    const children = await this.g.nodes.Folder.getByIds(
+      edges.map((edge) => edge.toId),
+    );
+    return edges.flatMap((edge, i) => {
+      const child = children[i];
+      return child === undefined
+        ? []
+        : [{ node: child, position: edge.position }];
+    });
   }
 
   private async documentsIn(
@@ -193,11 +227,8 @@ export class FolderRepo {
   ): Promise<readonly DocumentNode[]> {
     if (parentSlug === null) {
       const docs = await findAll((w) => this.g.nodes.Document.find(w));
-      const out: DocumentNode[] = [];
-      for (const d of docs) {
-        if ((await this.docFolderEdge(d)) === undefined) out.push(d);
-      }
-      return out;
+      const homes = await this.docFolderEdgesOf(docs);
+      return docs.filter((d) => !homes.has(d.id));
     }
     const folder = await this.nodeBySlug(parentSlug);
     if (folder === undefined) return [];
@@ -205,12 +236,9 @@ export class FolderRepo {
       kind: "Folder",
       id: folder.id,
     });
-    const out: DocumentNode[] = [];
-    for (const e of edges) {
-      const d = await this.g.nodes.Document.getById(e.fromId);
-      if (d !== undefined) out.push(d);
-    }
-    return out;
+    return (
+      await this.g.nodes.Document.getByIds(edges.map((edge) => edge.fromId))
+    ).filter((doc) => doc !== undefined);
   }
 
   // The cross-type sibling namespace shape (the folder/document
@@ -255,13 +283,14 @@ export class FolderRepo {
   private async parentMap(): Promise<Map<string, string | null>> {
     const folders = await findAll((w) => this.g.nodes.Folder.find(w));
     const byId = new Map(folders.map((f) => [f.id, f]));
-    const map = new Map<string, string | null>();
-    for (const f of folders) {
-      const edge = await this.parentEdge(f);
-      const parent = edge === undefined ? undefined : byId.get(edge.fromId);
-      map.set(f.slug, parent?.slug ?? null);
-    }
-    return map;
+    const parents = await this.parentEdgesOf(folders);
+    return new Map(
+      folders.map((f) => {
+        const edge = parents.get(f.id);
+        const parent = edge === undefined ? undefined : byId.get(edge.fromId);
+        return [f.slug, parent?.slug ?? null];
+      }),
+    );
   }
 
   // — Derived reads ——————————————————————————————————————————
@@ -483,18 +512,17 @@ export class FolderRepo {
   async listAll(): Promise<readonly FolderView[]> {
     const folders = await findAll((w) => this.g.nodes.Folder.find(w));
     const byId = new Map(folders.map((f) => [f.id, f]));
-    const out: FolderView[] = [];
-    for (const f of folders) {
-      const edge = await this.parentEdge(f);
+    const parents = await this.parentEdgesOf(folders);
+    return folders.map((f) => {
+      const edge = parents.get(f.id);
       const parent = edge === undefined ? undefined : byId.get(edge.fromId);
-      out.push({
+      return {
         slug: f.slug,
         name: f.name,
         parentSlug: parent?.slug ?? null,
         position: edge?.position ?? 0,
-      });
-    }
-    return out;
+      };
+    });
   }
 
   // — Mutations (single-parent + sibling namespace enforced) ————
@@ -609,26 +637,45 @@ export class FolderRepo {
     const unlinked = new Set<CollectionSlug>();
     // Deepest-first: a folder node is hard-deleted only after its children
     // are gone, so it is never still connected by a `folder_child` edge.
-    for (const f of await this.subtreeFolders(node)) {
-      for (const d of await this.documentsIn(f.slug)) {
-        const e = await this.docFolderEdge(d);
-        if (e !== undefined) await this.g.edges.in_folder.hardDelete(e.id);
-        documentSlugs.push(asDocumentSlug(d.slug));
+    // Read every relationship before mutating. The loop only consumes each
+    // folder's cached parent edge, so an earlier delete cannot invalidate it.
+    const subtree = await this.subtreeFolders(node);
+    const folderRefs = subtree.map((folder) => ({
+      kind: "Folder" as const,
+      id: folder.id,
+    }));
+    const [parents, documentEdgeGroups, collectionEdgeGroups] =
+      await Promise.all([
+        this.parentEdgesOf(subtree),
+        this.g.edges.in_folder.bulkFindTo(folderRefs),
+        this.g.edges.includes_folder.bulkFindTo(folderRefs),
+      ]);
+    const documentEdges = documentEdgeGroups.flat();
+    const documents = await this.g.nodes.Document.getByIds(
+      documentEdges.map((edge) => edge.fromId),
+    );
+    for (const [i, edge] of documentEdges.entries()) {
+      const document = documents[i];
+      await this.g.edges.in_folder.hardDelete(edge.id);
+      if (document !== undefined) {
+        documentSlugs.push(asDocumentSlug(document.slug));
       }
-      const own = await this.parentEdge(f);
+    }
+    const collectionEdges = collectionEdgeGroups.flat();
+    const collections = await this.g.nodes.Collection.getByIds([
+      ...new Set(collectionEdges.map((edge) => edge.fromId)),
+    ]);
+    for (const collection of collections) {
+      if (collection !== undefined) {
+        unlinked.add(asCollectionSlug(collection.slug));
+      }
+    }
+    for (const edge of collectionEdges) {
+      await this.g.edges.includes_folder.hardDelete(edge.id);
+    }
+    for (const f of subtree) {
+      const own = parents.get(f.id);
       if (own !== undefined) await this.g.edges.folder_child.hardDelete(own.id);
-      // Release every linking collection's `includes_folder` edge before
-      // the node is hard-deleted (TypeGraph forbids deleting a connected
-      // node).
-      const links = await this.g.edges.includes_folder.findTo({
-        kind: "Folder",
-        id: f.id,
-      });
-      for (const e of links) {
-        const col = await this.g.nodes.Collection.getById(e.fromId);
-        if (col !== undefined) unlinked.add(asCollectionSlug(col.slug));
-        await this.g.edges.includes_folder.hardDelete(e.id);
-      }
       await this.g.nodes.Folder.hardDelete(f.id);
     }
     return { ok: true, documentSlugs, unlinkedCollections: [...unlinked] };
@@ -642,9 +689,10 @@ export class FolderRepo {
   private async subtreeFolders(root: FolderNode): Promise<FolderNode[]> {
     const all = await findAll((w) => this.g.nodes.Folder.find(w));
     const byId = new Map(all.map((f) => [f.id, f]));
+    const parents = await this.parentEdgesOf(all);
     const childrenOf = new Map<string, FolderNode[]>();
     for (const f of all) {
-      const edge = await this.parentEdge(f);
+      const edge = parents.get(f.id);
       const parentSlug =
         edge === undefined ? undefined : byId.get(edge.fromId)?.slug;
       if (parentSlug === undefined) continue;

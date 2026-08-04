@@ -1,6 +1,11 @@
 import type { Node } from "@nicia-ai/typegraph";
 
-import type { Collection, CollectionFields } from "../../graph";
+import {
+  type Collection,
+  type CollectionFields,
+  DOCUMENT_SLUG_INDEX,
+  FOLDER_SLUG_INDEX,
+} from "../../graph";
 import type { CollectionSlug, DocumentSlug, FolderSlug } from "../../ids";
 import { type Compact, compact } from "../../util";
 import {
@@ -214,18 +219,23 @@ export class CollectionGraph {
   ): Promise<readonly Readonly<{ slug: DocumentSlug; position: number }>[]> {
     const col = await this.findCollection(collectionSlug);
     if (col === undefined) return [];
-    const [docEdges, folderEdges] = await Promise.all([
+    const [documentEdges, folderEdges] = await Promise.all([
       this.g.edges.includes.findFrom({ kind: "Collection", id: col.id }),
       this.g.edges.includes_folder.findFrom({ kind: "Collection", id: col.id }),
     ]);
-    const presentDocIds = new Set(docEdges.map((e) => e.toId));
-    let position = [...docEdges, ...folderEdges].reduce(
+    const presentDocIds = new Set(documentEdges.map((e) => e.toId));
+    let position = [...documentEdges, ...folderEdges].reduce(
       (max, e) => Math.max(max, e.position),
       -1,
     );
+    const docs = await this.g.nodes.Document.bulkFindByIndex(
+      DOCUMENT_SLUG_INDEX,
+      documentSlugs.map((slug) => ({ props: { slug } })),
+      { limitPerInput: 1 },
+    );
     const attached: { slug: DocumentSlug; position: number }[] = [];
-    for (const slug of documentSlugs) {
-      const doc = await this.findDoc(slug);
+    for (const [i, slug] of documentSlugs.entries()) {
+      const doc = docs[i]?.[0];
       if (doc === undefined || doc.archivedAt !== undefined) continue;
       if (presentDocIds.has(doc.id)) continue;
       position += 1;
@@ -311,12 +321,13 @@ export class CollectionGraph {
       string,
       Readonly<{ id: (typeof edges)[number]["id"]; position: number }>
     >();
-    await Promise.all(
-      edges.map(async (e) => {
-        const d = await this.g.nodes.Document.getById(e.toId);
-        if (d !== undefined) edgeBySlug.set(d.slug, e);
-      }),
+    const docs = await this.g.nodes.Document.getByIds(
+      edges.map((edge) => edge.toId),
     );
+    for (const [i, edge] of edges.entries()) {
+      const doc = docs[i];
+      if (doc !== undefined) edgeBySlug.set(doc.slug, edge);
+    }
     const orderedEdges = orderedDocumentSlugs.flatMap((slug) => {
       const edge = edgeBySlug.get(slug);
       return edge === undefined ? [] : [edge];
@@ -355,20 +366,24 @@ export class CollectionGraph {
       kind: "Collection",
       id: col.id,
     });
-    const docs = await Promise.all(
-      edges.map(async (e) => {
-        const d = await this.g.nodes.Document.getById(e.toId);
-        return d === undefined
-          ? undefined
-          : {
-              d,
-              position: e.position,
-              delivery: collectionDelivery(e.delivery),
-            };
-      }),
+    // Hydrated in one chunked read (see `entries`), not a `getById` per
+    // member — this feeds every corpus assembly and CollectionVersion.
+    const heads = await this.g.nodes.Document.getByIds(
+      edges.map((e) => e.toId),
     );
-    return docs
-      .filter((x) => x !== undefined)
+    return edges
+      .flatMap((e, i) => {
+        const d = heads[i];
+        return d === undefined
+          ? []
+          : [
+              {
+                d,
+                position: e.position,
+                delivery: collectionDelivery(e.delivery),
+              },
+            ];
+      })
       .sort(
         (a, b) => a.position - b.position || a.d.slug.localeCompare(b.d.slug),
       )
@@ -393,8 +408,8 @@ export class CollectionGraph {
       kind: "Document",
       id: doc.id,
     });
-    const cols = await Promise.all(
-      edges.map((ed) => this.g.nodes.Collection.getById(ed.fromId)),
+    const cols = await this.g.nodes.Collection.getByIds(
+      edges.map((edge) => edge.fromId),
     );
     return cols.flatMap((c) => (c === undefined ? [] : [c.slug]));
   }
@@ -416,42 +431,48 @@ export class CollectionGraph {
   ): Promise<CollectionEntries | undefined> {
     const col = await this.findCollection(collectionSlug);
     if (col === undefined) return undefined;
-    const [docEdges, folderEdges] = await Promise.all([
+    const [documentEdges, folderEdges] = await Promise.all([
       this.g.edges.includes.findFrom({ kind: "Collection", id: col.id }),
       this.g.edges.includes_folder.findFrom({
         kind: "Collection",
         id: col.id,
       }),
     ]);
-    const documents = (
-      await Promise.all(
-        docEdges.map(async (e) => {
-          const d = await this.g.nodes.Document.getById(e.toId);
-          return d === undefined
-            ? undefined
-            : {
+    // One chunked read per member kind, not a `getById` per edge — this
+    // is the collection read path (UI and MCP), so its statement count
+    // must not scale with membership. `getByIds` preserves input order,
+    // so index `i` of each result belongs to edge `i`; a `undefined`
+    // there is a member node that no longer exists, which is dropped.
+    const [docs, folders] = await Promise.all([
+      this.g.nodes.Document.getByIds(documentEdges.map((e) => e.toId)),
+      this.g.nodes.Folder.getByIds(folderEdges.map((e) => e.toId)),
+    ]);
+    return {
+      documents: documentEdges.flatMap((e, i) => {
+        const d = docs[i];
+        return d === undefined
+          ? []
+          : [
+              {
                 slug: d.slug,
                 position: e.position,
                 delivery: collectionDelivery(e.delivery),
-              };
-        }),
-      )
-    ).filter((x) => x !== undefined);
-    const folders = (
-      await Promise.all(
-        folderEdges.map(async (e) => {
-          const f = await this.g.nodes.Folder.getById(e.toId);
-          return f === undefined
-            ? undefined
-            : {
+              },
+            ];
+      }),
+      folders: folderEdges.flatMap((e, i) => {
+        const f = folders[i];
+        return f === undefined
+          ? []
+          : [
+              {
                 slug: f.slug,
                 position: e.position,
                 delivery: collectionDelivery(e.delivery),
-              };
-        }),
-      )
-    ).filter((x) => x !== undefined);
-    return { documents, folders };
+              },
+            ];
+      }),
+    };
   }
 
   // Attach a new folder→collection link or re-position an existing one
@@ -544,20 +565,26 @@ export class CollectionGraph {
   async collectionsIncludingFolders(
     folderSlugs: readonly string[],
   ): Promise<readonly string[]> {
-    const out = new Set<string>();
-    for (const slug of folderSlugs) {
-      const folder = await this.findFolder(slug);
-      if (folder === undefined) continue;
-      const edges = await this.g.edges.includes_folder.findTo({
-        kind: "Folder",
-        id: folder.id,
-      });
-      for (const e of edges) {
-        const c = await this.g.nodes.Collection.getById(e.fromId);
-        if (c !== undefined) out.add(c.slug);
-      }
-    }
-    return [...out];
+    const uniqueSlugs = [...new Set(folderSlugs)];
+    const folderMatches = await this.g.nodes.Folder.bulkFindByIndex(
+      FOLDER_SLUG_INDEX,
+      uniqueSlugs.map((slug) => ({ props: { slug } })),
+      { limitPerInput: 1 },
+    );
+    const folders = folderMatches.flatMap(([folder]) =>
+      folder === undefined ? [] : [folder],
+    );
+    // One `to_id IN (...)` read for the whole ancestor chain, not one per
+    // folder — this runs on every document archive.
+    const grouped = await this.g.edges.includes_folder.bulkFindTo(
+      folders.map((f) => ({ kind: "Folder" as const, id: f.id })),
+    );
+    // Ids are deduped before hydration, so the surviving slugs are too:
+    // a collection linking both a folder and its ancestor appears once.
+    const cols = await this.g.nodes.Collection.getByIds([
+      ...new Set(grouped.flat().map((e) => e.fromId)),
+    ]);
+    return cols.filter((c) => c !== undefined).map((c) => c.slug);
   }
 
   // Every collection with at least one folder link — the coarse v1
@@ -565,14 +592,14 @@ export class CollectionGraph {
   // the expansion of a collection that links some folder).
   async collectionsWithFolderLinks(): Promise<readonly string[]> {
     const cols = await findAll((w) => this.g.nodes.Collection.find(w));
-    const out: string[] = [];
-    for (const c of cols) {
-      const edges = await this.g.edges.includes_folder.findFrom({
-        kind: "Collection",
-        id: c.id,
-      });
-      if (edges.length > 0) out.push(c.slug);
-    }
-    return out;
+    // "Has at least one link" only needs the first edge of each
+    // collection, so cap the fan-out and read them all in one statement.
+    const grouped = await this.g.edges.includes_folder.bulkFindFrom(
+      cols.map((c) => ({ kind: "Collection" as const, id: c.id })),
+      { limitPerInput: 1 },
+    );
+    return cols
+      .filter((_, i) => (grouped[i]?.length ?? 0) > 0)
+      .map((c) => c.slug);
   }
 }
