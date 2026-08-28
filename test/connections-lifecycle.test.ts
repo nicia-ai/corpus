@@ -12,13 +12,12 @@ import { connectControlDb } from "../src/control/db";
 import { readPendingConnect } from "../src/control/oauth-selection";
 import { apiKey, connection } from "../src/control/schema/app";
 import {
-  oauthClient,
   oauthConsent,
   oauthRefreshToken,
 } from "../src/control/schema/better-auth";
 import { asCollectionSlug } from "../src/ids";
 
-import { createOrg, signUp } from "./_helpers";
+import { createOrg, seedOAuthClient, signUp } from "./_helpers";
 
 // Seed an OAuth grant footprint we expect deleteConnection to clean up:
 // one oauth_client (FK target), one oauth_refresh_token referencing the
@@ -30,22 +29,8 @@ async function seedGrantFootprint(
   connectionId: string,
 ): Promise<string> {
   const db = connectControlDb(env.DB);
-  const clientId = `client-${connectionId}`;
+  const clientId = await seedOAuthClient(connectionId);
   const now = new Date();
-  await db.insert(oauthClient).values({
-    id: clientId,
-    clientId,
-    name: "ci-client",
-    type: "public",
-    public: true,
-    requirePKCE: true,
-    redirectUris: ["http://127.0.0.1/cb"],
-    grantTypes: ["authorization_code", "refresh_token"],
-    responseTypes: ["code"],
-    tokenEndpointAuthMethod: "none",
-    createdAt: now,
-    updatedAt: now,
-  });
   await db.insert(oauthRefreshToken).values({
     id: `rt-${connectionId}`,
     token: `tok-${connectionId}`,

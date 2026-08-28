@@ -55,6 +55,7 @@ export const account = sqliteTable(
   "account",
   {
     id: text("id").primaryKey(),
+    issuer: text("issuer").notNull(),
     accountId: text("account_id").notNull(),
     providerId: text("provider_id").notNull(),
     userId: text("user_id")
@@ -78,7 +79,13 @@ export const account = sqliteTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index("account_userId_idx").on(table.userId)],
+  (table) => [
+    uniqueIndex("account_issuer_accountId_uidx").on(
+      table.issuer,
+      table.accountId,
+    ),
+    index("account_userId_idx").on(table.userId),
+  ],
 );
 
 export const verification = sqliteTable(
@@ -105,6 +112,8 @@ export const jwks = sqliteTable("jwks", {
   privateKey: text("private_key").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+  alg: text("alg"),
+  crv: text("crv"),
 });
 
 export const oauthClient = sqliteTable(
@@ -113,11 +122,15 @@ export const oauthClient = sqliteTable(
     id: text("id").primaryKey(),
     clientId: text("client_id").notNull().unique(),
     clientSecret: text("client_secret"),
+    clientDiscoveryId: text("client_discovery_id"),
     disabled: integer("disabled", { mode: "boolean" }).default(false),
     skipConsent: integer("skip_consent", { mode: "boolean" }),
     enableEndSession: integer("enable_end_session", { mode: "boolean" }),
     subjectType: text("subject_type"),
     scopes: text("scopes", { mode: "json" }),
+    clientCredentialsScopes: text("client_credentials_scopes", {
+      mode: "json",
+    }).default([]),
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
@@ -132,16 +145,68 @@ export const oauthClient = sqliteTable(
     softwareStatement: text("software_statement"),
     redirectUris: text("redirect_uris", { mode: "json" }).notNull(),
     postLogoutRedirectUris: text("post_logout_redirect_uris", { mode: "json" }),
+    backchannelLogoutUri: text("backchannel_logout_uri"),
+    backchannelLogoutSessionRequired: integer(
+      "backchannel_logout_session_required",
+      { mode: "boolean" },
+    ),
     tokenEndpointAuthMethod: text("token_endpoint_auth_method"),
+    applicationType: text("application_type"),
+    jwks: text("jwks"),
+    jwksUri: text("jwks_uri"),
     grantTypes: text("grant_types", { mode: "json" }),
     responseTypes: text("response_types", { mode: "json" }),
-    public: integer("public", { mode: "boolean" }),
-    type: text("type"),
     requirePKCE: integer("require_pkce", { mode: "boolean" }),
+    dpopBoundAccessTokens: integer("dpop_bound_access_tokens", {
+      mode: "boolean",
+    }).default(false),
     referenceId: text("reference_id"),
     metadata: text("metadata", { mode: "json" }),
   },
   (table) => [index("oauthClient_userId_idx").on(table.userId)],
+);
+
+export const oauthResource = sqliteTable("oauth_resource", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull().unique(),
+  name: text("name").notNull(),
+  accessTokenTtl: integer("access_token_ttl"),
+  refreshTokenTtl: integer("refresh_token_ttl"),
+  signingAlgorithm: text("signing_algorithm"),
+  signingKeyId: text("signing_key_id"),
+  allowedScopes: text("allowed_scopes", { mode: "json" }),
+  customClaims: text("custom_claims", { mode: "json" }),
+  dpopBoundAccessTokensRequired: integer("dpop_bound_access_tokens_required", {
+    mode: "boolean",
+  }).default(false),
+  disabled: integer("disabled", { mode: "boolean" }).default(false),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }),
+  policyVersion: integer("policy_version").default(1),
+  metadata: text("metadata", { mode: "json" }),
+});
+
+export const oauthClientResource = sqliteTable(
+  "oauth_client_resource",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    resourceId: text("resource_id")
+      .notNull()
+      .references(() => oauthResource.identifier, { onDelete: "cascade" }),
+    metadata: text("metadata", { mode: "json" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("oauthClientResource_clientId_resourceId_uidx").on(
+      table.clientId,
+      table.resourceId,
+    ),
+    index("oauthClientResource_clientId_idx").on(table.clientId),
+    index("oauthClientResource_resourceId_idx").on(table.resourceId),
+  ],
 );
 
 export const oauthRefreshToken = sqliteTable(
@@ -159,16 +224,30 @@ export const oauthRefreshToken = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     referenceId: text("reference_id"),
+    authorizationCodeId: text("authorization_code_id"),
+    resources: text("resources", { mode: "json" }),
+    requestedUserInfoClaims: text("requested_user_info_claims", {
+      mode: "json",
+    }),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     revoked: integer("revoked", { mode: "timestamp_ms" }),
+    rotatedAt: integer("rotated_at", { mode: "timestamp_ms" }),
+    rotationReplayResponse: text("rotation_replay_response"),
+    rotationReplayExpiresAt: integer("rotation_replay_expires_at", {
+      mode: "timestamp_ms",
+    }),
     authTime: integer("auth_time", { mode: "timestamp_ms" }),
+    confirmation: text("confirmation", { mode: "json" }),
     scopes: text("scopes", { mode: "json" }).notNull(),
   },
   (table) => [
     index("oauthRefreshToken_clientId_idx").on(table.clientId),
     index("oauthRefreshToken_sessionId_idx").on(table.sessionId),
     index("oauthRefreshToken_userId_idx").on(table.userId),
+    index("oauthRefreshToken_authorizationCodeId_idx").on(
+      table.authorizationCodeId,
+    ),
   ],
 );
 
@@ -185,17 +264,27 @@ export const oauthAccessToken = sqliteTable(
     }),
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     referenceId: text("reference_id"),
+    authorizationCodeId: text("authorization_code_id"),
+    resources: text("resources", { mode: "json" }),
+    requestedUserInfoClaims: text("requested_user_info_claims", {
+      mode: "json",
+    }),
     refreshId: text("refresh_id").references(() => oauthRefreshToken.id, {
       onDelete: "cascade",
     }),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    revoked: integer("revoked", { mode: "timestamp_ms" }),
+    confirmation: text("confirmation", { mode: "json" }),
     scopes: text("scopes", { mode: "json" }).notNull(),
   },
   (table) => [
     index("oauthAccessToken_clientId_idx").on(table.clientId),
     index("oauthAccessToken_sessionId_idx").on(table.sessionId),
     index("oauthAccessToken_userId_idx").on(table.userId),
+    index("oauthAccessToken_authorizationCodeId_idx").on(
+      table.authorizationCodeId,
+    ),
     index("oauthAccessToken_refreshId_idx").on(table.refreshId),
   ],
 );
@@ -209,6 +298,10 @@ export const oauthConsent = sqliteTable(
       .references(() => oauthClient.clientId, { onDelete: "cascade" }),
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     referenceId: text("reference_id"),
+    resources: text("resources", { mode: "json" }),
+    requestedUserInfoClaims: text("requested_user_info_claims", {
+      mode: "json",
+    }),
     scopes: text("scopes", { mode: "json" }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
@@ -219,18 +312,19 @@ export const oauthConsent = sqliteTable(
   ],
 );
 
-export const organization = sqliteTable(
-  "organization",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    slug: text("slug").notNull().unique(),
-    logo: text("logo"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    metadata: text("metadata"),
-  },
-  (table) => [uniqueIndex("organization_slug_uidx").on(table.slug)],
-);
+export const oauthClientAssertion = sqliteTable("oauth_client_assertion", {
+  id: text("id").primaryKey(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const organization = sqliteTable("organization", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  logo: text("logo"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  metadata: text("metadata"),
+});
 
 export const member = sqliteTable(
   "member",
@@ -307,10 +401,29 @@ export const oauthClientRelations = relations(oauthClient, ({ one, many }) => ({
     fields: [oauthClient.userId],
     references: [user.id],
   }),
+  oauthClientResources: many(oauthClientResource),
   oauthRefreshTokens: many(oauthRefreshToken),
   oauthAccessTokens: many(oauthAccessToken),
   oauthConsents: many(oauthConsent),
 }));
+
+export const oauthResourceRelations = relations(oauthResource, ({ many }) => ({
+  oauthClientResources: many(oauthClientResource),
+}));
+
+export const oauthClientResourceRelations = relations(
+  oauthClientResource,
+  ({ one }) => ({
+    oauthClient: one(oauthClient, {
+      fields: [oauthClientResource.clientId],
+      references: [oauthClient.clientId],
+    }),
+    oauthResource: one(oauthResource, {
+      fields: [oauthClientResource.resourceId],
+      references: [oauthResource.identifier],
+    }),
+  }),
+);
 
 export const oauthRefreshTokenRelations = relations(
   oauthRefreshToken,

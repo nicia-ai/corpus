@@ -8,6 +8,34 @@
       "when": 1780424761558,
       "tag": "0000_woozy_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787875746038,
+      "tag": "0001_productive_sunspot",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787875813756,
+      "tag": "0002_military_khan",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787875819790,
+      "tag": "0003_backfill_account_issuer",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787875875485,
+      "tag": "0004_robust_terror",
+      "breakpoints": true
     }
   ]
 }

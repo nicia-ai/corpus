@@ -188,6 +188,49 @@ responsibility.
   email (intentional, not a bug).
 - `BETTER_AUTH_SECRET` is dev-only in `wrangler.jsonc` (`.min(32)` in
   `src/control/env.server.ts`); production sets it via `wrangler secret put`.
+- **On the 1.7 bump** (see the [upgrade
+  guide](https://better-auth.com/docs/guides/1-7-upgrade-guide)):
+  - `oauthProvider`'s `validAudiences` is gone; use `resources: [...]`
+    plus `enforcePerClientResources: false` (Corpus has exactly one
+    resource — the MCP audience — shared by every DCR'd client, so
+    there is no per-client resource ACL to enforce).
+  - `account` gained a required `issuer` (unique with `accountId`), and
+    `oauth_client` lost its `public`/`type` columns. Four migrations, one
+    root cause: drizzle-kit hits an interactive rename-conflict prompt
+    (can't run non-interactively) whenever a diff both adds and drops a
+    column on the same table, or adds a NOT NULL column with no default
+    to a non-empty table. `0001` is every purely-additive change,
+    including `account.issuer` nullable-first; `0002` drops
+    `oauth_client.public`/`type` on their own, safe because the app never
+    reads them (verified — no reference outside the generated schema);
+    `0003_backfill_account_issuer.sql` fills `issuer` per the guide's
+    provider mapping (`credential` → `local:credential`, `google` →
+    `https://accounts.google.com`); `0004` adds the NOT NULL + unique
+    index once every row already has a value.
+  - `@better-auth/oauth-provider@1.7`'s bundled `.d.mts` widens some
+    OpenAPI-parameter literals to include explicit `key?: undefined`
+    members, which fails `BetterAuthPlugin` under our
+    `exactOptionalPropertyTypes` and collapses the _entire_ inferred
+    `plugins` array type (not just that one plugin). `asBetterAuthPlugin`
+    in `auth.server.ts` / `auth.cli.ts` is the documented workaround;
+    `src/api.ts`'s two `.well-known` handlers re-cast `getAuth(...)`
+    through the metadata helpers' own parameter types to recover the
+    endpoint names the workaround erases. Re-check on every
+    oauth-provider bump; drop once upstream's declarations stop emitting
+    bare `undefined` members.
+  - `@better-auth/drizzle-adapter@1.7` reads `db._?.schema` eagerly at
+    construction, so `auth.cli.ts`'s schema-generation stub db can no
+    longer be bare `undefined` — it's `{ _: undefined }` now.
+  - A DCR request with no declared `application_type` now defaults to
+    `"web"`, and a `"web"` client is refused any loopback redirect URI.
+    Every shipping MCP client (Claude Code, Cursor, mcp-remote) is a
+    CLI app running a local loopback callback server and does not send
+    `application_type`, so this silently broke unauthenticated DCR for
+    all of them. `src/api.ts`'s `classifyLoopbackDcrAsNative` reclassifies
+    an undeclared, all-loopback-redirect registration as `"native"`
+    before Better Auth ever sees it (using the same `isLoopbackIP`
+    predicate oauth-provider's own validator uses). Regression keeper:
+    `test/oauth-discovery.test.ts`.
 - Verify library APIs against the installed version + current docs —
   training data lags these fast-moving deps.
 
@@ -232,6 +275,57 @@ responsibility.
   performance-only `PRAGMA analysis_limit` and proceeds with scoped
   `ANALYZE`; do not re-add `refreshStatistics: false` to
   `materializeIndexes`.
+- **Known edge case, deliberately not guarded.** The FTS5 storage behind
+  `searchable()` is provisioned by TypeGraph and attested by a durable
+  marker; if the two drift apart (storage dropped under a live marker, or
+  a table left at a shape the current `createDdl` no longer produces) the
+  projection goes `degraded`. That is not a search-only outage — every
+  Document write syncs the index, so save / rename / import fail too.
+  Since 0.49 it is self-describing on Durable Object SQLite: both paths
+  throw `ContributionUnavailableError` with
+  `state: "physical-storage-missing"`, the driver error kept as `cause`,
+  and `getErrorSuggestion()` naming the remedy —
+  `store.rebuildContribution("fulltext")`, which drops, recreates, and
+  repopulates the index from the nodes' `searchText`. A failed write
+  still rolls back, so nothing is half-committed. Verified on 0.49.0.
+  Because the error diagnoses and fixes itself, Corpus deliberately runs
+  **no** `probeContributions()` at DO init — that would cost a catalog
+  read on every cold start for a state nothing here can cause. Do not add
+  a probe without revisiting that trade.
+- 0.46 refuses a constrained write it cannot fence
+  (`CONSTRAINT_WRITE_FENCE_UNSUPPORTED`) on a backend without
+  transactions — D1, `neon-http`, `transactionMode: "none"`. Durable
+  Object SQLite reports `capabilities.transactions: true` and fences
+  normally, so Corpus's `scope: "kind"` uniques are unaffected. This is
+  the concrete reason the data plane is a DO and not D1; a move to D1
+  would break every unique constraint in `canonicalGraph`.
+- Corpus is structurally immune to the valid-time hazards TypeGraph keeps
+  shipping guards for: no path states `validFrom` / `validTo` / `clearValidTo`,
+  and every removal is `hardDelete`, so there are no tombstones to resurrect
+  and no window a write could invert. 0.48's
+  `repairInvertedValidityWindows({ mode: "report" })` confirms it — 0 rows on
+  both `live` and `live-and-recorded`, `atomic: true` on DO SQLite. Do not
+  wire the repair in; re-check only if a future path starts stating windows.
+- Hard deletes are still one statement per row: the store surface
+  exposes only a **soft** `bulkDelete`, so `VersionRepo.reapDocumentVersions`
+  and `FolderRepo`'s subtree delete loop `hardDelete` per node/edge. Do
+  not "fix" this with `bulkDelete` — it soft-deletes, which is a
+  different operation. Tracked upstream (typegraph: no `bulkHardDelete`).
+- 0.50 added claim relations (`typegraph_node_uniques` axis rework,
+  `typegraph_edge_claims`, a `disjointWith` claim) that fence uniqueness /
+  disjointness / edge cardinality with a real row instead of racing the
+  per-graph advisory lock. Bundled SQLite declares `constraintClaims:
+true` and `ensureStore`'s idempotent boot path materializes the new
+  relation itself — no manual DO migration needed, confirmed by the full
+  suite passing straight through the 0.49→0.52 bump. 0.52 layers
+  authoritative one-statement commands on top for backends with no
+  interactive transaction (D1, Neon HTTP); Durable Object SQLite already
+  had a real transaction, so this changed nothing observable here.
+
+  `store.verifyConstraintFences()` (0.50) is the read-only audit for
+  pre-fence violations already sitting in a graph — not wired into
+  Corpus's boot path, run it manually if a pre-0.50 database is ever
+  suspected of carrying one.
 
 ## Durable Object migrations
 
