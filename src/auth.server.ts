@@ -190,6 +190,17 @@ function create(env: Env, runtime: ServerEnv) {
     // session+user join. 60s cache → signature verify only on the warm
     // path; revocation still takes effect within maxAge.
     session: { cookieCache: { enabled: true, maxAge: 60 } },
+    // Better Auth's default cookie prefix ("better-auth") is shared by
+    // every deploy that doesn't override it. On a hosted deploy under a
+    // shared registrable domain (nicia.ai), another nicia.ai property
+    // using the same default and a parent-domain (`.nicia.ai`) cookie
+    // collides: the browser sends BOTH same-named session_token cookies
+    // to corpus.nicia.ai, and whichever one wins the lookup may not be
+    // corpus's own — a valid login then looks unauthenticated because
+    // the wrong (foreign) token gets checked against this D1. A
+    // corpus-specific prefix makes the cookie name unique regardless of
+    // what other nicia.ai services do with theirs.
+    advanced: { cookiePrefix: "corpus" },
     database: drizzleAdapter(connectControlDb(env.DB), { provider: "sqlite" }),
     plugins: [
       jwt(),
