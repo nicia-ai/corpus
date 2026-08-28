@@ -1,3 +1,12 @@
+# `cli/` publishes standalone to npm (see .github/workflows/publish-cli.yml)
+# and is built with the root toolchain (`pnpm cli:build`), not installed as
+# its own workspace package — its package.json is npm-publish metadata only.
+# Without this, pnpm's implicit "all subdirectories" default pulls cli/
+# into the workspace and frozen-lockfile installs break whenever cli's
+# metadata deps drift from the (nonexistent) cli lockfile entry.
+packages:
+  - "."
+
 overrides:
   "@esbuild-kit/core-utils>esbuild": "^0.25.0"
   lodash: "^4.18.1"
