@@ -1,3 +1,4 @@
+import { isLoopbackIP } from "@better-auth/core/utils/host";
 import {
   getOAuthProviderState,
   oauthProvider,
@@ -7,6 +8,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { admin, jwt, organization } from "better-auth/plugins";
 
+import { asBetterAuthPlugin } from "./better-auth-plugin-compat";
 import { resolveConnection } from "./control/connection-resolution";
 import { connectControlDb } from "./control/db";
 import { entitlementsOf, QuotaExceededError } from "./control/entitlements";
@@ -27,6 +29,17 @@ let cachedAuth: ReturnType<typeof create> | undefined;
 let cachedKey: string | undefined;
 
 const INVITATION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+
+// The exact "loopback" predicate oauth-provider's own redirect-URI
+// validator uses: IPv4 127.0.0.0/8, IPv6 ::1, or the bare name `localhost`.
+function isLoopbackRedirectUri(uri: string): boolean {
+  try {
+    const { hostname } = new URL(uri);
+    return isLoopbackIP(hostname) || hostname === "localhost";
+  } catch {
+    return false;
+  }
+}
 
 // Platform-admin endpoint paths whose successful calls are recorded to
 // `admin_audit` (the after-hook below). Read-only admin endpoints
@@ -63,6 +76,34 @@ function create(env: Env, runtime: ServerEnv) {
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path !== "/oauth2/register") return;
+        // @better-auth/oauth-provider@1.7 defaults a DCR request with no
+        // declared `application_type` to "web", and a "web" client is
+        // refused any loopback redirect URI outright. Every shipping MCP
+        // client (Claude Code, Cursor, mcp-remote) registers as a
+        // CLI/native app running a local loopback callback server per RFC
+        // 8252 §7.3, and none of them send `application_type` — so the 1.7
+        // bump broke unauthenticated DCR for every real client. A
+        // registration with no declared type whose redirect URIs are ALL
+        // loopback is unambiguously native (no real "web" app is ever
+        // deployed at a loopback address), so classify it as such before
+        // the endpoint ever validates the redirect URIs. Mutating `ctx.body`
+        // in place (rather than returning `{ context: {...} }`) is what
+        // actually reaches the endpoint's own body — verified against
+        // test/oauth-discovery.test.ts.
+        const body = ctx.body as Record<string, unknown> | undefined;
+        const redirectUris = body?.redirect_uris;
+        if (
+          body !== undefined &&
+          !("application_type" in body) &&
+          Array.isArray(redirectUris) &&
+          redirectUris.length > 0 &&
+          redirectUris.every(
+            (uri: unknown) =>
+              typeof uri === "string" && isLoopbackRedirectUri(uri),
+          )
+        ) {
+          body.application_type = "native";
+        }
         try {
           await entitlementsOf(undefined).assertWithinQuota({
             action: "oauth_client_register",
@@ -160,8 +201,12 @@ function create(env: Env, runtime: ServerEnv) {
       //   DCR; static client_id is the worst-supported path. Unauth DCR
       //   because an MCP client registers BEFORE any user session. Abuse
       //   is bounded by the `oauth_client_register` entitlement (above).
-      // - `validAudiences` must include `${base}/mcp` or a spec-compliant
-      //   `resource=${base}/mcp` is rejected at issuance.
+      // - `resources` (replaces 1.6's `validAudiences`) must include
+      //   `${base}/mcp` or a spec-compliant `resource=${base}/mcp` is
+      //   rejected at issuance. `enforcePerClientResources: false` because
+      //   Corpus has exactly one resource and no per-client ACL — every
+      //   DCR'd client (Claude Code, Cursor, mcp-remote, VS Code) gets the
+      //   same MCP audience, matching 1.6's `validAudiences` semantics.
       // - `accessTokenExpiresIn: 900` is NOT a revocation latency:
       //   resolveConnection is uncached so a deleted Connection/member
       //   is dead next request; 900 s is only an un-revoked token's
@@ -172,56 +217,59 @@ function create(env: Env, runtime: ServerEnv) {
       //   OAuth query, so `getOAuthProviderState()` recovers it), and
       //   `customAccessTokenClaims` stamps it as the `${base}/connection`
       //   claim. No grant ⇒ no claim ⇒ 403 (fail closed).
-      oauthProvider({
-        loginPage: "/sign-in",
-        consentPage: "/consent",
-        allowDynamicClientRegistration: true,
-        allowUnauthenticatedClientRegistration: true,
-        validAudiences: [`${runtime.BETTER_AUTH_URL}/mcp`],
-        accessTokenExpiresIn: 900,
-        postLogin: {
-          page: "/connect/select",
-          // Redirect to the picker until a Connection is selected for
-          // THIS in-flight authorization request. No query (cannot
-          // recover the handshake) → don't loop; fall through to a
-          // claimless token → 403.
-          shouldRedirect: async ({ user }) => {
-            const state = await getOAuthProviderState();
-            if (state?.query === undefined) return false;
-            const picked = await readSelection(
-              connectControlDb(env.DB),
-              state.query,
-              user.id,
-            );
-            return picked === undefined;
+      asBetterAuthPlugin(
+        oauthProvider({
+          loginPage: "/sign-in",
+          consentPage: "/consent",
+          allowDynamicClientRegistration: true,
+          allowUnauthenticatedClientRegistration: true,
+          resources: [`${runtime.BETTER_AUTH_URL}/mcp`],
+          enforcePerClientResources: false,
+          accessTokenExpiresIn: 900,
+          postLogin: {
+            page: "/connect/select",
+            // Redirect to the picker until a Connection is selected for
+            // THIS in-flight authorization request. No query (cannot
+            // recover the handshake) → don't loop; fall through to a
+            // claimless token → 403.
+            shouldRedirect: async ({ user }) => {
+              const state = await getOAuthProviderState();
+              if (state?.query === undefined) return false;
+              const picked = await readSelection(
+                connectControlDb(env.DB),
+                state.query,
+                user.id,
+              );
+              return picked === undefined;
+            },
+            // Read (never delete — fires more than once per flow) the
+            // picked Connection. Undefined ⇒ no reference ⇒ no claim ⇒
+            // 403, consistent with the mandatory invariant. Also re-verify
+            // membership against the Connection's org at THIS instant so
+            // a user removed from the org between picker and consent
+            // doesn't get a signed-but-inert token (resolveConnection
+            // would later reject it at /mcp). Issuing a token whose
+            // membership has already lapsed is a worse UX than failing
+            // closed in the consent flow itself.
+            consentReferenceId: async ({ user }) => {
+              const state = await getOAuthProviderState();
+              if (state?.query === undefined) return undefined;
+              const db = connectControlDb(env.DB);
+              const picked = await readSelection(db, state.query, user.id);
+              if (picked === undefined) return undefined;
+              const ref = await resolveConnection(db, {
+                userId: user.id,
+                connectionId: picked,
+              });
+              return ref === undefined ? undefined : picked;
+            },
           },
-          // Read (never delete — fires more than once per flow) the
-          // picked Connection. Undefined ⇒ no reference ⇒ no claim ⇒
-          // 403, consistent with the mandatory invariant. Also re-verify
-          // membership against the Connection's org at THIS instant so
-          // a user removed from the org between picker and consent
-          // doesn't get a signed-but-inert token (resolveConnection
-          // would later reject it at /mcp). Issuing a token whose
-          // membership has already lapsed is a worse UX than failing
-          // closed in the consent flow itself.
-          consentReferenceId: async ({ user }) => {
-            const state = await getOAuthProviderState();
-            if (state?.query === undefined) return undefined;
-            const db = connectControlDb(env.DB);
-            const picked = await readSelection(db, state.query, user.id);
-            if (picked === undefined) return undefined;
-            const ref = await resolveConnection(db, {
-              userId: user.id,
-              connectionId: picked,
-            });
-            return ref === undefined ? undefined : picked;
-          },
-        },
-        customAccessTokenClaims: ({ referenceId }): Record<string, string> =>
-          referenceId === undefined || referenceId === ""
-            ? {}
-            : { [connectionClaimKey(runtime.BETTER_AUTH_URL)]: referenceId },
-      }),
+          customAccessTokenClaims: ({ referenceId }): Record<string, string> =>
+            referenceId === undefined || referenceId === ""
+              ? {}
+              : { [connectionClaimKey(runtime.BETTER_AUTH_URL)]: referenceId },
+        }),
+      ),
       // Org plugin owns organization + member + invitation. Nicia owns
       // `project` (one ProjectStore DO per project — no Better Auth
       // concept), wired via organizationHooks. No plugin-level

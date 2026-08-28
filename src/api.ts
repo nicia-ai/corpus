@@ -358,10 +358,24 @@ export const api = new Hono<{ Bindings: Env }>()
     return c.json({ ok: false, rolledBack: true }, 409);
   })
   .get("/.well-known/oauth-authorization-server", (c) =>
-    oauthProviderAuthServerMetadata(getAuth(c.env))(c.req.raw),
+    // See `asBetterAuthPlugin` in better-auth-plugin-compat.ts: widening the
+    // oauth-provider plugin to `BetterAuthPlugin` erases the literal
+    // endpoint names from `getAuth(...).api`, including the two this
+    // helper needs. Its own parameter type only asks for those two methods
+    // to exist and be callable — reasserting through it, rather than
+    // inventing the shape by hand, tracks any future signature change.
+    oauthProviderAuthServerMetadata(
+      getAuth(c.env) as unknown as Parameters<
+        typeof oauthProviderAuthServerMetadata
+      >[0],
+    )(c.req.raw),
   )
   .get("/.well-known/openid-configuration", (c) =>
-    oauthProviderOpenIdConfigMetadata(getAuth(c.env))(c.req.raw),
+    oauthProviderOpenIdConfigMetadata(
+      getAuth(c.env) as unknown as Parameters<
+        typeof oauthProviderOpenIdConfigMetadata
+      >[0],
+    )(c.req.raw),
   )
   .get("/.well-known/oauth-protected-resource", (c) =>
     protectedResourceMetadata(c.env),

@@ -8,7 +8,11 @@ import {
   DEFAULT_PROJECT_SLUG,
 } from "../src/control/org-lifecycle";
 import { connection, project } from "../src/control/schema/app";
-import { member, organization } from "../src/control/schema/better-auth";
+import {
+  member,
+  oauthClient,
+  organization,
+} from "../src/control/schema/better-auth";
 import { storeFor } from "../src/control/store-for";
 import type { EventLogStore } from "../src/event-log-store";
 import {
@@ -176,6 +180,31 @@ export async function createConnection(
     connectionId: asConnectionId(row?.id ?? ""),
     collectionSlug: asCollectionSlug(collectionSlug),
   };
+}
+
+// Seed an `oauth_client` row shaped like what Better Auth would persist for
+// a real DCR'd MCP client (native app, PKCE, no client secret) — the FK
+// target every OAuth grant-footprint fixture (refresh token, consent)
+// references. `applicationType`/`tokenEndpointAuthMethod` replaced the
+// removed `type`/`public` columns in better-auth@1.7's oauthClient schema.
+export async function seedOAuthClient(connectionId: string): Promise<string> {
+  const db = connectControlDb(env.DB);
+  const clientId = `client-${connectionId}`;
+  const now = new Date();
+  await db.insert(oauthClient).values({
+    id: clientId,
+    clientId,
+    name: "ci-client",
+    applicationType: "native",
+    requirePKCE: true,
+    redirectUris: ["http://127.0.0.1/cb"],
+    grantTypes: ["authorization_code", "refresh_token"],
+    responseTypes: ["code"],
+    tokenEndpointAuthMethod: "none",
+    createdAt: now,
+    updatedAt: now,
+  });
+  return clientId;
 }
 
 // Create the bound Collection in the per-Project DO so the respondMcp
