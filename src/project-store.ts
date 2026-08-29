@@ -4,8 +4,17 @@ import {
   isCreateProposal,
   parseBlocksWithRanges,
 } from "@nicia-ai/prose-diff";
-import { createAdapterStoreWithSchema } from "@nicia-ai/typegraph";
+import {
+  createAdapterStoreWithSchema,
+  type GraphBackend,
+} from "@nicia-ai/typegraph";
 import { createSqliteBackend } from "@nicia-ai/typegraph/adapters/drizzle/sqlite";
+import {
+  getCommittedSchemaVersion,
+  getSchemaChanges,
+  migrateSchema,
+  type NodeChange,
+} from "@nicia-ai/typegraph/schema";
 import { DurableObject } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -561,6 +570,62 @@ export class ProjectStore extends DurableObject<Env> {
     );
   }
 
+  // Each project's graph lives in its own Durable Object — there is no
+  // batch "wrangler d1 migrations apply" equivalent that can run a
+  // schema migration across every project ahead of a deploy. `ensureStore`
+  // is the only place any given project's graph gets touched, so it has
+  // to be able to self-heal a schema version bump on next boot, not just
+  // bootstrap a brand-new one. `createAdapterStoreWithSchema`'s own
+  // `ensureSchema` call already auto-migrates additive (backwards-
+  // compatible) diffs; a change TypeGraph classifies as breaking (e.g. a
+  // modified node — the 0.50 claim-relations rework, see AGENTS.md)
+  // throws `MigrationError` there instead of applying it, by design, so
+  // every project's boot would fail hard until a human runs
+  // `migrateSchema()` by hand against a DO that request-scoped code can't
+  // reach out-of-band.
+  //
+  // Reviewed once, at the PR that bumped TypeGraph: the only "breaking"
+  // classification this graph has ever produced is that claim-relations
+  // rework, which replaces an advisory-lock race with a real fenced row
+  // and touches no existing field or row data. `migrateSchema` itself
+  // still refuses to commit a diff that would drop a populated kind
+  // (`reason: "kind-removal"`), so that protection holds regardless —
+  // this only forecloses the *review* step for changes TypeGraph is
+  // able to auto-migrate outright, which is exactly the class this
+  // boot-time call is for. Logged so an unexpected future diff shows up
+  // in `wrangler tail` rather than silently sailing through.
+  private async migrateGraphSchemaIfNeeded(
+    backend: GraphBackend,
+  ): Promise<void> {
+    // getSchemaChanges (unlike ensureSchema's own loadActiveSchemaWithBootstrap)
+    // reads the schema-version table directly with no bootstrap fallback, so
+    // it throws on a brand-new project whose graph tables don't exist yet —
+    // there is nothing to migrate in that case; createAdapterStoreWithSchema's
+    // own initializeSchema path bootstraps it right after this returns.
+    let changes;
+    try {
+      changes = await getSchemaChanges(backend, canonicalGraph);
+    } catch (error) {
+      if (error instanceof Error && /no such table/iu.test(error.message)) {
+        return;
+      }
+      throw error;
+    }
+    if (!changes?.hasChanges) return;
+    const fromVersion = await getCommittedSchemaVersion(
+      backend,
+      canonicalGraph.id,
+    );
+    if (fromVersion === undefined) return;
+    console.warn(
+      `[typegraph] migrating graph "${canonicalGraph.id}" v${String(fromVersion)} -> v${String(fromVersion + 1)}: ${changes.summary}`,
+      changes.nodes
+        .filter((change: NodeChange) => change.type !== "added")
+        .map((change: NodeChange) => `${change.kind}: ${change.details}`),
+    );
+    await migrateSchema(backend, canonicalGraph, fromVersion);
+  }
+
   // Lazy, idempotent init. The ledger schema (content_blobs,
   // change_events) is applied by the Drizzle DO migrator from the
   // generated bundle — drizzle-kit is the single source of this DDL
@@ -575,6 +640,7 @@ export class ProjectStore extends DurableObject<Env> {
       const backend = createSqliteBackend(
         drizzle(this.ctx.storage, { logger: graphStatementLogger }),
       );
+      await this.migrateGraphSchemaIfNeeded(backend);
       const [store] = await createAdapterStoreWithSchema(
         canonicalGraph,
         backend,

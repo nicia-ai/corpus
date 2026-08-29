@@ -314,13 +314,30 @@ responsibility.
 - 0.50 added claim relations (`typegraph_node_uniques` axis rework,
   `typegraph_edge_claims`, a `disjointWith` claim) that fence uniqueness /
   disjointness / edge cardinality with a real row instead of racing the
-  per-graph advisory lock. Bundled SQLite declares `constraintClaims:
-true` and `ensureStore`'s idempotent boot path materializes the new
-  relation itself — no manual DO migration needed, confirmed by the full
-  suite passing straight through the 0.49→0.52 bump. 0.52 layers
-  authoritative one-statement commands on top for backends with no
-  interactive transaction (D1, Neon HTTP); Durable Object SQLite already
-  had a real transaction, so this changed nothing observable here.
+  per-graph advisory lock. Bundled SQLite declares `constraintClaims: true`.
+  **This was wrongly believed to bootstrap for free** ("no manual DO
+  migration needed, confirmed by the full suite passing straight
+  through the 0.49→0.52 bump") — every test builds a _fresh_ store, which
+  takes `ensureSchema`'s `initializeSchema` path (no stored schema to
+  diff against) and never exercises an _existing_ project's DO. Against
+  real data this change registers as a modified (not added) node,
+  `isBackwardsCompatible` calls that breaking, and `ensureSchema` throws
+  `MigrationError` — every existing project 500'd on next open until
+  `ProjectStore.migrateGraphSchemaIfNeeded` was wired in (called from
+  `ensureStore`, before `createAdapterStoreWithSchema`): on a breaking
+  diff it explicitly calls `migrateSchema()` itself, since there is no
+  per-project migration mechanism other than the DO's own next boot —
+  no `wrangler d1 migrations apply` equivalent exists for a graph
+  scattered across one DO per project, so `ensureStore` has to be able
+  to self-heal, not just bootstrap. `migrateSchema`'s own kind-removal
+  guard (refuses to drop a populated kind) is unaffected — this only
+  forecloses the human-review step for changes TypeGraph itself would
+  otherwise apply outright. **No test exercises this path yet** (would
+  need to seed a DO's DO-SQLite storage with a schema committed under
+  an intentionally-older graph definition, e.g. via `runInDurableObject`
+  - a hand-built old graph, then reopen through the real `ensureStore`)
+    — add one before the next schema-affecting TypeGraph bump, rather
+    than trusting "the suite passed" again.
 
   `store.verifyConstraintFences()` (0.50) is the read-only audit for
   pre-fence violations already sitting in a graph — not wired into
