@@ -27,19 +27,15 @@ allowBuilds:
   unrs-resolver: true
 
 minimumReleaseAgeExclude:
-  - "@cloudflare/vite-plugin@1.54.2"
-  - "@cloudflare/workerd-darwin-64@1.20260828.1"
-  - "@cloudflare/workerd-darwin-arm64@1.20260828.1"
-  - "@cloudflare/workerd-linux-64@1.20260828.1"
-  - "@cloudflare/workerd-linux-arm64@1.20260828.1"
-  - "@cloudflare/workerd-windows-64@1.20260828.1"
-  - "@posthog/browser-common@0.7.0"
-  - "@posthog/core@1.49.2"
+  - "@cloudflare/vite-plugin@1.54.3"
+  - "@nicia-ai/typegraph@0.53.0 || 0.54.0"
+  - "@posthog/browser-common@0.7.1"
+  - "@posthog/core@1.50.2"
   - "@posthog/types@1.407.1"
+  - "@types/node@26.4.1"
   - "@vitejs/plugin-react@6.1.1"
-  - lucide-react@1.35.0
-  - miniflare@5.20260828.0-alpha
-  - posthog-js@1.422.5
-  - workerd@1.20260828.1
-  - wrangler@4.127.1
-  - zod@4.5.1
+  - globals@17.12.0
+  - lucide-react@1.39.0
+  - miniflare@5.20260831.0-alpha
+  - posthog-js@1.424.1
+  - wrangler@4.128.0

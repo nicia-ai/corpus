@@ -2,6 +2,16 @@
 
 Guidance for coding agents in this repository. `CLAUDE.md` imports this file.
 
+**This file holds durable rules only** — what to do, what never to do,
+and which test keeps each rule honest. It is loaded into every agent's
+context, so it stays short.
+
+Upgrade narratives, benchmark numbers, incident write-ups, and
+"why we ruled X out" belong in `notes/` (`typegraph.md`, `toolchain.md`,
+`better-auth.md`), linked from the rule they explain. When a dependency
+bump teaches you something, the rule it changes goes here and the
+evidence goes there — do not append release notes to this file.
+
 ## What this is
 
 **Corpus** — a Git-free **canonical markdown context store for teams**:
@@ -54,20 +64,12 @@ Every change must pass `pnpm check` — the single gate CI also runs:
 `package.json`; do not re-list its steps in CI or docs — reference
 `pnpm check`.
 
-Both `lint` scripts set `NODE_OPTIONS=--max-old-space-size=8192`. This
-is load-bearing, not cargo cult: type-aware linting over
-`tsconfig.eslint.json` needs ~7 GiB and Node's default heap dies partway
-through with a V8 stack trace rather than a lint error. Measured on this
-tree: 6144 OOMs, 8192 completes at ~7.8 GiB peak.
-
-The cost is type-aware linting itself, not this repo's types — `tsc` over
-the _same_ project peaks at 1.3 GiB in 5s. Type-aware rules query the
-checker per node, so the checker's caches grow monotonically across
-files and are never released: any single directory lints in ~1.3 GiB,
-the whole tree needs ~7.8. Two things measured and ruled out, so nobody
-re-tries them: switching to `projectService` (same ceiling, ~2x faster)
-and disabling the most expensive rule, `no-deprecated` (no change).
-The real lever is linting fewer files type-aware, not a bigger heap.
+`pnpm lint` requires the `NODE_OPTIONS=--max-old-space-size=8192` both
+`lint` scripts set — type-aware linting peaks at ~7.8 GiB and Node's
+default heap dies with a V8 stack trace rather than a lint error. Do not
+lower it, and do not retry `projectService` or disabling `no-deprecated`
+to avoid it; both were measured and neither helps. TypeScript stays on 6
+until typescript-eslint supports 7. Measurements: `notes/toolchain.md`.
 
 The migration checks run unconditionally as part of `pnpm check`, but
 the regeneration remedies are conditional: when `src/db.ts` changes,
@@ -188,161 +190,79 @@ responsibility.
   email (intentional, not a bug).
 - `BETTER_AUTH_SECRET` is dev-only in `wrangler.jsonc` (`.min(32)` in
   `src/control/env.server.ts`); production sets it via `wrangler secret put`.
-- **On the 1.7 bump** (see the [upgrade
-  guide](https://better-auth.com/docs/guides/1-7-upgrade-guide)):
-  - `oauthProvider`'s `validAudiences` is gone; use `resources: [...]`
-    plus `enforcePerClientResources: false` (Corpus has exactly one
-    resource — the MCP audience — shared by every DCR'd client, so
-    there is no per-client resource ACL to enforce).
-  - `account` gained a required `issuer` (unique with `accountId`), and
-    `oauth_client` lost its `public`/`type` columns. Four migrations, one
-    root cause: drizzle-kit hits an interactive rename-conflict prompt
-    (can't run non-interactively) whenever a diff both adds and drops a
-    column on the same table, or adds a NOT NULL column with no default
-    to a non-empty table. `0001` is every purely-additive change,
-    including `account.issuer` nullable-first; `0002` drops
-    `oauth_client.public`/`type` on their own, safe because the app never
-    reads them (verified — no reference outside the generated schema);
-    `0003_backfill_account_issuer.sql` fills `issuer` per the guide's
-    provider mapping (`credential` → `local:credential`, `google` →
-    `https://accounts.google.com`); `0004` adds the NOT NULL + unique
-    index once every row already has a value.
-  - `@better-auth/oauth-provider@1.7`'s bundled `.d.mts` widens some
-    OpenAPI-parameter literals to include explicit `key?: undefined`
-    members, which fails `BetterAuthPlugin` under our
-    `exactOptionalPropertyTypes` and collapses the _entire_ inferred
-    `plugins` array type (not just that one plugin). `asBetterAuthPlugin`
-    in `auth.server.ts` / `auth.cli.ts` is the documented workaround;
-    `src/api.ts`'s two `.well-known` handlers re-cast `getAuth(...)`
-    through the metadata helpers' own parameter types to recover the
-    endpoint names the workaround erases. Re-check on every
-    oauth-provider bump; drop once upstream's declarations stop emitting
-    bare `undefined` members.
-  - `@better-auth/drizzle-adapter@1.7` reads `db._?.schema` eagerly at
-    construction, so `auth.cli.ts`'s schema-generation stub db can no
-    longer be bare `undefined` — it's `{ _: undefined }` now.
-  - A DCR request with no declared `application_type` now defaults to
-    `"web"`, and a `"web"` client is refused any loopback redirect URI.
-    Every shipping MCP client (Claude Code, Cursor, mcp-remote) is a
-    CLI app running a local loopback callback server and does not send
-    `application_type`, so this silently broke unauthenticated DCR for
-    all of them. `src/api.ts`'s `classifyLoopbackDcrAsNative` reclassifies
-    an undeclared, all-loopback-redirect registration as `"native"`
-    before Better Auth ever sees it (using the same `isLoopbackIP`
-    predicate oauth-provider's own validator uses). Regression keeper:
-    `test/oauth-discovery.test.ts`.
+- Better Auth 1.7 required workarounds that are still load-bearing and
+  must not be "cleaned up" without re-testing: `asBetterAuthPlugin` in
+  `auth.server.ts` / `auth.cli.ts`, the `.well-known` re-casts in
+  `src/api.ts`, and `classifyLoopbackDcrAsNative` (without which
+  unauthenticated DCR breaks for every CLI-based MCP client). Keeper:
+  `test/oauth-discovery.test.ts`. What each one is for:
+  `notes/better-auth.md`.
 - Verify library APIs against the installed version + current docs —
   training data lags these fast-moving deps.
 
 ## TypeGraph (`@nicia-ai/typegraph`)
 
-- Optimistic concurrency is enforced by the `DocumentVersion`
-  node-unique `(slug, docVersion)` constraint. A racing N+1 throws
-  `UniquenessError` (`code: "UNIQUENESS_VIOLATION"`) — **not** a SQLite
-  message. Classify via `isUniqueViolation` in `src/errors.ts`. The DO
-  maps it to a 409 conflict; the whole enlisted tx rolls back together.
-  Regression keeper: `test/save-path.test.ts`.
-- `kind` is reserved node metadata — use a domain-specific prop name.
-- `Node` / `Edge` shapes are flat (not under `.props`).
-- Look entities up with `find({ where })`, not `findByConstraint`.
+Upgrade history, measurements, and the reasoning behind these rules:
+`notes/typegraph.md`. Keep that file for background; keep this list for
+rules.
+
+- **`ensureStore()` is the only entry to a project's graph.** It
+  self-heals both the graph schema and TypeGraph's deployment-wide base
+  storage on boot, because there is no cross-DO migration mechanism —
+  each project's graph lives in its own Durable Object. A least-privilege
+  open would fail where `ensureStore` recovers. Keeper:
+  `test/graph-schema-upgrade.test.ts`.
+- **On every TypeGraph bump, repoint the `typegraph-prev` npm alias at
+  the release being upgraded FROM**, so that keeper tests the hop that is
+  shipping. Otherwise it silently degrades into another fresh-store test,
+  which is what let a breaking schema change reach production once
+  already.
+- Optimistic concurrency is the `DocumentVersion` node-unique
+  `(slug, docVersion)` constraint. A racing N+1 throws `UniquenessError`
+  (`code: "UNIQUENESS_VIOLATION"`) — **not** a SQLite message; classify
+  via `isUniqueViolation` in `src/errors.ts`. The DO maps it to a 409 and
+  the whole enlisted tx rolls back together. Keeper:
+  `test/save-path.test.ts`. Do not switch this to
+  `nodes.<Kind>.compareAndSet()`: a scalar guard on the `Document` head
+  covers one field, not the transaction.
+- Bind to `CorpusStore` / `CorpusTransaction` (`src/store/handle.ts`),
+  never to bare `Store<…>` — Corpus needs the **adapter** surface, which
+  is what exposes the `tx.sql` the atomic graph+ledger write depends on.
+  Backends import from `@nicia-ai/typegraph/adapters/drizzle/sqlite`.
+- Reach `tx.sql` only by narrowing the `tx.sqlAvailability` discriminant
+  (`"available" | "history" | "revisionTracking" | "unavailable"`); the
+  non-available arms omit `sql` outright. `ProjectStore.write()` narrows
+  once, at the single point a transaction opens.
 - Reading the edges of a SET of nodes goes through `bulkFindFrom` /
-  `bulkFindTo` (0.44+), never `findFrom` / `findTo` per item: they widen
+  `bulkFindTo`, never `findFrom` / `findTo` per item: they widen
   `from_id = ?` to `from_id IN (…)`, so a whole-tree walk costs a
   statement per bind-budget chunk instead of one per node. Results are
   grouped parallel to the input. `FolderRepo.parentEdgesOf` /
   `docFolderEdgesOf` are the shape to copy; `limitPerInput: 1` when the
-  question is only "does a link exist". A backend without
-  `findEdgesByEndpointSet` throws rather than silently looping.
-- Corpus binds to the **adapter** surface, not the portable one. Since
-  0.38 TypeGraph's default `Store` / `TransactionContext` are portable
-  and deliberately withhold the native handle; only
-  `createAdapterStoreWithSchema` + `AdapterStore` / `AdapterTransactionContext`
-  expose `tx.sql`, which the atomic graph+ledger write depends on. The
-  aliases live in `src/store/handle.ts` (`CorpusStore`,
-  `CorpusTransaction`) — bind to those, never to bare `Store<…>`.
-  Bring-your-own-connection backends import from
-  `@nicia-ai/typegraph/adapters/drizzle/sqlite` (the old `/sqlite`
-  entrypoint was removed, not deprecated).
-- `tx.sql` is gated by the `tx.sqlAvailability` discriminant
-  (`"available" | "history" | "revisionTracking" | "unavailable"`).
-  Since 0.39 the non-available arms **omit** `sql` entirely, so
-  narrowing on the discriminant is what makes `tx.sql` reachable at
-  all — reading it unnarrowed is a compile error, not a silent
-  `T | undefined`. `ProjectStore.write()` narrows once, at the single
-  point a transaction opens.
-- Statistics refresh needs no DO-SQLite workaround. TypeGraph 0.39
-  tolerates Durable Object SQLite's `SQLITE_AUTH` rejection of the
-  performance-only `PRAGMA analysis_limit` and proceeds with scoped
-  `ANALYZE`; do not re-add `refreshStatistics: false` to
-  `materializeIndexes`.
-- **Known edge case, deliberately not guarded.** The FTS5 storage behind
-  `searchable()` is provisioned by TypeGraph and attested by a durable
-  marker; if the two drift apart (storage dropped under a live marker, or
-  a table left at a shape the current `createDdl` no longer produces) the
-  projection goes `degraded`. That is not a search-only outage — every
-  Document write syncs the index, so save / rename / import fail too.
-  Since 0.49 it is self-describing on Durable Object SQLite: both paths
-  throw `ContributionUnavailableError` with
-  `state: "physical-storage-missing"`, the driver error kept as `cause`,
-  and `getErrorSuggestion()` naming the remedy —
-  `store.rebuildContribution("fulltext")`, which drops, recreates, and
-  repopulates the index from the nodes' `searchText`. A failed write
-  still rolls back, so nothing is half-committed. Verified on 0.49.0.
-  Because the error diagnoses and fixes itself, Corpus deliberately runs
-  **no** `probeContributions()` at DO init — that would cost a catalog
-  read on every cold start for a state nothing here can cause. Do not add
-  a probe without revisiting that trade.
-- 0.46 refuses a constrained write it cannot fence
-  (`CONSTRAINT_WRITE_FENCE_UNSUPPORTED`) on a backend without
-  transactions — D1, `neon-http`, `transactionMode: "none"`. Durable
-  Object SQLite reports `capabilities.transactions: true` and fences
-  normally, so Corpus's `scope: "kind"` uniques are unaffected. This is
-  the concrete reason the data plane is a DO and not D1; a move to D1
-  would break every unique constraint in `canonicalGraph`.
-- Corpus is structurally immune to the valid-time hazards TypeGraph keeps
-  shipping guards for: no path states `validFrom` / `validTo` / `clearValidTo`,
-  and every removal is `hardDelete`, so there are no tombstones to resurrect
-  and no window a write could invert. 0.48's
-  `repairInvertedValidityWindows({ mode: "report" })` confirms it — 0 rows on
-  both `live` and `live-and-recorded`, `atomic: true` on DO SQLite. Do not
-  wire the repair in; re-check only if a future path starts stating windows.
-- Hard deletes are still one statement per row: the store surface
-  exposes only a **soft** `bulkDelete`, so `VersionRepo.reapDocumentVersions`
-  and `FolderRepo`'s subtree delete loop `hardDelete` per node/edge. Do
-  not "fix" this with `bulkDelete` — it soft-deletes, which is a
-  different operation. Tracked upstream (typegraph: no `bulkHardDelete`).
-- 0.50 added claim relations (`typegraph_node_uniques` axis rework,
-  `typegraph_edge_claims`, a `disjointWith` claim) that fence uniqueness /
-  disjointness / edge cardinality with a real row instead of racing the
-  per-graph advisory lock. Bundled SQLite declares `constraintClaims: true`.
-  **This was wrongly believed to bootstrap for free** ("no manual DO
-  migration needed, confirmed by the full suite passing straight
-  through the 0.49→0.52 bump") — every test builds a _fresh_ store, which
-  takes `ensureSchema`'s `initializeSchema` path (no stored schema to
-  diff against) and never exercises an _existing_ project's DO. Against
-  real data this change registers as a modified (not added) node,
-  `isBackwardsCompatible` calls that breaking, and `ensureSchema` throws
-  `MigrationError` — every existing project 500'd on next open until
-  `ProjectStore.migrateGraphSchemaIfNeeded` was wired in (called from
-  `ensureStore`, before `createAdapterStoreWithSchema`): on a breaking
-  diff it explicitly calls `migrateSchema()` itself, since there is no
-  per-project migration mechanism other than the DO's own next boot —
-  no `wrangler d1 migrations apply` equivalent exists for a graph
-  scattered across one DO per project, so `ensureStore` has to be able
-  to self-heal, not just bootstrap. `migrateSchema`'s own kind-removal
-  guard (refuses to drop a populated kind) is unaffected — this only
-  forecloses the human-review step for changes TypeGraph itself would
-  otherwise apply outright. **No test exercises this path yet** (would
-  need to seed a DO's DO-SQLite storage with a schema committed under
-  an intentionally-older graph definition, e.g. via `runInDurableObject`
-  - a hand-built old graph, then reopen through the real `ensureStore`)
-    — add one before the next schema-affecting TypeGraph bump, rather
-    than trusting "the suite passed" again.
-
-  `store.verifyConstraintFences()` (0.50) is the read-only audit for
-  pre-fence violations already sitting in a graph — not wired into
-  Corpus's boot path, run it manually if a pre-0.50 database is ever
-  suspected of carrying one.
+  question is only "does a link exist". Keeper:
+  `test/bulk-edge-reads.test.ts`.
+- `hardDelete` per node/edge is correct, not a missed optimization. The
+  store surface's `bulkDelete` is **soft** — a different operation. Do
+  not "fix" `VersionRepo.reapDocumentVersions` or `FolderRepo`'s subtree
+  loop with it.
+- Do not move writes out of `ProjectStore.write()` to chase a
+  faster-looking TypeGraph write path. The atomic graph+ledger write is
+  the DO's defining responsibility; the transaction-free fast paths do
+  not apply to it.
+- Keep diagnostics off the boot path: `probeContributions()`,
+  `verifyConstraintFences()`, `repairInvertedValidityWindows()`,
+  `describe()`, `validateStore()`. Each answers a question Corpus does
+  not have at cold start. Run them by hand against a suspect database.
+- Do not re-add `refreshStatistics: false` to `materializeIndexes`.
+- The data plane must stay a Durable Object. TypeGraph refuses a
+  constrained write it cannot fence, and D1 offers no interactive
+  transaction — moving the graph to D1 would break every unique
+  constraint in `canonicalGraph`, including the OCC one above.
+- `kind` is reserved node metadata — use a domain-specific prop name.
+- `Node` / `Edge` shapes are flat (not under `.props`).
+- Look entities up with `find({ where })`, not `findByConstraint`.
+- Verify library APIs against the installed version + current docs —
+  training data lags this dependency badly.
 
 ## Durable Object migrations
 
