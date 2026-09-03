@@ -69,6 +69,22 @@ const TOOLS: readonly {
   snippet: (url: string, auth: Auth, server: string) => string;
 }[] = [
   {
+    id: "cursor",
+    label: "Cursor",
+    caption: "Add to ~/.cursor/mcp.json (or .cursor/mcp.json in a project).",
+    snippet: (url, auth, server) =>
+      auth === "oauth"
+        ? cursorMcpSnippet(url, server)
+        : `{
+  "mcpServers": {
+    "${server}": {
+      "url": "${url}",
+      "headers": { "Authorization": "Bearer ${KEY}" }
+    }
+  }
+}`,
+  },
+  {
     id: "claude-code",
     label: "Claude Code",
     caption: "Run in your terminal.",
@@ -102,22 +118,6 @@ const TOOLS: readonly {
         "--header",
         "Authorization: Bearer ${KEY}"
       ]
-    }
-  }
-}`,
-  },
-  {
-    id: "cursor",
-    label: "Cursor",
-    caption: "Add to ~/.cursor/mcp.json (or .cursor/mcp.json in a project).",
-    snippet: (url, auth, server) =>
-      auth === "oauth"
-        ? cursorMcpSnippet(url, server)
-        : `{
-  "mcpServers": {
-    "${server}": {
-      "url": "${url}",
-      "headers": { "Authorization": "Bearer ${KEY}" }
     }
   }
 }`,

@@ -13,11 +13,7 @@ import { resolveConnection } from "./control/connection-resolution";
 import { connectControlDb } from "./control/db";
 import { entitlementsOf, QuotaExceededError } from "./control/entitlements";
 import { resolveServerEnv, type ServerEnv } from "./control/env.server";
-import {
-  autoBindPendingConnect,
-  connectionClaimKey,
-  readSelection,
-} from "./control/oauth-selection";
+import { connectionClaimKey, readSelection } from "./control/oauth-selection";
 import {
   bumpOrgProjectsEpoch,
   materializeDefaultProject,
@@ -252,20 +248,10 @@ function create(env: Env, runtime: ServerEnv) {
               if (state?.query === undefined) return false;
               const db = connectControlDb(env.DB);
               const picked = await readSelection(db, state.query, user.id);
-              if (picked !== undefined) return false;
-              // Day-1 happy path: owner clicked "Connect this corpus"
-              // moments ago → bind that Connection and skip the picker.
-              // Multi-corpus / no-intent flows still land on /connect/select.
-              const auto = await autoBindPendingConnect(db, {
-                query: state.query,
-                userId: user.id,
-                resolve: async (connectionId) =>
-                  (await resolveConnection(db, {
-                    userId: user.id,
-                    connectionId,
-                  })) !== undefined,
-              });
-              return auto === undefined;
+              // No handshake-keyed selection yet → land on /connect/select.
+              // pending_connect is userId-keyed and only pre-selects there;
+              // binding it here would cross-bind concurrent handshakes.
+              return picked === undefined;
             },
             // Read (never delete — fires more than once per flow) the
             // picked Connection. Undefined ⇒ no reference ⇒ no claim ⇒

@@ -38,14 +38,13 @@ import { assertServerContext as srv } from "@/lib/server-context";
 const CONNECTION_ADMIN_MSG =
   "Only an organization owner can manage Connections";
 
-// Primary action behind "Connect this corpus" on the Corpus
-// page. Reuse-or-create the canonical Connection for (projectId,
-// corpusSlug) and write the userId-keyed pending-connect intent.
-// On the day-1 happy path, OAuth postLogin auto-binds that intent
-// (see autoBindPendingConnect) and skips `/connect/select`. The picker
-// remains for multi-corpus / no-intent flows. One D1 write (or a no-op
-// reuse), so the Connection is never a precondition the user satisfies
-// before connecting an agent.
+// Primary action behind "Connect this corpus" / "Connect agent".
+// Reuse-or-create the canonical Connection for (projectId, corpusSlug)
+// and write the userId-keyed pending-connect intent so /connect/select
+// pre-selects that Connection. Binding still requires the owner to
+// confirm on the picker (pending is not handshake-keyed — see
+// schema/app.ts). One D1 write (or a no-op reuse), so the Connection
+// is never a precondition the user satisfies before connecting an agent.
 export type ConnectCorpusResult = Readonly<{
   connectionId: ConnectionId;
   corpusSlug: CorpusSlug;

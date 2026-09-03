@@ -83,4 +83,98 @@ describe("corpus mcp add", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("merges into an existing Cursor mcp.json without dropping siblings", async () => {
+    const home = await mkdtemp(join(tmpdir(), "corpus-mcp-"));
+    try {
+      const path = join(home, ".cursor", "mcp.json");
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(join(home, ".cursor"), { recursive: true });
+      await writeFile(
+        path,
+        JSON.stringify({
+          mcpServers: { other: { url: "https://other.example/mcp" } },
+        }),
+      );
+      await mcpAdd(
+        [
+          "--client",
+          "cursor",
+          "--name",
+          "corpus-default",
+          "--url",
+          "https://x.test",
+        ],
+        { home, cwd: home },
+      );
+      const raw = JSON.parse(await readFile(path, "utf8")) as {
+        mcpServers: Record<string, { url: string }>;
+      };
+      expect(raw.mcpServers.other?.url).toBe("https://other.example/mcp");
+      expect(raw.mcpServers["corpus-default"]?.url).toBe("https://x.test/mcp");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a non-object JSON file as empty and still writes", async () => {
+    const home = await mkdtemp(join(tmpdir(), "corpus-mcp-"));
+    try {
+      const path = join(home, ".cursor", "mcp.json");
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(join(home, ".cursor"), { recursive: true });
+      await writeFile(path, "[]\n");
+      await mcpAdd(
+        [
+          "--client",
+          "cursor",
+          "--name",
+          "corpus-default",
+          "--url",
+          "https://x.test",
+        ],
+        { home, cwd: home },
+      );
+      const raw = JSON.parse(await readFile(path, "utf8")) as {
+        mcpServers: Record<string, { url: string }>;
+      };
+      expect(raw.mcpServers["corpus-default"]?.url).toBe("https://x.test/mcp");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unparseable JSON rather than silently clobbering", async () => {
+    const home = await mkdtemp(join(tmpdir(), "corpus-mcp-"));
+    try {
+      const path = join(home, ".cursor", "mcp.json");
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(join(home, ".cursor"), { recursive: true });
+      await writeFile(path, "not-json");
+      await expect(
+        mcpAdd(
+          [
+            "--client",
+            "cursor",
+            "--name",
+            "corpus-default",
+            "--url",
+            "https://x.test",
+          ],
+          { home, cwd: home },
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unknown --client", async () => {
+    await expect(
+      mcpAdd(["--client", "windsurf"], {
+        home: "/tmp",
+        cwd: "/tmp",
+      }),
+    ).rejects.toThrow(/usage: corpus mcp add/);
+  });
 });

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Field } from "@/components/Field";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { cardClass, EmptyState, listSurface } from "@/components/ui/Surface";
+import { cardClass, listSurface } from "@/components/ui/Surface";
 import { asProjectId, type ProjectId } from "@/ids";
 import { track } from "@/lib/analytics";
 import { WHAT_IS_A_CORPUS } from "@/lib/copy";
@@ -52,45 +52,35 @@ function Corpora() {
         <CreateForm projectId={projectId} onCancel={() => setCreating(false)} />
       )}
 
-      {corpora.length === 0 && !creating ? (
-        <EmptyState>
-          <span className="mb-1 block font-medium text-slate-900">
-            No corpora yet
-          </span>
-          Create one, then attach the documents an agent should read.
-        </EmptyState>
-      ) : (
-        corpora.length > 0 && (
-          // The house list surface (same as Changes and the dashboard):
-          // one bordered panel, divided rows — reads as a real list, not
-          // a stretched empty slab.
-          <ul className={listSurface("divide-y divide-slate-200")}>
-            {corpora.map((c: CorpusListItem) => (
-              <li key={c.slug}>
-                <Link
-                  to="/p/$projectId/corpora/$slug"
-                  params={{ projectId, slug: c.slug }}
-                  className="flex items-center gap-4 px-4 py-3 hover:bg-slate-50"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-base font-medium text-slate-900">
-                      {c.name}
-                    </div>
-                    {c.description !== undefined && (
-                      <div className="mt-0.5 truncate text-sm text-slate-500">
-                        {c.description}
-                      </div>
-                    )}
+      {!creating && (
+        // Default corpus is always present (ensureDefaultCorpus), so the
+        // old "No corpora yet" empty is unreachable. List surface only.
+        <ul className={listSurface("divide-y divide-slate-200")}>
+          {corpora.map((c: CorpusListItem) => (
+            <li key={c.slug}>
+              <Link
+                to="/p/$projectId/corpora/$slug"
+                params={{ projectId, slug: c.slug }}
+                className="flex items-center gap-4 px-4 py-3 hover:bg-slate-50"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-base font-medium text-slate-900">
+                    {c.name}
                   </div>
-                  <span className="shrink-0 text-sm text-slate-500 tabular-nums">
-                    {c.documentCount} document
-                    {c.documentCount === 1 ? "" : "s"}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )
+                  {c.description !== undefined && (
+                    <div className="mt-0.5 truncate text-sm text-slate-500">
+                      {c.description}
+                    </div>
+                  )}
+                </div>
+                <span className="shrink-0 text-sm text-slate-500 tabular-nums">
+                  {c.documentCount} document
+                  {c.documentCount === 1 ? "" : "s"}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

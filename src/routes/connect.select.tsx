@@ -39,9 +39,9 @@ export const Route = createFileRoute("/connect/select")({
 
 function SelectConnection() {
   const { connections, pendingConnectionId } = Route.useLoaderData();
-  // Pre-select the userId-keyed pending-connect hint when the happy-path
-  // auto-bind did not fire (multi-corpus / expired intent / direct OAuth).
-  // NOT auto-bound here — the user still confirms; the hint is a picker default.
+  // Pre-select the userId-keyed pending-connect hint when the owner
+  // just clicked "Connect this corpus". NOT auto-bound — the user still
+  // confirms; the hint is a picker default only.
   const initial =
     pendingConnectionId !== undefined &&
     connections.some((c: PickerRow) => c.connectionId === pendingConnectionId)

@@ -12,10 +12,11 @@ that Corpus's documents. Switching what an agent sees means editing
 the Corpus (or pointing it at a different Connection), not the
 credential.
 
-The fastest path is **"Connect agent"** on Home / Get Started, or
+The fastest path is **"Connect agent"** on a Home corpus card, or
 **"Connect this corpus"** on a Corpus page — that creates (or reuses)
-the Connection, shows an OAuth snippet (or `corpus mcp add`), and on
-first agent sign-in binds that Corpus automatically (no second picker).
+the Connection and shows an OAuth snippet (or `corpus mcp add`). On
+first agent sign-in you land on the Connection picker; the corpus you
+just chose is pre-selected — confirm it, then consent.
 
 ## Two ways to authenticate
 
@@ -45,9 +46,8 @@ claude mcp add \
 ```
 
 Then run `/mcp` inside Claude Code and complete the browser sign-in the
-first time. If you started from **Connect this corpus**, consent is
-enough — that Corpus is already bound. Otherwise you'll pick a Corpus
-once. For API-key auth, add
+first time. You'll pick a Corpus once (pre-selected if you started from
+**Connect this corpus**), then consent. For API-key auth, add
 `--header "Authorization: Bearer <YOUR_API_KEY>"` and skip the consent
 step (the key is already bound to a Connection).
 

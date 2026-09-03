@@ -6,14 +6,15 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
-import { Plug, Plus } from "lucide-react";
+import { FilePlus, Plug, Plus, Upload } from "lucide-react";
 
+import { EXAMPLE_GRAPH } from "@/components/project-graph/layout";
+import { ProjectGraph } from "@/components/project-graph/ProjectGraph";
 import { Button, buttonStyles } from "@/components/ui/Button";
 import { RelativeTime } from "@/components/ui/DateTime";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState, listSurface } from "@/components/ui/Surface";
 import { showToast } from "@/components/ui/Toast";
-import { GetStarted } from "@/features/onboarding/GetStarted";
 import {
   asCorpusSlug,
   asProjectId,
@@ -21,6 +22,7 @@ import {
   type ProjectId,
 } from "@/ids";
 import { actor, humanize, subject } from "@/lib/changes-format";
+import { TAGLINE, TAGLINE_LONG } from "@/lib/copy";
 import { useSubmit } from "@/lib/forms";
 import { type Change, getChanges } from "@/lib/server/changes";
 import { connectThisCorpus } from "@/lib/server/connections";
@@ -52,31 +54,20 @@ function Dashboard() {
   const shell = layout.useLoaderData();
   const isOwner = shell.current.role === "owner";
 
-  const defaultConnected =
-    (data.connectionsByCorpus[data.defaultCorpusSlug] ?? 0) > 0;
-  // Stay on the checklist until there is at least one document AND a
-  // Connection for the default corpus — uploading alone used to drop
-  // the connect steps.
-  const needsOnboarding = data.documents.length === 0 || !defaultConnected;
-
-  if (needsOnboarding) {
-    const corpora = data.corpora.map((c: CorpusMeta) => ({
-      ...c,
-      documentCount: data.members.filter(
-        (m: CorpusMember) => m.corpusSlug === c.slug,
-      ).length,
-    }));
+  // Default corpus is always materialized — emptiness is "no documents".
+  // A Connection row is not "an agent connected"; do not gate Home on it.
+  if (data.documents.length === 0) {
     return (
-      <GetStarted
+      <SeedChooser
         projectId={projectId}
-        defaultCorpusSlug={data.defaultCorpusSlug}
-        mcpUrl={data.mcpUrl}
-        isOwner={isOwner}
-        corpora={corpora}
-        folders={data.folders}
-        documents={data.documents.map((d) => ({ path: d.slug }))}
-        alreadyPrepared={defaultConnected}
-        onUploadComplete={() => void router.invalidate()}
+        onResult={(didSeed) => {
+          if (didSeed) {
+            showToast(
+              "Example loaded — edit any document to see linked corpora update.",
+            );
+          }
+          void router.invalidate();
+        }}
       />
     );
   }
@@ -178,38 +169,7 @@ function Home(
           ))}
         </ol>
       )}
-
-      <LoadExampleFooter projectId={props.projectId} />
     </div>
-  );
-}
-
-function LoadExampleFooter(
-  props: Readonly<{ projectId: ProjectId }>,
-): React.ReactElement {
-  const router = useRouter();
-  const { pending, error, run } = useSubmit(async () => {
-    const r = await seedExample({ data: { projectId: props.projectId } });
-    if (r.seeded) {
-      showToast(
-        "Example loaded — explore how one document feeds multiple corpora.",
-      );
-    }
-    void router.invalidate();
-  });
-  return (
-    <p className="mt-10 text-center text-sm text-slate-500">
-      New to Corpus?{" "}
-      <button
-        type="button"
-        disabled={pending}
-        onClick={() => void run()}
-        className="text-blue-600 hover:text-blue-700 disabled:opacity-50"
-      >
-        {pending ? "Loading…" : "Load the example project"}
-      </button>
-      {error && <span className="mt-1 block text-red-600">{error}</span>}
-    </p>
   );
 }
 
@@ -288,6 +248,8 @@ function CorpusCard(
     agentCount === 0
       ? "no agents"
       : `${agentCount} agent${agentCount === 1 ? "" : "s"}`;
+  // agentCount is Connection rows for this corpus — a prep signal for
+  // owners, not proof an agent completed OAuth.
   const showConnect = props.isOwner && agentCount === 0;
 
   return (
@@ -352,5 +314,68 @@ function ConnectCorpusButton(
       <Plug className="size-4" />
       {pending ? "Connecting…" : "Connect agent"}
     </Button>
+  );
+}
+
+// Empty project: the ghost fan-out graph IS the empty state — the
+// product's one memorable thing (one document → many corpora → many
+// agents, no copies) is shown, not described. "Load our example" is the
+// satisficing primary; Upload / Create are the other two doors. Seedable
+// while the only corpus is the empty default.
+function SeedChooser(
+  props: Readonly<{
+    projectId: ProjectId;
+    onResult: (didSeed: boolean) => void;
+  }>,
+) {
+  const { current } = layout.useLoaderData();
+  const { pending, error, run } = useSubmit(async () => {
+    const r = await seedExample({ data: { projectId: props.projectId } });
+    props.onResult(r.seeded);
+  });
+
+  return (
+    <div>
+      <div className="mb-6">
+        <p className="text-sm font-medium text-slate-500">
+          {current.project.name} is empty
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-slate-900">
+          {TAGLINE}
+        </h1>
+        <p className="mt-1 max-w-2xl text-base text-slate-500">
+          {TAGLINE_LONG} Start one of three ways:
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button disabled={pending} onClick={() => void run()}>
+            {pending ? "Loading…" : "Load our example"}
+          </Button>
+          <Link
+            to="/p/$projectId/import"
+            params={{ projectId: props.projectId }}
+            className={buttonStyles(
+              "secondary",
+              "inline-flex items-center gap-2",
+            )}
+          >
+            <Upload className="size-4" aria-hidden />
+            Upload documents
+          </Link>
+          <Link
+            to="/p/$projectId/documents/new"
+            params={{ projectId: props.projectId }}
+            className={buttonStyles(
+              "secondary",
+              "inline-flex items-center gap-2",
+            )}
+          >
+            <FilePlus className="size-4" aria-hidden />
+            Create a document
+          </Link>
+        </div>
+        {error && <p className="mt-3 text-base text-red-600">{error}</p>}
+      </div>
+      <ProjectGraph {...EXAMPLE_GRAPH} />
+    </div>
   );
 }

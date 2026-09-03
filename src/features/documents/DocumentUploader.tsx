@@ -27,6 +27,7 @@ import {
   dropHasFiles,
   placeEntries,
 } from "@/lib/upload/collect";
+import { importLinkForUpload } from "@/lib/upload/import-link";
 import type { ImportCorpusLink } from "@/project-store";
 
 // The whole upload flow as one component, shared between the dedicated
@@ -121,9 +122,7 @@ export function DocumentUploader(
   const [newName, setNewName] = useState("");
   const [keepWrapper, setKeepWrapper] = useState(true);
   const [link, setLink] = useState<ImportCorpusLink>(() =>
-    autoLinkCorpus === true && defaultCorpusSlug !== undefined
-      ? { mode: "existing", slug: defaultCorpusSlug }
-      : { mode: "none" },
+    importLinkForUpload({ autoLinkCorpus, defaultCorpusSlug }),
   );
   const [dragging, setDragging] = useState(false);
   const filesRef = useRef<HTMLInputElement>(null);
@@ -131,6 +130,8 @@ export function DocumentUploader(
 
   // A fresh drop is a fresh upload: clear the destination + link choices
   // so the previous upload's selections never silently carry over.
+  // autoLinkCorpus must survive the reset — otherwise the copy lies and
+  // docs land unattached (Documents empty promises a link).
   function ingest(c: Collected) {
     // A drop the browser handed us files for, but none were readable text
     // (e.g. only binaries) — surface the picker fallback.
@@ -145,7 +146,7 @@ export function DocumentUploader(
     setMakeNew(false);
     setNewName("");
     setKeepWrapper(true);
-    setLink({ mode: "none" });
+    setLink(importLinkForUpload({ autoLinkCorpus, defaultCorpusSlug }));
     setCollected(c);
   }
 
