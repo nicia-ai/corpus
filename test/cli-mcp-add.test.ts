@@ -169,6 +169,25 @@ describe("corpus mcp add", () => {
     }
   });
 
+  it("does not double /mcp when CORPUS_URL already ends with it", async () => {
+    const home = await mkdtemp(join(tmpdir(), "corpus-mcp-"));
+    try {
+      const r = await mcpAdd(
+        ["--client", "claude-code", "--name", "corpus-hr"],
+        {
+          home,
+          cwd: home,
+          corpusUrl: "https://corpus.example/mcp",
+        },
+      );
+      expect(r.command).toBe(
+        "claude mcp add --transport http corpus-hr https://corpus.example/mcp",
+      );
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("rejects an unknown --client", async () => {
     await expect(
       mcpAdd(["--client", "windsurf"], {

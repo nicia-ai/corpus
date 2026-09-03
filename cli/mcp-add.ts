@@ -105,9 +105,11 @@ export async function mcpAdd(
   }>,
 ): Promise<McpAddResult> {
   const parsed = parseArgs(args);
+  // Same mcpUrl normalizer as --url: CORPUS_URL may already end in /mcp
+  // (corpus setup / docs), so never append blindly.
   const url =
     env.corpusUrl !== undefined && !args.includes("--url")
-      ? `${env.corpusUrl.replace(/\/$/u, "")}/mcp`
+      ? mcpUrl(env.corpusUrl)
       : parsed.url;
 
   if (parsed.client === "claude-code") {

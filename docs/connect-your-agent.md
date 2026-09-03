@@ -137,7 +137,7 @@ the Connection's bound Corpus:
 | `reply_to_proposal`     | Reply inside one of this caller's still-open proposals. It cannot access document comments, resolve feedback, or act on another caller's proposal.                                |
 
 The same data is also exposed as MCP **resources**:
-`corpus://<slug>`, `corpus://<slug>/outline`, and
+`collection://<slug>`, `collection://<slug>/outline`, and
 `document://<slug>` — handy for clients that browse resources rather
 than call tools. Resources are scoped the same way; you won't see
 slugs outside the bound Corpus.
@@ -172,7 +172,7 @@ immutable audit record rather than silently carrying messages into new work.
 For anything beyond a small rules-style Corpus, toggle **Always
 include** on for the documents the agent must always start from and
 leave the rest on-demand. `read_collection` returns the always-included
-set; the agent browses `corpus://<slug>/outline` and calls
+set; the agent browses `collection://<slug>/outline` and calls
 `read_document` for on-demand documents when relevant. A large
 always-include set dilutes the agent's attention and burns its window,
 so keep it small (or raise the corpus's always-include budget if

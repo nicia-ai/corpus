@@ -69,7 +69,7 @@ everything-corpus. See [Recipes](./recipes.md) for how to split.
 version, plus a provenance manifest.
 
 The remaining (on-demand) documents are exposed through the structured
-**outline** — the `corpus://<slug>/outline` resource: the document
+**outline** — the `collection://<slug>/outline` resource: the document
 list with derived paths and a resolved link graph. The agent reads
 individual on-demand documents with `read_document` as it needs them,
 rather than ingesting everything at once.

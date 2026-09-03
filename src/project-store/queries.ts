@@ -254,8 +254,8 @@ export async function readCorpusProjection(
           "",
           "---",
           referenceCount === 1
-            ? `1 reference document is available in corpus://${corpusSlug}/outline. Read it with read_document when relevant.`
-            : `${pluralize(referenceCount, "reference document")} are available in corpus://${corpusSlug}/outline. Read them with read_document when relevant.`,
+            ? `1 reference document is available in collection://${corpusSlug}/outline. Read it with read_document when relevant.`
+            : `${pluralize(referenceCount, "reference document")} are available in collection://${corpusSlug}/outline. Read them with read_document when relevant.`,
         ].join("\n")
       : assembled.corpus;
   return {

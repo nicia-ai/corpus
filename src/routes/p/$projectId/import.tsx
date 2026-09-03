@@ -8,6 +8,7 @@ import { getCorpusList } from "@/lib/server/corpora";
 import { getDocumentList } from "@/lib/server/documents";
 import { getFolderList } from "@/lib/server/folders";
 import type { ImportSummary } from "@/project-store";
+import { DEFAULT_CORPUS_SLUG } from "@/store/domain/default-corpus";
 
 export const Route = createFileRoute("/p/$projectId/import")({
   component: Import,
@@ -36,6 +37,10 @@ function Import() {
   const { corpora, folders, documents } = Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
   const navigate = useNavigate();
+  // Home empty → Upload documents lands here. Mirror the Documents empty
+  // state: imported files join the default corpus so MCP can see them.
+  const defaultCorpus =
+    corpora.find((c) => c.slug === DEFAULT_CORPUS_SLUG) ?? corpora[0];
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -48,6 +53,12 @@ function Import() {
         corpora={corpora}
         folders={folders}
         documents={documents}
+        {...(defaultCorpus === undefined
+          ? {}
+          : {
+              defaultCorpusSlug: defaultCorpus.slug,
+              autoLinkCorpus: true,
+            })}
         onComplete={(r) => {
           // Land on Documents so the freshly-imported folder is visible,
           // with the outcome flashed — no bespoke "upload complete" screen.

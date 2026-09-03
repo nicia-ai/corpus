@@ -413,6 +413,7 @@ describe("MCP JSON-RPC dispatcher", () => {
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug)).toEqual(["brand"]);
     expect(r.corpus).toContain("reference document");
+    expect(r.corpus).toContain("collection://sales/outline");
 
     const outline = await w.corpusOutline(colSlug("sales"));
     expect(outline.found).toBe(true);

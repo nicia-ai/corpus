@@ -27,7 +27,7 @@ Each corpus has its own always-include budget (default 8,000
 tokens; raise it per corpus if you're feeding a larger context
 window). Past the budget the meter warns — a bloated always-include set
 dilutes the agent's attention and burns the window before it does any
-work. On-demand documents stay in `corpus://<slug>/outline` and are
+work. On-demand documents stay in `collection://<slug>/outline` and are
 pulled by path only when relevant.
 
 When a corpus gets heavy:
