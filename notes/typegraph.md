@@ -115,7 +115,7 @@ have. Run them by hand against a suspect database; do not wire them into
 
 ## Upstream gaps being tracked
 
-- **No `bulkHardDelete`** (still absent as of 0.54). The store surface
+- **No `bulkHardDelete`** (still absent as of 0.56). The store surface
   exposes only a soft `bulkDelete`, so `VersionRepo.reapDocumentVersions`
   and `FolderRepo`'s subtree delete loop `hardDelete` per node/edge. 0.53
   made `bulkDelete` a single atomic exchange, which does not help a hard
@@ -148,3 +148,26 @@ have. Run them by hand against a suspect database; do not wire them into
   (`BulkOperationHookContext["operation"]` gains `"compareAndSet"`) is
   inert: Corpus registers no TypeGraph hooks. `compareAndSet()` is not
   the OCC mechanism to switch to — see `AGENTS.md`.
+- **0.55** — source-dependent edge `to` maps and explicit
+  `validFrom: null`. Corpus edges are already single-pair kinds
+  (`includes` Collection→Document, `includes_folder` Collection→Folder,
+  etc.), so the Cartesian-product problem the map solves does not
+  appear; collapsing those into one kind would be a schema redesign, not
+  a free upgrade win. Corpus still never states validity windows — the
+  `validFrom: null` path stays unused (same posture as
+  `repairInvertedValidityWindows` above). `StaleVersionError` on
+  concurrent identity-repair vs schema migration is covered by staying
+  on `ensureStore`.
+- **0.56** — durable candidate write-set review
+  (`planCandidateWriteSetReview` /
+  `revalidateCandidateWriteSetReview` in `@nicia-ai/typegraph/graph-merge`)
+  plus `beforeApply` / `afterApply` on reviewed plan apply, and
+  `tx.getEdgeCollectionOrThrow(kind)` for generic edge dispatch. Corpus
+  has no `tx.edges[kind]` casts, so the lookup migration is a no-op.
+  Candidate review is the interesting surface for agent proposals
+  (digest-checked evidence, compatible / changed / incompatible
+  revalidation, fence + app writes in one tx) — but today's
+  `suggest_edit` path is markdown hunk review over `prose-diff`, not a
+  graph merge write-set, and the ledger-enlisted `ProjectStore.write()`
+  already owns apply atomicity. Tracked as a possible future redesign
+  of proposal apply, not adopted on this bump.
