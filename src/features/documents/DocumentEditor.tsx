@@ -671,7 +671,7 @@ export function DocumentEditor({
   } = useSubmit(async () => {
     const ok = await confirmDialog({
       title: `Delete "${head.title}"?`,
-      body: "It is removed from all collections and hidden. History is kept.",
+      body: "It is removed from all corpora and hidden. History is kept.",
       confirmLabel: "Delete",
       tone: "danger",
     });
@@ -1114,7 +1114,7 @@ function collabToastMessage(
     case "collection.attached":
     case "collection.detached":
     case "collection.reordered":
-      // Project/collection-level changes don't warrant a per-document toast.
+      // Project/corpus-level changes don't warrant a per-document toast.
       return undefined;
     default: {
       // Exhaustiveness: a new RealtimeChange action must be handled here (or

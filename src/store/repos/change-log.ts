@@ -8,7 +8,7 @@ export type RecentChange = Readonly<{
   id: number;
   eventType: string;
   documentSlug: string | null;
-  collectionSlug: string | null;
+  corpusSlug: string | null;
   beforeJson: string | null;
   afterJson: string | null;
   changedAt: string;
@@ -19,7 +19,7 @@ const RECENT_CHANGES_MAX = 200;
 
 // The append-only operational change-event log as a repository. This is
 // NOT content lineage — version history is the DocumentVersion /
-// CollectionVersion chain. Constructed with whichever do-sqlite handle is
+// CorpusVersion chain. Constructed with whichever do-sqlite handle is
 // active so the same code is correct inside and outside a transaction.
 // All Drizzle column noise lives here.
 export class ChangeLog {
@@ -40,7 +40,7 @@ export class ChangeLog {
     return this.insert({
       eventType: change.kind,
       documentSlug: change.slug,
-      collectionSlug: null,
+      corpusSlug: null,
       beforeJson: null,
       afterJson: JSON.stringify(
         compact({
@@ -56,11 +56,11 @@ export class ChangeLog {
     });
   }
 
-  appendCollection(change: CollectionChange): Promise<number> {
+  appendCorpus(change: CollectionChange): Promise<number> {
     return this.insert({
       eventType: change.kind,
       documentSlug: change.documentSlug ?? null,
-      collectionSlug: change.collectionSlug,
+      corpusSlug: change.collectionSlug,
       beforeJson:
         change.before === undefined ? null : JSON.stringify(change.before),
       afterJson:
@@ -76,7 +76,7 @@ export class ChangeLog {
         id: changeEvents.id,
         eventType: changeEvents.eventType,
         documentSlug: changeEvents.documentSlug,
-        collectionSlug: changeEvents.collectionSlug,
+        corpusSlug: changeEvents.corpusSlug,
         beforeJson: changeEvents.beforeJson,
         afterJson: changeEvents.afterJson,
         changedAt: changeEvents.changedAt,

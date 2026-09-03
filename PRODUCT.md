@@ -11,7 +11,7 @@ maintain the shared truth their agents read. They already wrote these docs
 scattered across repos, gists, Notion, and laptops; every agent carries its
 own drifting copy and no one can see the full set. Their context is a
 browser, not a terminal — no Git, no markdown toolchain. The job: author,
-version, and curate markdown documents; group them into ordered collections;
+version, and curate markdown documents; group them into ordered corpora;
 hand agents a single live, approved source over MCP. They review agent
 proposals, never let an agent auto-write.
 
@@ -20,7 +20,7 @@ terminal or CI against the same optimistic-concurrency contract as the web
 editor. Same data, different surface.
 
 **Tertiary — the agents themselves**, read-only over MCP, credential-scoped
-to one project's bound collection. They read the current approved version and
+to one project's bound corpus. They read the current approved version and
 propose edits a human accepts per hunk. They never see review state.
 
 ## Product Purpose
@@ -33,7 +33,7 @@ source of truth instead of stale prompt files copied into every agent.
 
 Success: one approved version of every document, maintained by non-engineers,
 read live by agents over MCP with per-project OAuth/API-key isolation. One
-edit updates every collection and every agent that reads it at once (documents
+edit updates every corpus and every agent that reads it at once (documents
 are graph nodes shared by reference, not copied). Never a lost write —
 optimistic-concurrency conflict detection turns a racing save into a 409, and a
 verifiable append-only version ledger lets any version be restored. Agents
@@ -88,9 +88,9 @@ clone.
    architecture, not a setting — design it into every flow, not behind a
    toggle.
 5. **One source, many readers.** Documents are shared by reference, not
-   copied — one edit propagates to every collection and every agent at once.
+   copied — one edit propagates to every corpus and every agent at once.
    The UI makes that linkage visible and the sharing unambiguous: the "In N
-   collections" fan-out is the product's signature, not a footnote.
+   corpora" fan-out is the product's signature, not a footnote.
 
 ## Accessibility & Inclusion
 

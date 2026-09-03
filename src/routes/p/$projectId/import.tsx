@@ -4,21 +4,22 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { showToast } from "@/components/ui/Toast";
 import { DocumentUploader } from "@/features/documents/DocumentUploader";
 import { asProjectId } from "@/ids";
-import { getCollectionList } from "@/lib/server/collections";
+import { getCorpusList } from "@/lib/server/corpora";
 import { getDocumentList } from "@/lib/server/documents";
 import { getFolderList } from "@/lib/server/folders";
 import type { ImportSummary } from "@/project-store";
+import { DEFAULT_CORPUS_SLUG } from "@/store/domain/default-corpus";
 
 export const Route = createFileRoute("/p/$projectId/import")({
   component: Import,
   loader: async ({ params }) => {
     const { projectId } = params;
-    const [collections, folders, documents] = await Promise.all([
-      getCollectionList({ data: { projectId } }),
+    const [corpora, folders, documents] = await Promise.all([
+      getCorpusList({ data: { projectId } }),
       getFolderList({ data: { projectId } }),
       getDocumentList({ data: { projectId } }),
     ]);
-    return { collections, folders, documents };
+    return { corpora, folders, documents };
   },
 });
 
@@ -33,9 +34,13 @@ function importSummary(s: ImportSummary): string {
 }
 
 function Import() {
-  const { collections, folders, documents } = Route.useLoaderData();
+  const { corpora, folders, documents } = Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
   const navigate = useNavigate();
+  // Home empty → Upload documents lands here. Mirror the Documents empty
+  // state: imported files join the default corpus so MCP can see them.
+  const defaultCorpus =
+    corpora.find((c) => c.slug === DEFAULT_CORPUS_SLUG) ?? corpora[0];
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -45,9 +50,15 @@ function Import() {
       />
       <DocumentUploader
         projectId={projectId}
-        collections={collections}
+        corpora={corpora}
         folders={folders}
         documents={documents}
+        {...(defaultCorpus === undefined
+          ? {}
+          : {
+              defaultCorpusSlug: defaultCorpus.slug,
+              autoLinkCorpus: true,
+            })}
         onComplete={(r) => {
           // Land on Documents so the freshly-imported folder is visible,
           // with the outcome flashed — no bespoke "upload complete" screen.

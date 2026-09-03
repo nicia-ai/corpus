@@ -1,5 +1,5 @@
 import type { EventLogStore } from "@/event-log-store";
-import { type CollectionSlug, parseCallerRef } from "@/ids";
+import { type CorpusSlug, parseCallerRef } from "@/ids";
 import {
   decodeEvent,
   type InstrumentationEvent,
@@ -33,7 +33,7 @@ export type RecentEventRow = Readonly<{
 }>;
 
 export type ActivityDTO = Readonly<{
-  collectionSlug: string;
+  corpusSlug: string;
   contextName: string;
   mcpUrl: string;
   lastEditAt: string | undefined;
@@ -46,7 +46,7 @@ export type ActivityDTO = Readonly<{
 }>;
 
 type ActivityStore = Readonly<{
-  collectionStructure: (slug: CollectionSlug) => Promise<
+  corpusStructure: (slug: CorpusSlug) => Promise<
     | { found: false }
     | {
         found: true;
@@ -106,23 +106,23 @@ function describeEvent(
     case "document.filename_changed":
       return `${who(event.changedBy)} changed filename of ${event.slug}`;
     case "collection.created":
-      return `${who(event.changedBy)} created collection ${event.collectionSlug}`;
+      return `${who(event.changedBy)} created corpus ${event.corpusSlug}`;
     case "collection.updated":
-      return `${who(event.changedBy)} edited collection ${event.collectionSlug}`;
+      return `${who(event.changedBy)} edited corpus ${event.corpusSlug}`;
     case "collection.attached": {
       const what = event.documentSlug ?? event.folderSlug ?? "a member";
-      return `${who(event.changedBy)} attached ${what} to ${event.collectionSlug}`;
+      return `${who(event.changedBy)} attached ${what} to ${event.corpusSlug}`;
     }
     case "collection.detached": {
       const what = event.documentSlug ?? event.folderSlug ?? "a member";
-      return `${who(event.changedBy)} detached ${what} from ${event.collectionSlug}`;
+      return `${who(event.changedBy)} detached ${what} from ${event.corpusSlug}`;
     }
     case "collection.reordered":
-      return `${who(event.changedBy)} reordered ${event.collectionSlug}`;
+      return `${who(event.changedBy)} reordered ${event.corpusSlug}`;
     case "read":
       return event.kind === "first"
-        ? `${labelFor(event.callerRef).callerLabel} first read of ${event.collectionSlug}`
-        : `${labelFor(event.callerRef).callerLabel} read ${event.collectionSlug} after an edit`;
+        ? `${labelFor(event.callerRef).callerLabel} first read of ${event.corpusSlug}`
+        : `${labelFor(event.callerRef).callerLabel} read ${event.corpusSlug} after an edit`;
     case "caller.connected":
       return `${labelFor(event.callerRef).callerLabel} connected`;
     case "prompt.answered":
@@ -203,10 +203,10 @@ function tryProjectionInput(
 
 function includesActivityContext(
   evt: InstrumentationEvent,
-  slug: CollectionSlug,
+  slug: CorpusSlug,
 ): boolean {
   return (
-    ("collectionSlug" in evt && evt.collectionSlug === slug) ||
+    ("corpusSlug" in evt && evt.corpusSlug === slug) ||
     evt.type === "caller.connected" ||
     evt.type === "prompt.answered" ||
     evt.type === "document.created" ||
@@ -222,9 +222,9 @@ export type NameResolver = (
   ids: readonly string[],
 ) => Promise<ReadonlyMap<string, string>>;
 
-export async function buildCollectionActivity(
+export async function buildCorpusActivity(
   args: Readonly<{
-    slug: CollectionSlug;
+    slug: CorpusSlug;
     mcpUrl: string;
     store: ActivityStore;
     log: EventLogPort;
@@ -232,7 +232,7 @@ export async function buildCollectionActivity(
   }>,
 ): Promise<ActivityDTO> {
   const { slug, mcpUrl, store, log, resolveNames } = args;
-  const structure = await store.collectionStructure(slug);
+  const structure = await store.corpusStructure(slug);
   const currentVersions = new Map<string, number>();
   let contextName: string = slug;
   if (structure.found) {
@@ -252,8 +252,8 @@ export async function buildCollectionActivity(
 
   const agents: ActivityAgentRow[] = [];
   const distinctAgentCallers = new Set<string>();
-  for (const s of projection.perCallerCollection.values()) {
-    if (s.collectionSlug !== slug) continue;
+  for (const s of projection.perCallerCorpus.values()) {
+    if (s.corpusSlug !== slug) continue;
     const { callerLabel, authPath } = labelFor(s.callerRef);
     const { status, staleVersionMap } = deriveStatus(
       s.versionCapturedAtRead,
@@ -340,7 +340,7 @@ export async function buildCollectionActivity(
     isActivated(distinctEditors, distinctAgentCallers.size, hasPostInviteEdit);
 
   return {
-    collectionSlug: slug,
+    corpusSlug: slug,
     contextName,
     mcpUrl,
     lastEditAt,

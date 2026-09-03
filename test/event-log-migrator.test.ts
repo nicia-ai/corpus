@@ -43,7 +43,7 @@ describe("EventLogStore Drizzle migrator", () => {
       projectId: "proj-A",
       idempotencyKey: "read:agent-X:ctx-Y:v1",
       eventType: "read.first",
-      payload: JSON.stringify({ caller: "apikey:k1", collectionSlug: "ctx-Y" }),
+      payload: JSON.stringify({ caller: "apikey:k1", corpusSlug: "ctx-Y" }),
     });
     expect(id2).toBeGreaterThan(id1);
 

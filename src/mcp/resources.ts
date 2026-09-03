@@ -1,4 +1,4 @@
-import { asCollectionSlug, asDocumentSlug } from "../ids";
+import { asCorpusSlug, asDocumentSlug } from "../ids";
 
 import type { McpExecutor } from "./executor";
 import { strField } from "./params";
@@ -16,7 +16,7 @@ export async function listResources(
   exec: McpExecutor,
 ): Promise<unknown> {
   const [collections, documents] = await Promise.all([
-    exec.listCollections(),
+    exec.listCorpora(),
     exec.listDocuments(),
   ]);
   return ok(id, {
@@ -47,10 +47,10 @@ export async function readResource(
 ): Promise<unknown> {
   const uri = strField(params, "uri");
   if (uri.startsWith(COLLECTION_URI) && uri.endsWith(OUTLINE_SUFFIX)) {
-    const slug = asCollectionSlug(
+    const slug = asCorpusSlug(
       uri.slice(COLLECTION_URI.length, uri.length - OUTLINE_SUFFIX.length),
     );
-    const o = await exec.collectionOutline(slug);
+    const o = await exec.corpusOutline(slug);
     if (!o.found) return err(id, ERR.NOT_FOUND, `unknown collection: ${uri}`);
     return ok(id, {
       contents: [
@@ -58,7 +58,7 @@ export async function readResource(
           uri,
           mimeType: "application/json",
           text: JSON.stringify({
-            collection: o.collection,
+            collection: o.corpus,
             name: o.name,
             documents: o.documents,
           }),
@@ -67,8 +67,8 @@ export async function readResource(
     });
   }
   if (uri.startsWith(COLLECTION_URI)) {
-    const slug = asCollectionSlug(uri.slice(COLLECTION_URI.length));
-    const r = await exec.readCollection(slug);
+    const slug = asCorpusSlug(uri.slice(COLLECTION_URI.length));
+    const r = await exec.readCorpus(slug);
     if (!r.found) return err(id, ERR.NOT_FOUND, `unknown collection: ${uri}`);
     return ok(id, {
       contents: [{ uri, mimeType: "text/markdown", text: r.corpus }],

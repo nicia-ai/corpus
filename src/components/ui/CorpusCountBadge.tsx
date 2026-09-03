@@ -1,11 +1,11 @@
 import { cn } from "@/lib/cn";
 
 // DESIGN.md signature token — the shared-linkage emphasis. A document
-// living in agent collections is the product's whole point, so the blue-50
+// living in agent corpora is the product's whole point, so the blue-50
 // wash (the one place the accent is spent on data, per the color
 // budget) gets a single home shared by the project graph and the
 // documents list. Pluralizes; caller decides when to render it.
-export function CollectionCountBadge({
+export function CorpusCountBadge({
   count,
   className,
 }: Readonly<{ count: number; className?: string }>): React.ReactElement {
@@ -16,7 +16,7 @@ export function CollectionCountBadge({
         className,
       )}
     >
-      In {count} collection{count === 1 ? "" : "s"}
+      In {count} corpus{count === 1 ? "" : "s"}
     </span>
   );
 }

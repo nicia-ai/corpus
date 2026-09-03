@@ -10,19 +10,19 @@ type Store = ReturnType<typeof freshStore>;
 // document (suggestCreate — the MCP entry), a human applies or rejects it.
 // Apply follows the import path's placement semantics (folders created as
 // needed) and attaches the created document to the proposing connection's
-// bound Collection as `reference` — never always-include.
+// bound Corpus as `reference` — never always-include.
 
 const AGENT = asCallerRef("apikey:agent-a");
 const BODY = "# Answer X\n\nthe answer body";
 
-async function seedCollection(store: Store): Promise<void> {
+async function seedCorpus(store: Store): Promise<void> {
   await store.saveDocument({
     slug: docSlug("doc-a"),
     markdown: "seed doc",
     clientVersion: 0,
     changedBy: "alice",
   });
-  await store.createCollection({
+  await store.createCorpus({
     slug: colSlug("col-a"),
     name: "A",
     changedBy: "alice",
@@ -47,7 +47,7 @@ async function propose(
 describe("create-proposals (DO + D1 integration)", () => {
   it("projects proposal messages to the human UI and caller-scoped MCP result", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     const id = await propose(store, { slug: "conversation" });
 
     await store.addSuggestionMessage({
@@ -93,7 +93,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("apply creates the document at the proposed path and attaches it as reference", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     const id = await propose(store, { path: "wiki/answer-x.md" });
 
     const applied = await store.applyCreateProposal({
@@ -105,7 +105,7 @@ describe("create-proposals (DO + D1 integration)", () => {
     const doc = await store.getDocument(docSlug("wiki-answer-x"));
     expect(doc?.markdown).toBe(BODY);
 
-    const outline = await store.collectionOutline(colSlug("col-a"));
+    const outline = await store.corpusOutline(colSlug("col-a"));
     if (!outline.found) throw new Error("outline missing");
     const member = outline.documents.find((d) => d.slug === "wiki-answer-x");
     expect(member?.path).toBe("wiki/answer-x.md");
@@ -117,7 +117,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("propose rejects a path whose slot an existing document occupies", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     await store.importDocumentAtPath({
       path: "wiki/notes.md",
       markdown: "# occupied",
@@ -155,7 +155,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("propose rejects a path whose slot an existing FOLDER occupies", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     // Importing wiki/notes.md/inner.md creates a folder NAMED "notes.md" —
     // the cross-type namespace: a document may not share a sibling
     // folder's name.
@@ -174,7 +174,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("a folder claiming the slot after propose makes apply return taken with NO writes", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     const id = await propose(store, { path: "wiki/report.md" });
     // The race: a folder named "report.md" lands under wiki/ before apply.
     await store.importDocumentAtPath({
@@ -199,7 +199,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("apply succeeds for a folder-placed path when a root document shares the filename", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     // Root document holding readme.md — a folder-placed readme.md is NOT
     // a collision (filename uniqueness is per-folder; regression for the
     // folder-scoped save-path check).
@@ -219,13 +219,13 @@ describe("create-proposals (DO + D1 integration)", () => {
     expect(doc?.markdown).toBe(BODY);
   });
 
-  it("apply survives a vanished origin Collection — document still created, no attach", async () => {
+  it("apply survives a vanished origin Corpus — document still created, no attach", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     const r = await store.suggestCreate(AGENT, {
       slug: docSlug("orphaned"),
       proposedMarkdown: BODY,
-      // A collection that no longer resolves at apply time.
+      // A corpus that no longer resolves at apply time.
       originCollectionSlug: colSlug("ghost-col"),
     });
     if (!r.ok) throw new Error("propose failed");
@@ -240,7 +240,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("creating a document through any path stales the open proposal for its slug", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     const id = await propose(store, { slug: "late" });
 
     // A human (or the REST path) creates the document directly.
@@ -265,7 +265,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("apply marks the proposal stale when the path slot was taken by a different slug", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     // Proposal claims slug "custom" but the path dir/file.md; an import then
     // occupies the same path under its own derived slug ("dir-file").
     const id = await propose(store, { slug: "custom" });
@@ -297,7 +297,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("reject is terminal and creates nothing", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     const id = await propose(store, { slug: "declined" });
 
     expect(
@@ -315,7 +315,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("the edit-apply path refuses a create-proposal and vice versa", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     const id = await propose(store, { slug: "mismatched" });
 
     // Edit-apply on a create row: the target document doesn't exist.
@@ -341,7 +341,7 @@ describe("create-proposals (DO + D1 integration)", () => {
 
   it("edit-suggestion rails never list create-proposals for the same slug", async () => {
     const store = freshStore("cprop");
-    await seedCollection(store);
+    await seedCorpus(store);
     await propose(store, { slug: "shadow" });
     // The slug later becomes a real document (proposal → stale)…
     await store.saveDocument({

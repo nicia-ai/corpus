@@ -21,7 +21,7 @@ import {
 
 import {
   colSlug,
-  createCollectionFor,
+  createCorpusFor,
   createConnection,
   createOrg,
   docSlug,
@@ -194,7 +194,7 @@ describe("markdown byte cap — markdownBodyZ REST/MCP pre-filter", () => {
 const MEMBER_SLUG = "member-doc";
 
 // Mirrors cli-rest.test.ts's fixture: an api-key bound to a fresh
-// Connection whose Collection contains one small seed document.
+// Connection whose Corpus contains one small seed document.
 async function mintKey(): Promise<string> {
   const ownerUserId = await signUp("cap");
   const db = connectControlDb(env.DB);
@@ -203,7 +203,7 @@ async function mintKey(): Promise<string> {
     organizationId: ref.organizationId,
     projectId: ref.projectId,
   });
-  await createCollectionFor(ref.projectId, conn.collectionSlug);
+  await createCorpusFor(ref.projectId, conn.corpusSlug);
 
   const store = storeFor(env, ref.projectId);
   await store.saveDocument({
@@ -213,7 +213,7 @@ async function mintKey(): Promise<string> {
     changedBy: ownerUserId,
   });
   await store.attachDocument(
-    conn.collectionSlug,
+    conn.corpusSlug,
     docSlug(MEMBER_SLUG),
     0,
     ownerUserId,
@@ -278,13 +278,13 @@ async function mcpSetup(): Promise<ReturnType<typeof scopedExecutor>> {
     clientVersion: 0,
     changedBy: "alice",
   });
-  await store.createCollection({
+  await store.createCorpus({
     slug: colSlug("col-a"),
     name: "A",
     changedBy: "alice",
   });
   await store.attachDocument(colSlug("col-a"), docSlug("doc-a"), 1, "alice");
-  const members = (await store.collectionMembers(colSlug("col-a"))) ?? [];
+  const members = (await store.corpusMembers(colSlug("col-a"))) ?? [];
   return scopedExecutor(
     store,
     colSlug("col-a"),

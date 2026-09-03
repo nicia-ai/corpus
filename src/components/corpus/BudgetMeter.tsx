@@ -19,7 +19,7 @@ export function sizeStateFor(total: number, budget: number): SizeState {
 }
 
 // Shown when at least one always-include document is present, comparing
-// the assembled always-include token total against the collection's
+// the assembled always-include token total against the corpus's
 // configured `alwaysIncludeBudgetTokens`. Authoring-side guidance only.
 export function BudgetMeter({
   total,

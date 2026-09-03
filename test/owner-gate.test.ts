@@ -13,7 +13,7 @@ import { requireProjectOwner } from "../src/lib/server/shared";
 
 // Owner-gate primitive (`src/lib/server/shared.ts`). Every server fn that
 // administers a Connection (`renameConnection`, `deleteConnection`,
-// `connectThisCollection`), mints an API key (`createApiKey`), or moves
+// `connectThisCorpus`), mints an API key (`createApiKey`), or moves
 // a bundle (`exportBundle`, `importBundle`) routes through this. The
 // cross-tenant SQL scope is pinned in `connections-cross-tenant.test.ts`;
 // here we pin the role/auth check itself so a refactor that quietly

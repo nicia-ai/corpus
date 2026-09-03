@@ -24,7 +24,7 @@ export type ImportResult = Readonly<
 >;
 
 // Bundle export and import are admin-only. Export serializes the whole
-// project (every document, version, collection, folder, manifest); import
+// project (every document, version, corpus, folder, manifest); import
 // can replace it atomically. Both are owner-gated server-side so a
 // member session can't drive them headlessly (the Settings UI is
 // owner-only too, but the server fn is the trust boundary).

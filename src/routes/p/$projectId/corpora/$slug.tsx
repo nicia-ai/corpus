@@ -8,27 +8,37 @@ import {
 import { Plug } from "lucide-react";
 import { useState } from "react";
 
-import { BudgetMeter, sizeStateFor } from "@/components/collection/BudgetMeter";
-import { CorpusBrowser } from "@/components/collection/CorpusBrowser";
+import { BudgetMeter, sizeStateFor } from "@/components/corpus/BudgetMeter";
+import { CorpusBrowser } from "@/components/corpus/CorpusBrowser";
 import { BackLink } from "@/components/ui/BackLink";
 import { Button, buttonStyles } from "@/components/ui/Button";
 import { Section } from "@/components/ui/Section";
-import { CollectionMembers } from "@/features/collections/CollectionMembers";
-import { EditCollectionForm } from "@/features/collections/EditCollectionForm";
-import { asCollectionSlug, asProjectId } from "@/ids";
+import { CorpusMembers } from "@/features/corpora/CorpusMembers";
+import { EditCorpusForm } from "@/features/corpora/EditCorpusForm";
+import {
+  asCorpusSlug,
+  asProjectId,
+  type DocumentSlug,
+  type FolderSlug,
+} from "@/ids";
 import { useSubmit } from "@/lib/forms";
-import { attachDocument, getCollectionDetail } from "@/lib/server/collections";
-import { connectThisCollection } from "@/lib/server/connections";
+import { connectThisCorpus } from "@/lib/server/connections";
+import {
+  attachDocument,
+  getCorpusDetail,
+  type ColFolderLink,
+  type CorpusMemberRow,
+} from "@/lib/server/corpora";
 import { getDocumentList } from "@/lib/server/documents";
-import { attachFolderToCollection, getFolderList } from "@/lib/server/folders";
+import { attachFolderToCorpus, getFolderList } from "@/lib/server/folders";
 import { manifestTokens } from "@/util";
 
-export const Route = createFileRoute("/p/$projectId/collections/$slug")({
-  component: CollectionView,
+export const Route = createFileRoute("/p/$projectId/corpora/$slug")({
+  component: CorpusView,
   loader: async ({ params }) => {
     const { projectId } = params;
     const [col, docs, folders] = await Promise.all([
-      getCollectionDetail({ data: { projectId, slug: params.slug } }),
+      getCorpusDetail({ data: { projectId, slug: params.slug } }),
       getDocumentList({ data: { projectId } }),
       getFolderList({ data: { projectId } }),
     ]);
@@ -38,36 +48,36 @@ export const Route = createFileRoute("/p/$projectId/collections/$slug")({
 
 const layout = getRouteApi("/p/$projectId");
 
-function CollectionView() {
+function CorpusView() {
   const { col, docs, folders } = Route.useLoaderData();
   const params = Route.useParams();
   const projectId = asProjectId(params.projectId);
-  const slug = asCollectionSlug(params.slug);
+  const slug = asCorpusSlug(params.slug);
   const router = useRouter();
   const nav = useNavigate();
   const [editing, setEditing] = useState(false);
-  // "Connect this collection" is owner-only (the server fn calls
+  // "Connect this corpus" is owner-only (the server fn calls
   // requireProjectOwner). Read the role from the parent shell so the
   // button is hidden for members instead of letting them click and get
   // a raw 'Only an organization owner can manage Connections' error.
   const isOwner = layout.useLoaderData().current.role === "owner";
 
-  // "Connect this collection" — the primary path per the v4 design.
-  // Reuse-or-create the canonical Connection for this Collection, write
+  // "Connect this corpus" — the primary path per the v4 design.
+  // Reuse-or-create the canonical Connection for this Corpus, write
   // the userId-keyed pending-connect intent (so /connect/select can
   // pre-select on an OAuth handshake), then take the owner to the
-  // setup page with `?collection=<slug>` so its snippets use the per-
+  // setup page with `?corpus=<slug>` so its snippets use the per-
   // Connection `corpus-<slug>` server name.
   const {
     pending: connecting,
     error: connectError,
     run: connect,
   } = useSubmit(async () => {
-    await connectThisCollection({ data: { projectId, collectionSlug: slug } });
+    await connectThisCorpus({ data: { projectId, corpusSlug: slug } });
     await nav({
       to: "/p/$projectId/connectors/mcp/setup",
       params: { projectId },
-      search: { collection: slug },
+      search: { corpus: slug },
     });
   });
 
@@ -75,11 +85,11 @@ function CollectionView() {
     return (
       <div className="mx-auto max-w-3xl">
         <BackLink
-          to="/p/$projectId/collections"
+          to="/p/$projectId/corpora"
           projectId={projectId}
-          label="Collections"
+          label="Corpora"
         />
-        <p className="mt-4 text-slate-500">Collection not found.</p>
+        <p className="mt-4 text-slate-500">Corpus not found.</p>
       </div>
     );
   }
@@ -88,11 +98,11 @@ function CollectionView() {
     return (
       <div className="mx-auto max-w-2xl">
         <BackLink
-          to="/p/$projectId/collections"
+          to="/p/$projectId/corpora"
           projectId={projectId}
-          label="Collections"
+          label="Corpora"
         />
-        <EditCollectionForm
+        <EditCorpusForm
           slug={slug}
           projectId={projectId}
           initialName={col.name}
@@ -108,27 +118,35 @@ function CollectionView() {
     );
   }
 
-  const direct = col.members.filter((m) => m.direct);
-  const viaFolder = col.members.filter((m) => !m.direct);
-  const memberSlugs = new Set(col.members.map((m) => m.slug));
-  const linkedSlugs = new Set(col.folders.map((f) => f.slug));
+  const direct = col.members.filter((m: CorpusMemberRow) => m.direct);
+  const viaFolder = col.members.filter((m: CorpusMemberRow) => !m.direct);
+  const memberSlugs = new Set<DocumentSlug>(
+    col.members.map((m: CorpusMemberRow) => m.slug),
+  );
+  const linkedSlugs = new Set<FolderSlug>(
+    col.folders.map((f: ColFolderLink) => f.slug),
+  );
   const position = col.members.length + 1;
   const budget = col.alwaysIncludeBudgetTokens;
-  const coreMembers = col.members.filter((m) => m.delivery === "core");
+  const coreMembers = col.members.filter(
+    (m: CorpusMemberRow) => m.delivery === "core",
+  );
   const total = manifestTokens(coreMembers);
   const sizeState = sizeStateFor(total, budget);
   // Server truth is the seed; any membership/order change flips this key
   // so the members pane remounts with server order (no useEffect re-seed).
   const orderKey = col.members
-    .map((m) => `${m.slug}:${m.delivery}:${String(m.position)}`)
+    .map(
+      (m: CorpusMemberRow) => `${m.slug}:${m.delivery}:${String(m.position)}`,
+    )
     .join("|");
 
   return (
     <div className="pb-12">
       <BackLink
-        to="/p/$projectId/collections"
+        to="/p/$projectId/corpora"
         projectId={projectId}
-        label="Collections"
+        label="Corpora"
       />
       <header className="mt-2 flex items-start justify-between gap-4 border-b border-slate-200 pb-3">
         <div className="min-w-0">
@@ -151,11 +169,11 @@ function CollectionView() {
                 className="inline-flex items-center gap-1.5!"
               >
                 <Plug className="size-4" />
-                {connecting ? "Connecting…" : "Connect this collection"}
+                {connecting ? "Connecting…" : "Connect this corpus"}
               </Button>
             )}
             <Link
-              to="/p/$projectId/collections/$slug/activity"
+              to="/p/$projectId/corpora/$slug/activity"
               params={{ projectId, slug }}
               className={buttonStyles("secondary")}
             >
@@ -172,7 +190,7 @@ function CollectionView() {
       </header>
 
       <div className="mt-6 grid items-start gap-8 lg:grid-cols-2 lg:gap-10">
-        <CollectionMembers
+        <CorpusMembers
           key={orderKey}
           slug={slug}
           projectId={projectId}
@@ -183,7 +201,7 @@ function CollectionView() {
         />
 
         <Section
-          label="Add to this collection"
+          label="Add to this corpus"
           hint="Added documents are pulled on demand by the agent. Toggle “Always include” on a row to pre-load it into every read_collection call."
         >
           <CorpusBrowser
@@ -196,7 +214,7 @@ function CollectionView() {
               attachDocument({
                 data: {
                   projectId,
-                  collectionSlug: slug,
+                  corpusSlug: slug,
                   documentSlug,
                   position,
                   delivery: "reference",
@@ -204,10 +222,10 @@ function CollectionView() {
               })
             }
             addFolder={(folderSlug) =>
-              attachFolderToCollection({
+              attachFolderToCorpus({
                 data: {
                   projectId,
-                  collectionSlug: slug,
+                  corpusSlug: slug,
                   folderSlug,
                   position,
                   delivery: "reference",

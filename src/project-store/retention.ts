@@ -6,7 +6,7 @@ import type { ProjectUnit } from "./unit";
 
 // Reap records past the Project's retention window. Called inside
 // ProjectStore.write() so version-node, change-event, and blob deletes cannot
-// tear. Heads and versions still pinned by a live CollectionVersion survive.
+// tear. Heads and versions still pinned by a live CorpusVersion survive.
 export async function reapExpiredRecords(
   u: ProjectUnit,
   retention: RetentionPolicy,
@@ -15,8 +15,8 @@ export async function reapExpiredRecords(
   let versionsDeleted = 0;
   let survivingHashes: readonly string[] | undefined;
   if (retention.documentVersionDays !== undefined) {
-    // Pin versions referenced by EVERY stored CollectionVersion, not just the
-    // latest per collection — older immutable snapshots are live records too,
+    // Pin versions referenced by EVERY stored CorpusVersion, not just the
+    // latest per corpus — older immutable snapshots are live records too,
     // and reaping a version (or its blob) they pin would dangle them.
     const pinned = new Set<string>();
     for (const c of await u.versions.allCollectionVersions()) {

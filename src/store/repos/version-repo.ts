@@ -2,7 +2,7 @@ import type { Node } from "@nicia-ai/typegraph";
 
 import { InternalError } from "../../errors";
 import type { CollectionVersion, DocumentVersion } from "../../graph";
-import type { CollectionSlug, DocumentSlug } from "../../ids";
+import type { CorpusSlug, DocumentSlug } from "../../ids";
 import { planVersionReap } from "../domain/retention";
 import type {
   CollectionMember,
@@ -141,9 +141,9 @@ export class VersionRepo {
     };
   }
 
-  // Append a membership snapshot and link it from its Collection.
+  // Append a membership snapshot and link it from its Corpus.
   async appendCollectionVersion(
-    collectionNodeId: string,
+    corpusNodeId: string,
     snapshot: CollectionVersionSnapshot,
   ): Promise<void> {
     const node = await this.g.nodes.CollectionVersion.create({
@@ -154,14 +154,14 @@ export class VersionRepo {
       changedBy: snapshot.changedBy,
     });
     await this.g.edges.version_of_collection.create(
-      { kind: "Collection", id: collectionNodeId },
+      { kind: "Collection", id: corpusNodeId },
       { kind: "CollectionVersion", id: node.id },
       {},
     );
   }
 
   private async findCollectionVersions(
-    collectionSlug: CollectionSlug,
+    collectionSlug: CorpusSlug,
   ): Promise<CollectionVersionNode[]> {
     return findAll((w) =>
       this.g.nodes.CollectionVersion.find({
@@ -171,15 +171,13 @@ export class VersionRepo {
     );
   }
 
-  // Highest collectionVersion for a collection, or 0 if none yet.
-  async latestCollectionVersion(
-    collectionSlug: CollectionSlug,
-  ): Promise<number> {
+  // Highest collectionVersion for a corpus, or 0 if none yet.
+  async latestCollectionVersion(collectionSlug: CorpusSlug): Promise<number> {
     const nodes = await this.findCollectionVersions(collectionSlug);
     return nodes.reduce((max, n) => Math.max(max, n.collectionVersion), 0);
   }
 
-  // The current membership snapshot per collection (bundle export, verifier).
+  // The current membership snapshot per corpus (bundle export, verifier).
   async latestCollectionVersions(): Promise<readonly CollectionVersionRow[]> {
     const nodes = await findAll((w) => this.g.nodes.CollectionVersion.find(w));
     const latest = new Map<string, CollectionVersionNode>();
@@ -194,7 +192,7 @@ export class VersionRepo {
       .sort((a, b) => a.collectionSlug.localeCompare(b.collectionSlug));
   }
 
-  // EVERY membership snapshot, not just the latest per collection. Retention
+  // EVERY membership snapshot, not just the latest per corpus. Retention
   // pins document versions referenced by any live CollectionVersion (not only
   // the head snapshot), so an older snapshot can never be left referencing a
   // reaped version/blob.
@@ -237,7 +235,7 @@ function toCollectionVersionRow(
 }
 
 // A corrupt `members` payload on a single row would otherwise throw a
-// bare SyntaxError out of every consumer (exportBundle, collectionStructure,
+// bare SyntaxError out of every consumer (exportBundle, corpusStructure,
 // the chain verifier). Convert to a kinded AppError so the framework
 // boundary maps it to a 500 and the row coordinates land in logs.
 function parseMembers(

@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import {
   asApiKeyId,
-  asCollectionSlug,
+  asCorpusSlug,
   asConnectionId,
   asOrganizationId,
   asProjectId,
@@ -25,7 +25,7 @@ import { member } from "./schema/better-auth";
 type ConnRow = Readonly<{
   organizationId: string;
   projectId: string;
-  collectionSlug: string;
+  corpusSlug: string;
   connectionId: string;
   userId: string;
   role: string;
@@ -40,7 +40,7 @@ function toConnectionRef(row: ConnRow): ConnectionRef {
     userId: asUserId(row.userId),
     role: asRole(row.role),
     connectionId: asConnectionId(row.connectionId),
-    collectionSlug: asCollectionSlug(row.collectionSlug),
+    corpusSlug: asCorpusSlug(row.corpusSlug),
     apiKeyId: row.apiKeyId === undefined ? undefined : asApiKeyId(row.apiKeyId),
   });
 }
@@ -56,7 +56,7 @@ export async function resolveApiKey(
     .select({
       organizationId: connection.organizationId,
       projectId: connection.projectId,
-      collectionSlug: connection.collectionSlug,
+      corpusSlug: connection.collectionSlug,
       connectionId: connection.id,
       userId: apiKey.userId,
       role: member.role,
@@ -97,7 +97,7 @@ export async function resolveConnection(
     .select({
       organizationId: connection.organizationId,
       projectId: connection.projectId,
-      collectionSlug: connection.collectionSlug,
+      corpusSlug: connection.collectionSlug,
       connectionId: connection.id,
       userId: member.userId,
       role: member.role,

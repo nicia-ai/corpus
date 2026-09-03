@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type {
   CallerChannel,
-  CollectionSlug,
+  CorpusSlug,
   DocumentSlug,
   FolderSlug,
 } from "../../ids";
@@ -65,7 +65,7 @@ export type DocumentChange = Readonly<{
 // owns JSON-encoding them into the ledger columns.
 export type CollectionChange = Readonly<{
   kind: CollectionEventType;
-  collectionSlug: CollectionSlug;
+  collectionSlug: CorpusSlug;
   documentSlug?: DocumentSlug;
   before?: Readonly<Record<string, unknown>>;
   after?: Readonly<Record<string, unknown>>;
@@ -192,7 +192,7 @@ export type CollectionMetadata = Readonly<
 // diffs `before` vs `after` rather than re-reading the node.
 export function collectionUpdated(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     before: CollectionMetadata;
     after: CollectionMetadata;
     changedBy: string;
@@ -201,7 +201,7 @@ export function collectionUpdated(
 ): CollectionChange {
   return {
     kind: "collection.updated",
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     before: compact(args.before),
     after: compact(args.after),
     changedBy: args.changedBy,
@@ -211,7 +211,7 @@ export function collectionUpdated(
 
 export function collectionCreated(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     name: string;
     changedBy: string;
     changedAt: string;
@@ -219,7 +219,7 @@ export function collectionCreated(
 ): CollectionChange {
   return {
     kind: "collection.created",
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     after: { name: args.name },
     changedBy: args.changedBy,
     changedAt: args.changedAt,
@@ -228,7 +228,7 @@ export function collectionCreated(
 
 export function documentDetached(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     documentSlug: DocumentSlug;
     position: number;
     changedBy: string;
@@ -237,7 +237,7 @@ export function documentDetached(
 ): CollectionChange {
   return {
     kind: "collection.detached",
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     documentSlug: args.documentSlug,
     before: { position: args.position },
     changedBy: args.changedBy,
@@ -249,7 +249,7 @@ export function documentDetached(
 // not per moved document (the snapshot pins the new order).
 export function collectionReordered(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     order: readonly string[];
     changedBy: string;
     changedAt: string;
@@ -257,7 +257,7 @@ export function collectionReordered(
 ): CollectionChange {
   return {
     kind: "collection.reordered",
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     after: { order: args.order },
     changedBy: args.changedBy,
     changedAt: args.changedAt,
@@ -268,7 +268,7 @@ export function collectionReordered(
 // one place.
 export function documentAttached(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     documentSlug: DocumentSlug;
     position: number;
     previousPosition: number | undefined;
@@ -282,7 +282,7 @@ export function documentAttached(
     : "collection.attached";
   return compact({
     kind,
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     documentSlug: args.documentSlug,
     before: reordered ? { position: args.previousPosition } : undefined,
     after: { position: args.position },
@@ -298,7 +298,7 @@ export function documentAttached(
 // corpus.
 export function folderAttached(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     folderSlug: FolderSlug;
     position: number;
     previousPosition: number | undefined;
@@ -312,7 +312,7 @@ export function folderAttached(
     : "collection.attached";
   return compact({
     kind,
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     before: reordered
       ? { position: args.previousPosition, folderSlug: args.folderSlug }
       : undefined,
@@ -324,7 +324,7 @@ export function folderAttached(
 
 export function folderDetached(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     folderSlug: FolderSlug;
     position: number;
     changedBy: string;
@@ -333,7 +333,7 @@ export function folderDetached(
 ): CollectionChange {
   return {
     kind: "collection.detached",
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     before: { position: args.position, folderSlug: args.folderSlug },
     changedBy: args.changedBy,
     changedAt: args.changedAt,
@@ -348,7 +348,7 @@ export function folderDetached(
 // identify the flipped member; `delivery` is the new tier.
 export function collectionDeliveryChanged(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     documentSlug?: DocumentSlug;
     folderSlug?: FolderSlug;
     delivery: CollectionDelivery;
@@ -358,7 +358,7 @@ export function collectionDeliveryChanged(
 ): CollectionChange {
   return compact({
     kind: "collection.reordered" as const,
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     documentSlug: args.documentSlug,
     after: compact({
       reason: "delivery-changed",
@@ -376,14 +376,14 @@ export function collectionDeliveryChanged(
 // per-collection audit event.
 export function collectionFolderTreeChanged(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     changedBy: string;
     changedAt: string;
   }>,
 ): CollectionChange {
   return {
     kind: "collection.reordered",
-    collectionSlug: args.collectionSlug,
+    collectionSlug: args.corpusSlug,
     after: { reason: "folder-tree-changed" },
     changedBy: args.changedBy,
     changedAt: args.changedAt,

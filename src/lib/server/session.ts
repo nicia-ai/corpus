@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { getAuth } from "@/auth.server";
 import type { Role } from "@/control/access";
-import { countConnectionsByCollection } from "@/control/connections";
+import { countConnectionsByCorpus } from "@/control/connections";
 import { connectControlDb } from "@/control/db";
 import { entitlementsOf } from "@/control/entitlements";
 import type { SidebarLink } from "@/control/env";
@@ -19,31 +19,36 @@ import {
 } from "@/control/project-resolution";
 import { storeFor } from "@/control/store-for";
 import { InternalError } from "@/errors";
-import type { OrganizationId, ProjectId } from "@/ids";
+import type { OrganizationId, ProjectId, CorpusSlug } from "@/ids";
+import { asFolderSlug } from "@/ids";
 import { authMiddleware } from "@/lib/middleware";
 import {
-  type ColMeta,
-  colMetas,
-  type CollectionMember,
-  collectionMemberMetas,
-} from "@/lib/server/collections";
+  type CorpusMeta,
+  corpusMetas,
+  type CorpusMember,
+  corpusMemberMetas,
+} from "@/lib/server/corpora";
 import { type DocMeta, docMetas } from "@/lib/server/documents";
+import type { FolderRow } from "@/lib/server/folders";
 import { authedUserId } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
+import { DEFAULT_CORPUS_SLUG } from "@/store/domain/default-corpus";
 import { compact } from "@/util";
 
 // firstRun:false carries everything the dashboard renders in one
 // round-trip: counts + the shared-document proof
-// (documents / attachments) + recent collection list + the MCP
-// endpoint + per-collection connection counts (the Home collections
-// strip's "N agents" pill). Collections with zero Connections are
-// absent from `connectionsByCollection`.
+// (documents / attachments) + recent corpus list + the MCP
+// endpoint + per-corpus connection counts (the Home corpora
+// strip's "N agents" pill). Corpora with zero Connections are
+// absent from `connectionsByCorpus`.
 export type DashboardData = Readonly<{
-  collections: ColMeta[];
+  corpora: CorpusMeta[];
   documents: DocMeta[];
-  members: CollectionMember[];
+  members: CorpusMember[];
+  folders: readonly FolderRow[];
   mcpUrl: string;
-  connectionsByCollection: Readonly<Record<string, number>>;
+  connectionsByCorpus: Readonly<Record<string, number>>;
+  defaultCorpusSlug: CorpusSlug;
 }>;
 
 // — Session / first-run ————————————————————————————————————————
@@ -275,21 +280,32 @@ export const loadDashboard = createServerFn({ method: "GET" })
       );
       if (ref === undefined) return { authed: true, firstRun: true };
       const store = storeFor(c.env, ref.projectId);
+      await store.ensureDefaultCorpus(userId);
       const db = connectControlDb(c.env.DB);
-      const [cols, documents, members, connCounts] = await Promise.all([
-        store.listCollections(),
-        store.listDocuments(),
-        store.listResolvedMembers(),
-        countConnectionsByCollection(db, ref.projectId),
-      ]);
+      const [cols, documents, members, connCounts, folders] = await Promise.all(
+        [
+          store.listCorpora(),
+          store.listDocuments(),
+          store.listResolvedMembers(),
+          countConnectionsByCorpus(db, ref.projectId),
+          store.listFolders(),
+        ],
+      );
       return {
         authed: true,
         firstRun: false,
-        collections: colMetas(cols),
+        corpora: corpusMetas(cols),
         documents: docMetas(documents),
-        members: collectionMemberMetas(members),
+        members: corpusMemberMetas(members),
+        folders: folders.map((f) => ({
+          slug: asFolderSlug(f.slug),
+          name: f.name,
+          parentSlug: f.parentSlug === null ? null : asFolderSlug(f.parentSlug),
+          position: f.position,
+        })),
         mcpUrl: `${c.env.BETTER_AUTH_URL}/mcp`,
-        connectionsByCollection: Object.fromEntries(connCounts),
+        connectionsByCorpus: Object.fromEntries(connCounts),
+        defaultCorpusSlug: DEFAULT_CORPUS_SLUG,
       };
     },
   );

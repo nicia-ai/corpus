@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import { CollectionCountBadge } from "@/components/ui/CollectionCountBadge";
+import { CorpusCountBadge } from "@/components/ui/CorpusCountBadge";
 import { compact } from "@/util";
 
 import {
@@ -11,12 +11,12 @@ import {
   linkageSentences,
 } from "./layout";
 
-const COLUMN_LABELS = ["Documents", "Collections", "Agents"] as const;
+const COLUMN_LABELS = ["Documents", "Corpora", "Agents"] as const;
 
 // The example/teaching graph (empty-state only): Documents →
-// Collections → Agents, rendered from the pure `layout()`
+// Corpora → Agents, rendered from the pure `layout()`
 // (deterministic, SSR-safe — no DOM measurement). It exists to show
-// the system's shape — one document feeding many collections, read by
+// the system's shape — one document feeding many corpora, read by
 // many agents, no copies — at a glance.
 // The populated project home is a dashboard, not a graph (a fixed-grid
 // node diagram doesn't scale past a handful of docs and the live app
@@ -40,7 +40,7 @@ export function ProjectGraph(props: Props): React.ReactElement {
       layout(
         compact({
           documents: props.documents,
-          collections: props.collections,
+          corpora: props.corpora,
           attachments: props.attachments,
           agents: props.agents,
           agentLinks: props.agentLinks,
@@ -48,7 +48,7 @@ export function ProjectGraph(props: Props): React.ReactElement {
       ),
     [
       props.documents,
-      props.collections,
+      props.corpora,
       props.attachments,
       props.agents,
       props.agentLinks,
@@ -58,10 +58,10 @@ export function ProjectGraph(props: Props): React.ReactElement {
     () =>
       linkageSentences({
         documents: props.documents,
-        collections: props.collections,
+        corpora: props.corpora,
         attachments: props.attachments,
       }),
-    [props.documents, props.collections, props.attachments],
+    [props.documents, props.corpora, props.attachments],
   );
 
   return (
@@ -121,9 +121,9 @@ export function ProjectGraph(props: Props): React.ReactElement {
                 style={{ width: n.w, height: n.h }}
               >
                 <span className="truncate font-semibold">{n.label}</span>
-                {n.kind === "document" && (n.collectionCount ?? 0) >= 1 && (
-                  <CollectionCountBadge
-                    count={n.collectionCount ?? 0}
+                {n.kind === "document" && (n.corpusCount ?? 0) >= 1 && (
+                  <CorpusCountBadge
+                    count={n.corpusCount ?? 0}
                     className="mt-0.5"
                   />
                 )}

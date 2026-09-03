@@ -149,4 +149,16 @@ describe("C2 — oauth connection-selection seam", () => {
     await writePendingConnect(db, userId, b);
     expect(await readPendingConnect(db, userId)).toBe(b);
   });
+
+  // pending_connect is deliberately NOT bound into a handshake selection —
+  // that would cross-bind concurrent OAuth grants (schema/app.ts). Binding
+  // happens only via putSelection after the owner confirms on /connect/select.
+  it("pending-connect does not stamp a handshake selection by itself", async () => {
+    const db = connectControlDb(env.DB);
+    const { userId, connectionId } = await conn("no-auto");
+    const q = authQuery("no-auto-cc", "no-auto-state");
+    await writePendingConnect(db, userId, connectionId);
+    expect(await readPendingConnect(db, userId)).toBe(connectionId);
+    expect(await readSelection(db, q, userId)).toBeUndefined();
+  });
 });

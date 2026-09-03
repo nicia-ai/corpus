@@ -11,7 +11,7 @@
   // `ctx.storage.transaction`). Plus one EventLogStore per Project
   // with its OWN SQLite for the append-only instrumentation event
   // stream — separate storage budget so durable events never compete
-  // with canonical documents, collections, and blobs.
+  // with canonical documents, corpuss, and blobs.
   "durable_objects": {
     "bindings": [
       { "name": "PROJECT_STORE", "class_name": "ProjectStore" },

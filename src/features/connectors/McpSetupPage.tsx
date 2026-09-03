@@ -2,7 +2,7 @@ import { useRouter } from "@tanstack/react-router";
 import { ChevronRight, Plus } from "lucide-react";
 import { useState } from "react";
 
-import { AgentPromptSection } from "@/components/collection/AgentPromptSection";
+import { AgentPromptSection } from "@/components/corpus/AgentPromptSection";
 import { Field } from "@/components/Field";
 import { BackLink } from "@/components/ui/BackLink";
 import { Button } from "@/components/ui/Button";
@@ -13,10 +13,16 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, EmptyState, listSurface } from "@/components/ui/Surface";
 import { Tabs } from "@/components/ui/Tabs";
 import { showToast } from "@/components/ui/Toast";
-import { asCollectionSlug, type ProjectId } from "@/ids";
+import {
+  claudeCodeMcpCommand,
+  corpusServerName,
+  cursorMcpSnippet,
+  vscodeMcpSnippet,
+} from "@/features/onboarding/agent-write-prompt";
+import { asCorpusSlug, type ProjectId } from "@/ids";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
-import { COLLECTION_SCOPE_PROMISE } from "@/lib/copy";
+import { CORPUS_SCOPE_PROMISE } from "@/lib/copy";
 import { useSubmit } from "@/lib/forms";
 import {
   type ApiKeyCreated,
@@ -25,7 +31,7 @@ import {
   createApiKey,
   revokeApiKey,
 } from "@/lib/server/api-keys";
-import type { ColMetaResult } from "@/lib/server/collections";
+import type { CorpusMetaResult } from "@/lib/server/corpora";
 import type { Role } from "@/lib/server/team.functions";
 
 const KEY = "<YOUR_API_KEY>";
@@ -50,9 +56,9 @@ const AUTH_OPTIONS: readonly {
 ];
 
 // Copy-paste connection recipes per client, tailored to the chosen
-// auth AND to the bound Collection (server name =
-// `corpus-<collectionSlug>` when arriving from "Connect this
-// collection"; plain `corpus` from the generic connector page).
+// auth AND to the bound Corpus (server name =
+// `corpus-<corpusSlug>` when arriving from "Connect this
+// corpus"; plain `corpus` from the generic connector page).
 // OAuth recipes are the bare endpoint — the client runs the sign-in flow.
 // API-key recipes add the bearer header with a placeholder (the secret is
 // only shown once, on creation).
@@ -63,19 +69,29 @@ const TOOLS: readonly {
   snippet: (url: string, auth: Auth, server: string) => string;
 }[] = [
   {
+    id: "cursor",
+    label: "Cursor",
+    caption: "Add to ~/.cursor/mcp.json (or .cursor/mcp.json in a project).",
+    snippet: (url, auth, server) =>
+      auth === "oauth"
+        ? cursorMcpSnippet(url, server)
+        : `{
+  "mcpServers": {
+    "${server}": {
+      "url": "${url}",
+      "headers": { "Authorization": "Bearer ${KEY}" }
+    }
+  }
+}`,
+  },
+  {
     id: "claude-code",
     label: "Claude Code",
     caption: "Run in your terminal.",
     snippet: (url, auth, server) =>
       auth === "oauth"
-        ? `claude mcp add \\
-  --transport http \\
-  ${server} \\
-  ${url}`
-        : `claude mcp add \\
-  --transport http \\
-  ${server} \\
-  ${url} \\
+        ? claudeCodeMcpCommand(url, server)
+        : `${claudeCodeMcpCommand(url, server)} \\
   --header "Authorization: Bearer ${KEY}"`,
   },
   {
@@ -107,41 +123,12 @@ const TOOLS: readonly {
 }`,
   },
   {
-    id: "cursor",
-    label: "Cursor",
-    caption: "Add to ~/.cursor/mcp.json (or .cursor/mcp.json in a project).",
-    snippet: (url, auth, server) =>
-      auth === "oauth"
-        ? `{
-  "mcpServers": {
-    "${server}": {
-      "url": "${url}"
-    }
-  }
-}`
-        : `{
-  "mcpServers": {
-    "${server}": {
-      "url": "${url}",
-      "headers": { "Authorization": "Bearer ${KEY}" }
-    }
-  }
-}`,
-  },
-  {
     id: "vscode",
     label: "VS Code",
     caption: "Add to .vscode/mcp.json in your workspace.",
     snippet: (url, auth, server) =>
       auth === "oauth"
-        ? `{
-  "servers": {
-    "${server}": {
-      "type": "http",
-      "url": "${url}"
-    }
-  }
-}`
+        ? vscodeMcpSnippet(url, server)
         : `{
   "servers": {
     "${server}": {
@@ -157,17 +144,17 @@ const TOOLS: readonly {
 export function McpSetupPage({
   projectId,
   role,
-  collection,
+  corpus,
   url,
   connection,
   col,
 }: Readonly<{
   projectId: ProjectId;
   role: Role;
-  collection?: string | undefined;
+  corpus?: string | undefined;
   url: string;
   connection: ConnectionKeysView | undefined;
-  col: ColMetaResult | undefined;
+  col: CorpusMetaResult | undefined;
 }>): React.ReactElement {
   const [auth, setAuth] = useState<Auth>("oauth");
   const [toolId, setToolId] = useState<string>(TOOLS[0]?.id ?? "");
@@ -175,42 +162,42 @@ export function McpSetupPage({
   if (tool === undefined) return <div />;
   const isOwner = role === "owner";
 
-  // `?collection=<slug>` pointing at a deleted / never-existed
-  // Collection: every panel below would render a partial broken state
-  // (BackLink to a 404'd /collections/<slug>, empty ApiKeysSection,
+  // `?corpus=<slug>` pointing at a deleted / never-existed
+  // Corpus: every panel below would render a partial broken state
+  // (BackLink to a 404'd /corpora/<slug>, empty ApiKeysSection,
   // missing AgentPromptSection). Stop early with a single clear card so
-  // the owner can correct the link or jump back to /collections.
-  if (collection !== undefined && col !== undefined && !col.found) {
+  // the owner can correct the link or jump back to /corpora.
+  if (corpus !== undefined && col !== undefined && !col.found) {
     return (
       <div className="pb-12">
         <BackLink
-          to="/p/$projectId/collections"
+          to="/p/$projectId/corpora"
           projectId={projectId}
-          label="Collections"
+          label="Corpora"
         />
         <PageHeader
-          title="Collection not found"
-          subtitle={`No collection named ${collection} in this project. It may have been renamed or deleted.`}
+          title="Corpus not found"
+          subtitle={`No corpus named ${corpus} in this project. It may have been renamed or deleted.`}
         />
       </div>
     );
   }
 
   const mode =
-    collection === undefined
+    corpus === undefined
       ? ({
           kind: "generic",
           serverName: "corpus",
           title: "MCP",
           subtitle:
-            "One endpoint, two ways to authenticate. Either way, the agent only ever sees the one collection it’s connected to.",
+            "One endpoint, two ways to authenticate. Either way, the agent only ever sees the one corpus it’s connected to.",
         } as const)
       : ({
-          kind: "collection",
-          slug: asCollectionSlug(collection),
-          serverName: `corpus-${collection}`,
-          title: `Connect ${collection}`,
-          subtitle: `${COLLECTION_SCOPE_PROMISE} Edit the collection anytime; agents see the change on their next call.`,
+          kind: "corpus",
+          slug: asCorpusSlug(corpus),
+          serverName: corpusServerName(corpus),
+          title: `Connect ${corpus}`,
+          subtitle: `${CORPUS_SCOPE_PROMISE} Edit the corpus anytime; agents see the change on their next call.`,
         } as const);
   const snippet = tool.snippet(url, auth, mode.serverName);
 
@@ -218,13 +205,13 @@ export function McpSetupPage({
     <div className="pb-12">
       {mode.kind === "generic" ? (
         <BackLink
-          to="/p/$projectId/collections"
+          to="/p/$projectId/corpora"
           projectId={projectId}
-          label="Collections"
+          label="Corpora"
         />
       ) : (
         <BackLink
-          to="/p/$projectId/collections/$slug"
+          to="/p/$projectId/corpora/$slug"
           projectId={projectId}
           slug={mode.slug}
           label={mode.slug}
@@ -234,7 +221,7 @@ export function McpSetupPage({
 
       {/* Left: how to connect (endpoint + auth choice). Right: the exact
           thing to paste for the chosen client. Config on the left, the
-          result on the right — same split as the collection builder. */}
+          result on the right — same split as the corpus builder. */}
       <div className="grid items-start gap-8 lg:grid-cols-2 lg:gap-10">
         <div className="space-y-6">
           <div>
@@ -333,17 +320,17 @@ export function McpSetupPage({
       </div>
 
       {/* MCP is access; this section is the *trigger* that gets the agent
-          to actually reach for it. Templated from the bound Collection's
+          to actually reach for it. Templated from the bound Corpus's
           live name/description so the prompt stays accurate when the
-          owner edits the collection — no second copy to keep aligned.
-          Only renders when the collection is loaded; a not-found (race
+          owner edits the corpus — no second copy to keep aligned.
+          Only renders when the corpus is loaded; a not-found (race
           after delete) silently skips it. Collapsed behind <details> so
           the primary handoff (the snippet above) stays the focus. */}
-      {mode.kind === "collection" && col?.found === true && (
+      {mode.kind === "corpus" && col?.found === true && (
         <CollapsibleSection
           className="mt-10"
           title="Tell the agent to use it"
-          description="MCP gives the agent access. This prompt tells it when to reach for the collection. Paste it where your agent reads project guidance."
+          description="MCP gives the agent access. This prompt tells it when to reach for the corpus. Paste it where your agent reads project guidance."
         >
           <AgentPromptSection
             serverName={mode.serverName}
@@ -357,15 +344,15 @@ export function McpSetupPage({
           presentation choice, not a reason to hide existing keys.
           Collapsed by default; the snippet's "Replace <YOUR_API_KEY>"
           note is the signal to expand this. */}
-      {mode.kind === "collection" && (
+      {mode.kind === "corpus" && (
         <CollapsibleSection
           className="mt-6"
           title="API Keys"
           description={
             <>
               For headless clients that can't do OAuth. Each key is scoped to
-              the <code className="font-mono">{mode.slug}</code> collection —
-              agents using it see exactly this collection, nothing else.
+              the <code className="font-mono">{mode.slug}</code> corpus — agents
+              using it see exactly this corpus, nothing else.
             </>
           }
         >
@@ -411,7 +398,7 @@ function CollapsibleSection({
 
 // `connection === undefined` covers two edge-case landings on this page
 // where the canonical Connection has never been minted: a direct URL
-// before "Connect this collection" ran, or a non-owner who can't mint it.
+// before "Connect this corpus" ran, or a non-owner who can't mint it.
 function ApiKeysSection({
   projectId,
   connection,
@@ -425,8 +412,8 @@ function ApiKeysSection({
     <div className="mt-4">
       {connection === undefined ? (
         <EmptyState>
-          No Connection for this collection yet. Click "Connect this collection"
-          on the collection page first.
+          No Connection for this corpus yet. Click "Connect this corpus" on the
+          corpus page first.
         </EmptyState>
       ) : (
         <ApiKeyManager

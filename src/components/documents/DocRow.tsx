@@ -3,7 +3,7 @@ import { FileText } from "lucide-react";
 import { memo, useState } from "react";
 
 import { fieldInputClass } from "@/components/Field";
-import { CollectionCountBadge } from "@/components/ui/CollectionCountBadge";
+import { CorpusCountBadge } from "@/components/ui/CorpusCountBadge";
 import type { DocumentSlug, ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
 import type { DocListItem } from "@/lib/server/documents";
@@ -12,7 +12,7 @@ import { treeIndent } from "@/lib/tree";
 import { InlineConfirm } from "./RowActions";
 
 // One document row in the documents tree: checkbox + title link (to the
-// detail page), inline filename rename, collection-count badge, and
+// detail page), inline filename rename, corpus-count badge, and
 // hover-revealed delete confirm. Shift-click on the checkbox flips
 // `range` so the parent extends the selection from the last anchor.
 type DocRowProps = Readonly<{
@@ -82,9 +82,7 @@ function DocRowComponent({
               {doc.pendingSuggestions} pending
             </span>
           )}
-          {doc.collectionCount > 0 && (
-            <CollectionCountBadge count={doc.collectionCount} />
-          )}
+          {doc.corpusCount > 0 && <CorpusCountBadge count={doc.corpusCount} />}
         </div>
         <div className="flex items-center gap-2 text-sm tabular-nums text-slate-400">
           <span className="shrink-0">

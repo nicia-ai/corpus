@@ -1,11 +1,11 @@
 ---
 title: Your team
-description: Invite teammates into your organization so everyone shares one canonical collection — roles, the invite-link flow, and managing members.
+description: Invite teammates into your organization so everyone shares one canonical corpus — roles, the invite-link flow, and managing members.
 sidebar:
   order: 8
 ---
 
-Everyone in your organization shares its canonical collection. Inviting
+Everyone in your organization shares its canonical corpus. Inviting
 your team is how non-engineers contribute the knowledge and engineers
 keep agents pointed at it.
 
@@ -13,7 +13,7 @@ keep agents pointed at it.
 
 | Role       | Can                                                                            |
 | ---------- | ------------------------------------------------------------------------------ |
-| **Member** | Read and write documents and collections, manage their own API keys.           |
+| **Member** | Read and write documents and corpora, manage their own API keys.               |
 | **Owner**  | Everything a member can, plus invite people, change roles, and remove members. |
 
 ## Inviting someone

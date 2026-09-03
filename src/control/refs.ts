@@ -1,6 +1,6 @@
 import type {
   ApiKeyId,
-  CollectionSlug,
+  CorpusSlug,
   ConnectionId,
   OrganizationId,
   ProjectId,
@@ -25,6 +25,6 @@ export type ConnectionRef = Readonly<{
   userId: UserId;
   role: Role;
   connectionId: ConnectionId;
-  collectionSlug: CollectionSlug;
+  corpusSlug: CorpusSlug;
   apiKeyId?: ApiKeyId;
 }>;

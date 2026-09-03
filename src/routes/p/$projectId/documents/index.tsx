@@ -2,14 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { DocumentsPage } from "@/features/documents/DocumentsPage";
 import { asProjectId } from "@/ids";
-import { getCollectionList, type ColListItem } from "@/lib/server/collections";
+import { getCorpusList, type CorpusListItem } from "@/lib/server/corpora";
 import { getDocumentList } from "@/lib/server/documents";
 import { getFolderList } from "@/lib/server/folders";
 import { listCreateProposals } from "@/lib/server/suggestions";
 
 export const Route = createFileRoute("/p/$projectId/documents/")({
   component: DocumentsRoute,
-  // Collections feed the empty-state uploader's "link to a collection"
+  // Corpora feed the empty-state uploader's "link to a corpus"
   // picker and nothing else on this page — fetch them only when we're
   // actually going to render that picker. Create-proposals surface here
   // too: an agent-proposed NEW document has no document page of its own
@@ -21,11 +21,11 @@ export const Route = createFileRoute("/p/$projectId/documents/")({
       getFolderList({ data: { projectId } }),
       listCreateProposals({ data: { projectId } }),
     ]);
-    const collections: readonly ColListItem[] =
+    const corpora: readonly CorpusListItem[] =
       documents.length === 0 && folders.length === 0
-        ? await getCollectionList({ data: { projectId } })
+        ? await getCorpusList({ data: { projectId } })
         : [];
-    return { documents, folders, collections, proposals };
+    return { documents, folders, corpora, proposals };
   },
 });
 
@@ -36,7 +36,7 @@ function DocumentsRoute(): React.ReactElement {
       projectId={asProjectId(Route.useParams().projectId)}
       documents={data.documents}
       folders={data.folders}
-      collections={data.collections}
+      corpora={data.corpora}
       proposals={data.proposals}
     />
   );

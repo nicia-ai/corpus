@@ -1,4 +1,4 @@
-import { asCollectionSlug, asDocumentSlug, asFolderSlug } from "../../ids";
+import { asCorpusSlug, asDocumentSlug, asFolderSlug } from "../../ids";
 import {
   type Bundle,
   BUNDLE_KIND,
@@ -19,11 +19,11 @@ import { deriveSearchText } from "../../store/domain/search";
 import { collectionVersionSnapshot } from "../../store/domain/versions";
 import { compact, DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS } from "../../util";
 import type { CommandOutcome, ProjectCommandContext } from "../command";
-import { collectionSnapshotMembers } from "../command";
+import { corpusSnapshotMembers } from "../command";
 import type { ProjectUnit } from "../unit";
 
 export type ImportBundleCommandResult = Readonly<
-  | { ok: true; documents: number; collections: number }
+  | { ok: true; documents: number; corpora: number }
   | { ok: false; reason: "root-hash-mismatch" }
 >;
 
@@ -100,14 +100,14 @@ export async function importBundleCommand(
   for (const slug of Object.keys(bundle.collections).sort()) {
     const colFile = bundle.collections[slug];
     if (colFile === undefined) continue;
-    const colSlug = asCollectionSlug(slug);
-    await ctx.u.cols.createCollection({
+    const colSlug = asCorpusSlug(slug);
+    await ctx.u.cols.createCorpus({
       slug: colSlug,
       name: colFile.name,
       description: colFile.description,
       alwaysIncludeBudgetTokens: colFile.alwaysIncludeBudgetTokens,
     });
-    const colNode = await ctx.u.cols.findCollection(colSlug);
+    const colNode = await ctx.u.cols.findCorpus(colSlug);
     if (colNode === undefined) continue;
     const members = collectionMembersOf(colFile.members);
     for (const m of members) {
@@ -134,7 +134,7 @@ export async function importBundleCommand(
     result: {
       ok: true,
       documents: Object.keys(bundle.documents).length,
-      collections: Object.keys(bundle.collections).length,
+      corpora: Object.keys(bundle.collections).length,
     },
     changes: [],
   };
@@ -143,7 +143,7 @@ export async function importBundleCommand(
 export async function exportBundleProjection(
   u: ProjectUnit,
   source: BundleSource,
-  resolvedViews: ProjectCommandContext["collection"]["resolvedViews"],
+  resolvedViews: ProjectCommandContext["corpus"]["resolvedViews"],
 ): Promise<Bundle> {
   const heads = [...(await u.docs.listAll())].sort((a, b) =>
     a.slug.localeCompare(b.slug),
@@ -206,8 +206,8 @@ export async function exportBundleProjection(
     colRows.map(async (c) => {
       const meta = colMeta.get(c.collectionSlug);
       const members = folderLinked.has(c.collectionSlug)
-        ? collectionSnapshotMembers(
-            (await resolvedViews(u, asCollectionSlug(c.collectionSlug))) ?? [],
+        ? corpusSnapshotMembers(
+            (await resolvedViews(u, asCorpusSlug(c.collectionSlug))) ?? [],
           )
         : c.members;
       return compact({

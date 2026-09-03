@@ -32,10 +32,10 @@ export const recordPromptAnswer = createServerFn({ method: "POST" })
     z.object({
       bet: promptBetSchema,
       // Accepted but not in the event payload: the prompt is
-      // project-scoped, not collection-scoped. Held so a later UI
-      // evolution can show "you answered from collection X" without
+      // project-scoped, not corpus-scoped. Held so a later UI
+      // evolution can show "you answered from corpus X" without
       // changing the API.
-      collectionSlug: z.string().min(1).optional(),
+      corpusSlug: z.string().min(1).optional(),
       // projectMiddleware consumes this; declare it so the input
       // validator does not strip it before the middleware runs.
       projectId: z.string().min(1),

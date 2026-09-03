@@ -1,14 +1,14 @@
 import { CREATE_PROPOSAL_BASE_VERSION } from "@nicia-ai/prose-diff";
 import { z } from "zod";
 
-import { asCollectionSlug, asDocumentSlug } from "../ids";
+import { asCorpusSlug, asDocumentSlug } from "../ids";
 import { proposalMessageSchema } from "../lib/proposal-message";
 import type { ProposalResult } from "../project-store/commands/suggestions";
 import { parseFrontmatter } from "../store/domain/frontmatter";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "../util";
 
 import type { McpExecutor } from "./executor";
-import { boundCollectionSlug, documentSlugFromArgs, strField } from "./params";
+import { boundCorpusSlug, documentSlugFromArgs, strField } from "./params";
 import { ERR, err, ok, textContent, TOOLS } from "./protocol";
 
 // suggest_edit args. The document is addressed by slug OR path (resolved
@@ -157,7 +157,7 @@ type ToolHandler = (args: {
 
 const TOOL_HANDLERS: Record<string, ToolHandler> = {
   list_collections: async ({ id, exec }) =>
-    ok(id, textContent(JSON.stringify(await exec.listCollections()))),
+    ok(id, textContent(JSON.stringify(await exec.listCorpora()))),
 
   list_documents: async ({ id, exec }) =>
     ok(id, textContent(JSON.stringify(await exec.listDocuments()))),
@@ -165,13 +165,11 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   read_collection: async ({ id, exec, params }) => {
     const rawSlug = strField(params, "collectionSlug");
     const slug =
-      rawSlug === ""
-        ? await boundCollectionSlug(exec)
-        : asCollectionSlug(rawSlug);
+      rawSlug === "" ? await boundCorpusSlug(exec) : asCorpusSlug(rawSlug);
     if (slug === undefined) {
       return err(id, ERR.NOT_FOUND, "no bound collection");
     }
-    const r = await exec.readCollection(slug);
+    const r = await exec.readCorpus(slug);
     if (!r.found) return err(id, ERR.NOT_FOUND, `unknown collection: ${slug}`);
     return ok(id, textContent(r.corpus));
   },

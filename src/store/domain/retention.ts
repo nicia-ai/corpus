@@ -56,7 +56,7 @@ export type VersionReapPlan = Readonly<{
 
 // Pure reap selection. A version is deleted iff it is older than the
 // window AND it is not a document's current head AND it is not pinned by
-// a live CollectionVersion — so `getDocument` and `verifyHistory` stay
+// a live CorpusVersion — so `getDocument` and `verifyHistory` stay
 // green after a sweep.
 export function planVersionReap(
   args: Readonly<{

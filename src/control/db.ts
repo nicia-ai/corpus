@@ -14,7 +14,7 @@ export type ControlDb = ReturnType<typeof build>;
 const cache = new WeakMap<D1Database, ControlDb>();
 
 // Control plane lives in D1 (central, cross-project identity). The data
-// plane (Document/Collection/ledger) is per-Project ProjectStore SQLite.
+// plane (Document/Corpus/ledger) is per-Project ProjectStore SQLite.
 export function connectControlDb(d1: D1Database): ControlDb {
   let db = cache.get(d1);
   if (db === undefined) {

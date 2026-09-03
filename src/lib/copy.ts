@@ -3,13 +3,13 @@
 export const TAGLINE = "One source of truth your agents read — no copies.";
 
 export const TAGLINE_LONG =
-  "Documents link into agent collections and are served over one MCP endpoint — never copied.";
+  "Documents live once. Add them to your corpus. Every connected agent reads the same approved versions.";
 
-export const WHAT_IS_A_COLLECTION =
-  "A collection is a set of documents an agent reads as one corpus. Group your documents into a collection, then point your agents at it over MCP.";
+export const WHAT_IS_A_CORPUS =
+  "A corpus is the set of documents your team and agents work on together. Connect an agent to a corpus — it reads approved versions and can propose edits for you to review.";
 
-// The scope promise shown both pre-OAuth (Connect this collection) and
+// The scope promise shown both pre-OAuth (Connect this corpus) and
 // post-OAuth (the Connection picker) — one place so the two surfaces
 // can't drift.
-export const COLLECTION_SCOPE_PROMISE =
-  "The agent will see exactly this collection — no other documents in this project.";
+export const CORPUS_SCOPE_PROMISE =
+  "This agent will read exactly this corpus — no other documents in this project.";

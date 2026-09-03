@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { asCollectionSlug } from "../src/ids";
-import { buildCollectionActivity } from "../src/lib/server/activity-view";
+import { asCorpusSlug } from "../src/ids";
+import { buildCorpusActivity } from "../src/lib/server/activity-view";
 import {
   encodeEvent,
   events,
@@ -10,12 +10,12 @@ import {
 } from "../src/store/domain/instrumentation-events";
 
 // Port-driven tests — no DO, no D1. The builder receives the event log,
-// the collection structure, and the id → name resolver as plain ports;
+// the corpus structure, and the id → name resolver as plain ports;
 // these pin that authors in the feed are humanized through the resolver
 // (the regression: raw user ids leaking into descriptions and
 // lastEditBy) while agent caller refs keep their truncated labels.
 
-const SLUG = asCollectionSlug("galileo-wiki");
+const SLUG = asCorpusSlug("galileo-wiki");
 const ALICE_ID = "QtvwujE8klpmiEXNp6H10K3dQZCPE1QV";
 const NAMES = new Map([[ALICE_ID, "Galileo Tester"]]);
 
@@ -42,7 +42,7 @@ function envelope(
   };
 }
 
-type BuilderArgs = Parameters<typeof buildCollectionActivity>[0];
+type BuilderArgs = Parameters<typeof buildCorpusActivity>[0];
 
 function build(feed: readonly InstrumentationEvent[]) {
   const envelopes = feed.map((e, i) => envelope(i + 1, e));
@@ -52,11 +52,11 @@ function build(feed: readonly InstrumentationEvent[]) {
   const log = {
     iterate: () => Promise.resolve(envelopes),
   } as unknown as BuilderArgs["log"];
-  return buildCollectionActivity({
+  return buildCorpusActivity({
     slug: SLUG,
     mcpUrl: "https://corpus.test/mcp",
     store: {
-      collectionStructure: () =>
+      corpusStructure: () =>
         Promise.resolve({
           found: true as const,
           name: "Galileo Wiki",
@@ -69,7 +69,7 @@ function build(feed: readonly InstrumentationEvent[]) {
   });
 }
 
-describe("buildCollectionActivity name resolution", () => {
+describe("buildCorpusActivity name resolution", () => {
   it("humanizes changedBy ids in feed descriptions and lastEditBy", async () => {
     const dto = await build([
       events.documentUpdated({
@@ -115,7 +115,7 @@ describe("buildCollectionActivity name resolution", () => {
       {
         type: "read",
         kind: "first",
-        collectionSlug: "galileo-wiki",
+        corpusSlug: "galileo-wiki",
         callerRef: "apikey:613d25bd-3dac-46a5-8f52-007081279d7b",
         versionCapturedAtRead: { "wiki-index": 3 },
       },

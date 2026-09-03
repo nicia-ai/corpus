@@ -2,11 +2,11 @@ import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import {
   asConnectionId,
-  asCollectionSlug,
+  asCorpusSlug,
   asOrganizationId,
   asProjectId,
   type ConnectionId,
-  type CollectionSlug,
+  type CorpusSlug,
   type OrganizationId,
   type ProjectId,
   type UserId,
@@ -26,7 +26,7 @@ export type ConnectionSummary = Readonly<{
   connectionId: ConnectionId;
   organizationId: OrganizationId;
   projectId: ProjectId;
-  collectionSlug: CollectionSlug;
+  corpusSlug: CorpusSlug;
   name: string;
   isDefaultForCollection: boolean;
   projectName: string;
@@ -46,7 +46,7 @@ export async function listConnectionsForUser(
       connectionId: connection.id,
       organizationId: connection.organizationId,
       projectId: connection.projectId,
-      collectionSlug: connection.collectionSlug,
+      corpusSlug: connection.collectionSlug,
       name: connection.name,
       isDefaultForCollection: connection.isDefaultForCollection,
       projectName: project.name,
@@ -72,7 +72,7 @@ export async function listConnectionsForUser(
     connectionId: asConnectionId(r.connectionId),
     organizationId: asOrganizationId(r.organizationId),
     projectId: asProjectId(r.projectId),
-    collectionSlug: asCollectionSlug(r.collectionSlug),
+    corpusSlug: asCorpusSlug(r.corpusSlug),
     name: r.name,
     isDefaultForCollection: r.isDefaultForCollection,
     projectName: r.projectName,
@@ -95,32 +95,32 @@ export async function listAdministeredConnections(
   return all.filter((c) => c.role === "owner");
 }
 
-// How many Connections live under each Collection in a Project. Powers
-// the "N agents" pill on the Home collections strip — one round-trip
+// How many Connections live under each Corpus in a Project. Powers
+// the "N agents" pill on the Home corpora strip — one round-trip
 // per dashboard render, scoped by projectId (already membership-
-// checked at the caller). Collections with zero Connections are absent
+// checked at the caller). Corpora with zero Connections are absent
 // from the map.
-export async function countConnectionsByCollection(
+export async function countConnectionsByCorpus(
   db: ControlDb,
   projectId: ProjectId,
-): Promise<ReadonlyMap<CollectionSlug, number>> {
+): Promise<ReadonlyMap<CorpusSlug, number>> {
   const rows = await db
     .select({
-      collectionSlug: connection.collectionSlug,
+      corpusSlug: connection.collectionSlug,
       n: count(connection.id),
     })
     .from(connection)
     .where(eq(connection.projectId, projectId))
     .groupBy(connection.collectionSlug);
-  return new Map(rows.map((r) => [asCollectionSlug(r.collectionSlug), r.n]));
+  return new Map(rows.map((r) => [asCorpusSlug(r.corpusSlug), r.n]));
 }
 
-// Reuse-or-create the canonical Connection for (projectId, collectionSlug).
+// Reuse-or-create the canonical Connection for (projectId, corpusSlug).
 // One round-trip, race-safe: a concurrent first-click cannot tear,
 // because the partial unique index `WHERE isDefaultForCollection` covers
 // exactly the canonical row and `ON CONFLICT … DO UPDATE … RETURNING`
 // returns the winning row's id either way. `name` is touched (not
-// keyed): a later Collection rename never spawns a second canonical row.
+// keyed): a later Corpus rename never spawns a second canonical row.
 // Advanced (`isDefaultForCollection: false`) Connections are unconstrained
 // by the index and use a plain insert at the call site.
 export async function createCanonicalConnection(
@@ -128,17 +128,17 @@ export async function createCanonicalConnection(
   args: Readonly<{
     organizationId: OrganizationId;
     projectId: ProjectId;
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     name?: string;
   }>,
 ): Promise<ConnectionId> {
-  const name = args.name ?? args.collectionSlug;
+  const name = args.name ?? args.corpusSlug;
   const [row] = await db
     .insert(connection)
     .values({
       organizationId: args.organizationId,
       projectId: args.projectId,
-      collectionSlug: args.collectionSlug,
+      collectionSlug: args.corpusSlug,
       name,
       isDefaultForCollection: true,
     })
@@ -151,7 +151,7 @@ export async function createCanonicalConnection(
       // and all. An unqualified `"is_default_for_collection"` here
       // silently misses the index and SQLite rejects the insert
       // with "no unique or exclusion constraint matching" — the bug
-      // the user's "Connect this collection" button surfaced.
+      // the user's "Connect this corpus" button surfaced.
       // `eq(col, true)` won't work either: it emits `col = ?` which
       // is a different predicate from the bare boolean. Raw SQL with
       // the qualified column is the only path.
@@ -168,10 +168,10 @@ export async function createCanonicalConnection(
 
 // Read-only canonical Connection lookup (the upsert path is
 // `upsertCanonicalConnection` above).
-export async function findCanonicalConnectionByCollection(
+export async function findCanonicalConnectionByCorpus(
   db: ControlDb,
   projectId: ProjectId,
-  collectionSlug: CollectionSlug,
+  corpusSlug: CorpusSlug,
 ): Promise<ConnectionId | undefined> {
   const [row] = await db
     .select({ id: connection.id })
@@ -179,7 +179,7 @@ export async function findCanonicalConnectionByCollection(
     .where(
       and(
         eq(connection.projectId, projectId),
-        eq(connection.collectionSlug, collectionSlug),
+        eq(connection.collectionSlug, corpusSlug),
         eq(connection.isDefaultForCollection, true),
       ),
     )
@@ -199,18 +199,18 @@ export async function findCanonicalConnectionByCollection(
 // invariant is still enforced server-side by the partial unique index;
 // a concurrent insert from another caller would throw, which the
 // caller can retry to land on the existing-row branch. In practice
-// "Connect this collection" is a user-initiated single click per session
+// "Connect this corpus" is a user-initiated single click per session
 // and a concurrent race is theoretical.
 export async function upsertCanonicalConnection(
   db: ControlDb,
   args: Readonly<{
     organizationId: OrganizationId;
     projectId: ProjectId;
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     name?: string;
   }>,
 ): Promise<ConnectionId> {
-  const name = args.name ?? args.collectionSlug;
+  const name = args.name ?? args.corpusSlug;
   try {
     const [existing] = await db
       .select({ id: connection.id, name: connection.name })
@@ -218,7 +218,7 @@ export async function upsertCanonicalConnection(
       .where(
         and(
           eq(connection.projectId, args.projectId),
-          eq(connection.collectionSlug, args.collectionSlug),
+          eq(connection.collectionSlug, args.corpusSlug),
           eq(connection.isDefaultForCollection, true),
         ),
       )
@@ -237,7 +237,7 @@ export async function upsertCanonicalConnection(
       .values({
         organizationId: args.organizationId,
         projectId: args.projectId,
-        collectionSlug: args.collectionSlug,
+        collectionSlug: args.corpusSlug,
         name,
         isDefaultForCollection: true,
       })
@@ -359,7 +359,7 @@ export async function deleteConnection(
 // list practically useful without N+1 lookups in the route.
 export type ProjectConnectionRow = Readonly<{
   connectionId: ConnectionId;
-  collectionSlug: CollectionSlug;
+  corpusSlug: CorpusSlug;
   name: string;
   isDefaultForCollection: boolean;
   apiKeyCount: number;
@@ -374,7 +374,7 @@ export async function listProjectConnections(
   const rows = await db
     .select({
       id: connection.id,
-      collectionSlug: connection.collectionSlug,
+      corpusSlug: connection.collectionSlug,
       name: connection.name,
       isDefaultForCollection: connection.isDefaultForCollection,
       createdAt: connection.createdAt,
@@ -414,7 +414,7 @@ export async function listProjectConnections(
 
   return rows.map((r) => ({
     connectionId: asConnectionId(r.id),
-    collectionSlug: asCollectionSlug(r.collectionSlug),
+    corpusSlug: asCorpusSlug(r.corpusSlug),
     name: r.name,
     isDefaultForCollection: r.isDefaultForCollection,
     apiKeyCount: keysById.get(r.id) ?? 0,

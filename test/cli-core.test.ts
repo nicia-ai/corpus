@@ -23,7 +23,7 @@ import { storeFor } from "../src/control/store-for";
 import type { ProjectId } from "../src/ids";
 
 import {
-  createCollectionFor,
+  createCorpusFor,
   createConnection,
   createOrg,
   docSlug,
@@ -54,7 +54,7 @@ function memoryFiles(): Files & { readonly map: Map<string, string> } {
 }
 
 // Mint an api-key bound to a fresh Connection, seed the per-Project DO with
-// a collection member + an outsider document (mirrors cli-rest.test.ts).
+// a corpus member + an outsider document (mirrors cli-rest.test.ts).
 async function setup(): Promise<
   Readonly<{
     cfg: CorpusConfig;
@@ -69,7 +69,7 @@ async function setup(): Promise<
     organizationId: ref.organizationId,
     projectId: ref.projectId,
   });
-  await createCollectionFor(ref.projectId, conn.collectionSlug);
+  await createCorpusFor(ref.projectId, conn.corpusSlug);
 
   const store = storeFor(env, ref.projectId);
   await store.saveDocument({
@@ -79,7 +79,7 @@ async function setup(): Promise<
     changedBy: ownerUserId,
   });
   await store.attachDocument(
-    conn.collectionSlug,
+    conn.corpusSlug,
     docSlug(MEMBER_SLUG),
     0,
     ownerUserId,
@@ -122,7 +122,7 @@ describe("CLI core (portable list/pull/push over the REST surface)", () => {
     expect(await readClientVersion(files, "x.md")).toBe(7);
   });
 
-  it("list returns only the bound collection's members", async () => {
+  it("list returns only the bound corpus's members", async () => {
     const { cfg } = await setup();
     const slugs = (await list(cfg)).map((d) => d.slug);
     expect(slugs).toContain(MEMBER_SLUG);
@@ -141,7 +141,7 @@ describe("CLI core (portable list/pull/push over the REST surface)", () => {
     });
   });
 
-  it("pull of a document outside the collection throws not-found", async () => {
+  it("pull of a document outside the corpus throws not-found", async () => {
     const { cfg } = await setup();
     await expect(pull(cfg, OUTSIDER_SLUG)).rejects.toMatchObject({
       name: "CliError",
@@ -182,7 +182,7 @@ describe("CLI core (portable list/pull/push over the REST surface)", () => {
     expect((err as CliError).message).toContain("v2");
   });
 
-  it("push creates a brand-new document into the bound collection", async () => {
+  it("push creates a brand-new document into the bound corpus", async () => {
     const { cfg, files } = await setup();
     files.map.set("onboarding.md", "# Onboarding\n\nwelcome");
     const r = await push(cfg, "onboarding", "onboarding.md");

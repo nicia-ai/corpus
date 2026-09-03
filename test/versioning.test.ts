@@ -61,7 +61,7 @@ describe("version-model constructors (pure, zero-IO)", () => {
     expect(v.prevContentHash).toBe("sha256:aaa");
   });
 
-  it("CollectionVersionSnapshot carries the ordered member set verbatim", () => {
+  it("CorpusVersionSnapshot carries the ordered member set verbatim", () => {
     const snap = collectionVersionSnapshot({
       collectionSlug: colSlug("ctx"),
       collectionVersion: 3,
@@ -95,7 +95,7 @@ describe("verifyChain (pure verifier)", () => {
           ],
         },
       ],
-      collections: [],
+      corpora: [],
       blobs: new Map([
         [h1, "v1"],
         [h2, "v2"],
@@ -113,7 +113,7 @@ describe("verifyChain (pure verifier)", () => {
           versions: [{ docVersion: 1, contentHash: h1, prevContentHash: null }],
         },
       ],
-      collections: [],
+      corpora: [],
       blobs: new Map([[h1, "TAMPERED"]]),
     });
     expect(r.ok).toBe(false);
@@ -139,7 +139,7 @@ describe("verifyChain (pure verifier)", () => {
           ],
         },
       ],
-      collections: [],
+      corpora: [],
       blobs: new Map([
         [h1, "v1"],
         [h2, "v2"],
@@ -149,7 +149,7 @@ describe("verifyChain (pure verifier)", () => {
     if (!r.ok) expect(r.brokenAt.reason).toBe("chain-broken");
   });
 
-  it("flags a collection member that does not resolve to a version", async () => {
+  it("flags a corpus member that does not resolve to a version", async () => {
     const h1 = await sha256("v1");
     const r = await verifyChain({
       documents: [
@@ -158,10 +158,10 @@ describe("verifyChain (pure verifier)", () => {
           versions: [{ docVersion: 1, contentHash: h1, prevContentHash: null }],
         },
       ],
-      collections: [
+      corpora: [
         {
-          collectionSlug: "ctx",
-          collectionVersion: 1,
+          corpusSlug: "ctx",
+          corpusVersion: 1,
           members: [
             { documentSlug: "a", docVersion: 9, contentHash: h1, position: 0 },
           ],
@@ -172,7 +172,7 @@ describe("verifyChain (pure verifier)", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.brokenAt).toMatchObject({
-        kind: "collection",
+        kind: "corpus",
         reason: "missing-version",
       });
     }

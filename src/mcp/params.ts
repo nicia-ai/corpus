@@ -1,7 +1,7 @@
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
-  type CollectionSlug,
+  type CorpusSlug,
   type DocumentSlug,
 } from "../ids";
 import { pathSegments as pathParts } from "../store/domain/paths";
@@ -24,20 +24,20 @@ export function corpusPath(raw: string): string {
   return pathParts(withoutScheme).join("/");
 }
 
-export async function boundCollectionSlug(
+export async function boundCorpusSlug(
   exec: McpExecutor,
-): Promise<CollectionSlug | undefined> {
-  const [col] = await exec.listCollections();
-  return col === undefined ? undefined : asCollectionSlug(col.slug);
+): Promise<CorpusSlug | undefined> {
+  const [col] = await exec.listCorpora();
+  return col === undefined ? undefined : asCorpusSlug(col.slug);
 }
 
 async function documentSlugForPath(
   exec: McpExecutor,
   rawPath: string,
 ): Promise<DocumentSlug | undefined> {
-  const collectionSlug = await boundCollectionSlug(exec);
+  const collectionSlug = await boundCorpusSlug(exec);
   if (collectionSlug === undefined) return undefined;
-  const outline = await exec.collectionOutline(collectionSlug);
+  const outline = await exec.corpusOutline(collectionSlug);
   if (!outline.found) return undefined;
   const path = corpusPath(rawPath);
   const doc = outline.documents.find((d) => corpusPath(d.path) === path);

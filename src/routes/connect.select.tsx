@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState, listSurface } from "@/components/ui/Surface";
 import { asConnectionId } from "@/ids";
 import { authClient } from "@/lib/auth-client";
-import { COLLECTION_SCOPE_PROMISE } from "@/lib/copy";
+import { CORPUS_SCOPE_PROMISE } from "@/lib/copy";
 import { useSubmit } from "@/lib/forms";
 import {
   commitConnectionSelection,
@@ -39,13 +39,12 @@ export const Route = createFileRoute("/connect/select")({
 
 function SelectConnection() {
   const { connections, pendingConnectionId } = Route.useLoaderData();
-  // Pre-select the userId-keyed pending-connect hint (the Collection-
-  // page "Connect this collection" click that may have happened before
-  // the client's OAuth flow existed). NOT auto-bound — the user still
-  // confirms; the hint is a *picker default*.
+  // Pre-select the userId-keyed pending-connect hint when the owner
+  // just clicked "Connect this corpus". NOT auto-bound — the user still
+  // confirms; the hint is a picker default only.
   const initial =
     pendingConnectionId !== undefined &&
-    connections.some((c) => c.connectionId === pendingConnectionId)
+    connections.some((c: PickerRow) => c.connectionId === pendingConnectionId)
       ? pendingConnectionId
       : (connections[0]?.connectionId ?? asConnectionId(""));
   const [picked, setPicked] = useState(initial);
@@ -79,18 +78,17 @@ function SelectConnection() {
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader
-        title="Choose a collection for this agent"
+        title="Choose a corpus for this agent"
         subtitle={
           empty
-            ? "No collections are set up for agent access yet. Open a collection in Corpus and click “Connect this collection” first."
-            : COLLECTION_SCOPE_PROMISE
+            ? "No corpora are set up for agent access yet. Open a corpus in Corpus and click “Connect this corpus” first."
+            : CORPUS_SCOPE_PROMISE
         }
       />
       {empty ? (
         <EmptyState>
-          Open a collection in Corpus and click{" "}
-          <strong>Connect this collection</strong>, then restart this
-          agent&rsquo;s sign-in.
+          Open a corpus in Corpus and click <strong>Connect this corpus</strong>
+          , then restart this agent&rsquo;s sign-in.
         </EmptyState>
       ) : (
         <form
@@ -101,7 +99,7 @@ function SelectConnection() {
           }}
         >
           <div className={listSurface("divide-y divide-slate-200")}>
-            {connections.map((c) => (
+            {connections.map((c: PickerRow) => (
               <ConnectionOption
                 key={c.connectionId}
                 connection={c}
@@ -112,7 +110,7 @@ function SelectConnection() {
           </div>
           {error && <p className="text-base text-red-600">{error}</p>}
           <Button type="submit" disabled={pending || picked === ""}>
-            {pending ? "Connecting…" : "Grant access to this collection"}
+            {pending ? "Connecting…" : "Grant access to this corpus"}
           </Button>
         </form>
       )}
@@ -139,7 +137,7 @@ function ConnectionOption({
         className="mt-1"
       />
       <div className="min-w-0 flex-1">
-        <div className="font-medium text-slate-900">{c.collectionSlug}</div>
+        <div className="font-medium text-slate-900">{c.corpusSlug}</div>
         <div className="text-sm text-slate-500">
           {c.projectName}
           {c.isDefaultForCollection ? "" : ` · ${c.name}`}

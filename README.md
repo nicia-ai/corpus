@@ -13,8 +13,8 @@ repos, gists, Notion, and laptops, every agent carries its own drifting
 copy, and no one can see the full set. Corpus is **not a prompt manager,
 not a vector database, and not a RAG pipeline** — it's the documents you
 already have, made shared and versioned. Non-engineers author and curate
-them, group them into ordered **collections**, and agents consume those
-collections over MCP with per-project OAuth/API-key isolation: an agent
+them, group them into ordered **corpora**, and agents consume those
+corpora over MCP with per-project OAuth/API-key isolation: an agent
 only ever sees the project its credential resolves to.
 
 Tenancy is **Organization → Project**: one default project is
@@ -22,14 +22,14 @@ materialized per organization (the project selector stays hidden until a
 second exists). It runs entirely on Cloudflare — a Worker (Hono +
 TanStack Start), a D1 control plane for identity, and one SQLite-backed
 Durable Object per **project** holding that project's documents,
-collections, and folders.
+corpora, and folders.
 
-That document/collection/folder model is built on
+That document/corpus/folder model is built on
 **[TypeGraph](https://typegraph.dev)**, our open-source typed-graph
 library — Corpus's sibling in the knowledge stack (TypeGraph for
 structure, Corpus for context). Because documents are graph nodes shared
-across collections by reference rather than copied, one edit updates
-every collection, and every agent that reads it, at once. TypeGraph's
+across corpora by reference rather than copied, one edit updates
+every corpus, and every agent that reads it, at once. TypeGraph's
 node-unique `(slug, docVersion)` constraint gives optimistic-concurrency
 conflict detection for free: a racing save becomes a 409 conflict, never
 a lost write. The same graph underpins the verifiable, append-only
@@ -47,13 +47,13 @@ version history.
   restored from. General document review stays off MCP and the full review
   layer stays out of the bundle; an originating agent can only retrieve and
   reply inside its own proposal.
-- **Collections** — an ordered set of documents assembled into one
-  corpus, with a token-size estimate so you can see when a collection is
+- **Corpora** — an ordered set of documents assembled into one
+  corpus, with a token-size estimate so you can see when a corpus is
   too large for an agent to use well.
 - **MCP** — each project exposes an MCP endpoint (`/mcp`) authenticated
   by OAuth bearer token or `cck_`-prefixed API key. An agent only ever
-  sees the Collection its credential is bound to. It reads documents and
-  collections, and can **propose edits — and new documents** with
+  sees the Corpus its credential is bound to. It reads documents and
+  corpora, and can **propose edits — and new documents** with
   `suggest_edit`: a reviewable suggestion a human accepts or rejects
   (per hunk for edits; create-then-attach for a proposed new document),
   never an auto-applied write. Agents propose; only humans approve. With
@@ -67,7 +67,7 @@ version history.
   state remains off-MCP.
 - **CLI** — a standalone Git-free `pull`/`push` tool
   (`npm install -g @nicia-ai/corpus-cli`, then `corpus setup`) over a
-  collection-scoped REST surface (`/api/v1/docs`), for editing documents
+  corpus-scoped REST surface (`/api/v1/docs`), for editing documents
   from a terminal or CI with the same optimistic-concurrency contract as
   the editor. Its logic is a runtime-agnostic core (web `fetch` + an
   injected filesystem port, zero `node:` imports), plus `corpus doctor` for
@@ -94,7 +94,7 @@ pnpm dev          # Vite + Worker on http://localhost:8787
 ```
 
 Then open http://localhost:8787, sign up, name your organization, add a
-document, create a collection, and copy the MCP URL into your agent.
+document, create a corpus, and copy the MCP URL into your agent.
 
 If `pnpm db:migrate` fails with `table account already exists`, your
 local D1 state is stale. Remove `.wrangler/state/v3/d1` and run
@@ -137,7 +137,7 @@ src/
   event-log-store.ts   EventLogStore Durable Object — durable instrumentation event stream
   store/               Data-plane internals: handle, repos, domain
   db.ts                Drizzle ledger tables (co-located in the DO's SQLite)
-  graph.ts             TypeGraph schema: Document + Collection + Folder
+  graph.ts             TypeGraph schema: Document + Corpus + Folder
   mcp.ts               MCP JSON-RPC surface
   errors.ts util.ts
 test/                  vitest-pool-workers suites (real bindings)

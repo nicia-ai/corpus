@@ -35,6 +35,7 @@ import {
   pull,
   push,
 } from "./core.js";
+import { MCP_ADD_USAGE, mcpAdd } from "./mcp-add.js";
 
 function die(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -290,7 +291,9 @@ function usage(): string {
 Commands:
   setup [--url URL]                  Configure and verify this machine
   doctor                            Check config, permissions, and connectivity
-  list                              List documents in the bound collection
+  mcp add [--client cursor|claude-code|vscode]
+          [--url URL] [--name NAME] Write an OAuth MCP entry for an agent client
+  list                              List documents in the bound corpus
   pull <slug> [path]                Download markdown + version sidecar
   push <slug> [path]                Upload a new conflict-checked version
 
@@ -306,6 +309,34 @@ async function main(): Promise<void> {
   if (command === "doctor") {
     if (args.length > 0) die("usage: corpus doctor");
     return runDoctor();
+  }
+  if (command === "mcp") {
+    const [sub, ...rest] = args;
+    if (sub !== "add") {
+      die(MCP_ADD_USAGE);
+    }
+    try {
+      const result = await mcpAdd(rest, {
+        home: homedir(),
+        cwd: process.cwd(),
+        ...(process.env.CORPUS_URL !== undefined
+          ? { corpusUrl: process.env.CORPUS_URL }
+          : {}),
+      });
+      if (result.command !== undefined) {
+        process.stdout.write(
+          `Run this in your terminal, then complete the browser sign-in:\n\n  ${result.command}\n`,
+        );
+        return;
+      }
+      process.stdout.write(
+        `Wrote ${result.serverName} → ${result.path ?? ""}\n` +
+          `Reload your agent, then complete the browser sign-in on first use.\n`,
+      );
+      return;
+    } catch (error) {
+      die(error instanceof Error ? error.message : String(error));
+    }
   }
   if (command === "--version" || command === "-v") {
     if (args.length > 0) die("usage: corpus --version");

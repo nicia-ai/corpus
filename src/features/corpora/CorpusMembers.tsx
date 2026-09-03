@@ -6,28 +6,28 @@ import {
   type Delivery,
   DeliveryToggle,
   RemoveAction,
-} from "@/components/collection/DeliveryControls";
-import { DocLine, docMeta, FolderLine } from "@/components/collection/DocLine";
+} from "@/components/corpus/DeliveryControls";
+import { DocLine, docMeta, FolderLine } from "@/components/corpus/DocLine";
 import { Section } from "@/components/ui/Section";
 import { EmptyState, listSurface } from "@/components/ui/Surface";
-import type { CollectionSlug, FolderSlug, ProjectId } from "@/ids";
+import type { CorpusSlug, FolderSlug, ProjectId } from "@/ids";
 import { useSubmit } from "@/lib/forms";
 import {
   type ColFolderLink,
-  type ColMemberRow,
+  type CorpusMemberRow,
   detachDocument,
-  reorderCollectionDocuments,
+  reorderCorpusDocuments,
   setMemberDelivery,
-} from "@/lib/server/collections";
+} from "@/lib/server/corpora";
 import {
-  detachFolderFromCollection,
+  detachFolderFromCorpus,
   setFolderLinkDelivery,
 } from "@/lib/server/folders";
 import { formatNumber, manifestTokens, pluralize } from "@/util";
 
 // Footer copy is mode-specific so the budget clause never appears when
 // nothing is pre-loaded — "~0 / N" alongside zero pre-loaded rows reads
-// as a broken counter for owners. Returns "" on the empty collection so
+// as a broken counter for owners. Returns "" on the empty corpus so
 // the EmptyState above doesn't stack with a redundant "0 documents …"
 // line; the JSX guards with truthiness.
 function footerCopy({
@@ -54,11 +54,11 @@ function footerCopy({
   return `${pluralize(coreCount, "document")} always included (${tokens}) · ${String(referenceCount)} more available on demand.`;
 }
 
-// The left pane of the collection page: what the agent actually gets.
+// The left pane of the corpus page: what the agent actually gets.
 // Sized to its content; the footer restates the assembled result right
 // under the list so the content has a bottom of its own (no stretching,
 // no stranded footer).
-export function CollectionMembers({
+export function CorpusMembers({
   slug,
   projectId,
   budget,
@@ -66,15 +66,15 @@ export function CollectionMembers({
   viaFolder,
   linkedFolders,
 }: Readonly<{
-  slug: CollectionSlug;
+  slug: CorpusSlug;
   projectId: ProjectId;
   budget: number;
-  direct: readonly ColMemberRow[];
-  viaFolder: readonly ColMemberRow[];
+  direct: readonly CorpusMemberRow[];
+  viaFolder: readonly CorpusMemberRow[];
   linkedFolders: readonly ColFolderLink[];
 }>): React.ReactElement {
   const router = useRouter();
-  const [order, setOrder] = useState<readonly ColMemberRow[]>(direct);
+  const [order, setOrder] = useState<readonly CorpusMemberRow[]>(direct);
   const dragFrom = useRef<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
 
@@ -86,13 +86,13 @@ export function CollectionMembers({
     },
   );
 
-  function persistOrder(next: readonly ColMemberRow[]) {
+  function persistOrder(next: readonly CorpusMemberRow[]) {
     setOrder(next);
     void run(() =>
-      reorderCollectionDocuments({
+      reorderCorpusDocuments({
         data: {
           projectId,
-          collectionSlug: slug,
+          corpusSlug: slug,
           orderedDocumentSlugs: next.map((m) => m.slug),
         },
       }),
@@ -111,20 +111,20 @@ export function CollectionMembers({
     persistOrder(next);
   }
 
-  function detach(m: ColMemberRow) {
+  function detach(m: CorpusMemberRow) {
     void run(() =>
       detachDocument({
-        data: { projectId, collectionSlug: slug, documentSlug: m.slug },
+        data: { projectId, corpusSlug: slug, documentSlug: m.slug },
       }),
     );
   }
 
-  function setDocumentDelivery(m: ColMemberRow, delivery: Delivery) {
+  function setDocumentDelivery(m: CorpusMemberRow, delivery: Delivery) {
     void run(() =>
       setMemberDelivery({
         data: {
           projectId,
-          collectionSlug: slug,
+          corpusSlug: slug,
           documentSlug: m.slug,
           delivery,
         },
@@ -137,7 +137,7 @@ export function CollectionMembers({
       setFolderLinkDelivery({
         data: {
           projectId,
-          collectionSlug: slug,
+          corpusSlug: slug,
           folderSlug: f.slug,
           delivery,
         },
@@ -146,7 +146,7 @@ export function CollectionMembers({
   }
 
   const byFolder = useMemo(() => {
-    const m = new Map<FolderSlug, ColMemberRow[]>();
+    const m = new Map<FolderSlug, CorpusMemberRow[]>();
     for (const row of viaFolder) {
       if (row.viaFolder === undefined) continue;
       const list = m.get(row.viaFolder) ?? [];
@@ -159,7 +159,7 @@ export function CollectionMembers({
   // One pass over every member instead of two spreads + two filters —
   // delivered is reused for the token sum; coreCount falls out of it.
   const memberCount = order.length + viaFolder.length;
-  const delivered: ColMemberRow[] = [];
+  const delivered: CorpusMemberRow[] = [];
   for (const m of order) if (m.delivery === "core") delivered.push(m);
   for (const m of viaFolder) if (m.delivery === "core") delivered.push(m);
   const coreCount = delivered.length;
@@ -176,7 +176,7 @@ export function CollectionMembers({
   return (
     <div className="space-y-6">
       <Section
-        label="In this collection"
+        label="In this corpus"
         count={memberCount}
         tone="primary"
         hint={
@@ -188,7 +188,7 @@ export function CollectionMembers({
         {error && <p className="mb-2 text-base text-red-600">{error}</p>}
         {memberCount === 0 ? (
           <EmptyState>
-            Nothing here yet — use &ldquo;Add to this collection&rdquo; below.
+            Nothing here yet — use &ldquo;Add to this corpus&rdquo; below.
           </EmptyState>
         ) : (
           <ol className={listSurface("divide-y divide-slate-200")}>
@@ -238,7 +238,7 @@ export function CollectionMembers({
                           }
                         />
                         <RemoveAction
-                          label={`Remove ${m.title} from this collection`}
+                          label={`Remove ${m.title} from this corpus`}
                           onClick={() => detach(m)}
                         />
                       </span>
@@ -253,7 +253,7 @@ export function CollectionMembers({
 
       {linkedFolders.length > 0 && (
         <Section
-          label="Folders in this collection"
+          label="Folders in this corpus"
           hint="Live — documents added to these folders join automatically. Manage them by the folder, not one by one."
         >
           <div className="space-y-3">
@@ -266,10 +266,10 @@ export function CollectionMembers({
                 onDeliveryChange={(delivery) => setFolderDelivery(f, delivery)}
                 onUnlink={() =>
                   void run(() =>
-                    detachFolderFromCollection({
+                    detachFolderFromCorpus({
                       data: {
                         projectId,
-                        collectionSlug: slug,
+                        corpusSlug: slug,
                         folderSlug: f.slug,
                       },
                     }),
@@ -293,7 +293,7 @@ export function CollectionMembers({
 // The folder-link accordion inside the members pane: a folder header
 // with delivery + unlink trailing actions, then its current resolved
 // members rendered read-only (the folder is the unit; per-document
-// actions belong to the folder owner, not the collection builder).
+// actions belong to the folder owner, not the corpus builder).
 function FolderMembersSection({
   folder,
   members,
@@ -302,7 +302,7 @@ function FolderMembersSection({
   onUnlink,
 }: Readonly<{
   folder: ColFolderLink;
-  members: readonly ColMemberRow[];
+  members: readonly CorpusMemberRow[];
   delivery: Delivery;
   onDeliveryChange: (delivery: Delivery) => void;
   onUnlink: () => void;
@@ -321,7 +321,7 @@ function FolderMembersSection({
                 onChange={onDeliveryChange}
               />
               <RemoveAction
-                label={`Remove folder ${folder.name} from this collection`}
+                label={`Remove folder ${folder.name} from this corpus`}
                 onClick={onUnlink}
               />
             </span>

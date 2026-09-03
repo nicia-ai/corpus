@@ -21,17 +21,17 @@ import { Route as ConnectSelectRouteImport } from './routes/connect.select'
 import { Route as InviteInvitationIdRouteImport } from './routes/invite.$invitationId'
 import { Route as PProjectIdRouteRouteImport } from './routes/p/$projectId/route'
 import { Route as PProjectIdIndexRouteImport } from './routes/p/$projectId/index'
-import { Route as PProjectIdChangesRouteImport } from './routes/p/$projectId/changes'
+import { Route as PProjectIdActivityRouteImport } from './routes/p/$projectId/activity'
 import { Route as PProjectIdImportRouteImport } from './routes/p/$projectId/import'
 import { Route as PProjectIdSettingsRouteImport } from './routes/p/$projectId/settings'
 import { Route as PProjectIdTeamRouteImport } from './routes/p/$projectId/team'
-import { Route as PProjectIdCollectionsIndexRouteImport } from './routes/p/$projectId/collections/index'
-import { Route as PProjectIdCollectionsSlugRouteImport } from './routes/p/$projectId/collections/$slug'
+import { Route as PProjectIdCorporaIndexRouteImport } from './routes/p/$projectId/corpora/index'
+import { Route as PProjectIdCorporaSlugRouteImport } from './routes/p/$projectId/corpora/$slug'
 import { Route as PProjectIdDocumentsIndexRouteImport } from './routes/p/$projectId/documents/index'
 import { Route as PProjectIdDocumentsSlugRouteRouteImport } from './routes/p/$projectId/documents/$slug/route'
 import { Route as PProjectIdDocumentsNewRouteImport } from './routes/p/$projectId/documents/new'
-import { Route as PProjectIdCollectionsSlugActivityRouteImport } from './routes/p/$projectId/collections/$slug_.activity'
 import { Route as PProjectIdConnectorsMcpSetupRouteImport } from './routes/p/$projectId/connectors/mcp/setup'
+import { Route as PProjectIdCorporaSlugActivityRouteImport } from './routes/p/$projectId/corpora/$slug_.activity'
 import { Route as PProjectIdDocumentsSlugIndexRouteImport } from './routes/p/$projectId/documents/$slug/index'
 import { Route as PProjectIdDocumentsSlugVersionsRouteImport } from './routes/p/$projectId/documents/$slug/versions'
 
@@ -95,9 +95,9 @@ const PProjectIdIndexRoute = PProjectIdIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
-const PProjectIdChangesRoute = PProjectIdChangesRouteImport.update({
-  id: '/changes',
-  path: '/changes',
+const PProjectIdActivityRoute = PProjectIdActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
 const PProjectIdImportRoute = PProjectIdImportRouteImport.update({
@@ -115,18 +115,16 @@ const PProjectIdTeamRoute = PProjectIdTeamRouteImport.update({
   path: '/team',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
-const PProjectIdCollectionsIndexRoute =
-  PProjectIdCollectionsIndexRouteImport.update({
-    id: '/collections/',
-    path: '/collections/',
-    getParentRoute: () => PProjectIdRouteRoute,
-  } as any)
-const PProjectIdCollectionsSlugRoute =
-  PProjectIdCollectionsSlugRouteImport.update({
-    id: '/collections/$slug',
-    path: '/collections/$slug',
-    getParentRoute: () => PProjectIdRouteRoute,
-  } as any)
+const PProjectIdCorporaIndexRoute = PProjectIdCorporaIndexRouteImport.update({
+  id: '/corpora/',
+  path: '/corpora/',
+  getParentRoute: () => PProjectIdRouteRoute,
+} as any)
+const PProjectIdCorporaSlugRoute = PProjectIdCorporaSlugRouteImport.update({
+  id: '/corpora/$slug',
+  path: '/corpora/$slug',
+  getParentRoute: () => PProjectIdRouteRoute,
+} as any)
 const PProjectIdDocumentsIndexRoute =
   PProjectIdDocumentsIndexRouteImport.update({
     id: '/documents/',
@@ -144,16 +142,16 @@ const PProjectIdDocumentsNewRoute = PProjectIdDocumentsNewRouteImport.update({
   path: '/documents/new',
   getParentRoute: () => PProjectIdRouteRoute,
 } as any)
-const PProjectIdCollectionsSlugActivityRoute =
-  PProjectIdCollectionsSlugActivityRouteImport.update({
-    id: '/collections/$slug_/activity',
-    path: '/collections/$slug/activity',
-    getParentRoute: () => PProjectIdRouteRoute,
-  } as any)
 const PProjectIdConnectorsMcpSetupRoute =
   PProjectIdConnectorsMcpSetupRouteImport.update({
     id: '/connectors/mcp/setup',
     path: '/connectors/mcp/setup',
+    getParentRoute: () => PProjectIdRouteRoute,
+  } as any)
+const PProjectIdCorporaSlugActivityRoute =
+  PProjectIdCorporaSlugActivityRouteImport.update({
+    id: '/corpora/$slug_/activity',
+    path: '/corpora/$slug/activity',
     getParentRoute: () => PProjectIdRouteRoute,
   } as any)
 const PProjectIdDocumentsSlugIndexRoute =
@@ -181,18 +179,18 @@ export interface FileRoutesByFullPath {
   '/connect/select': typeof ConnectSelectRoute
   '/invite/$invitationId': typeof InviteInvitationIdRoute
   '/admin/': typeof AdminIndexRoute
-  '/p/$projectId/changes': typeof PProjectIdChangesRoute
+  '/p/$projectId/activity': typeof PProjectIdActivityRoute
   '/p/$projectId/import': typeof PProjectIdImportRoute
   '/p/$projectId/settings': typeof PProjectIdSettingsRoute
   '/p/$projectId/team': typeof PProjectIdTeamRoute
   '/p/$projectId/': typeof PProjectIdIndexRoute
   '/p/$projectId/documents/$slug': typeof PProjectIdDocumentsSlugRouteRouteWithChildren
-  '/p/$projectId/collections/$slug': typeof PProjectIdCollectionsSlugRoute
+  '/p/$projectId/corpora/$slug': typeof PProjectIdCorporaSlugRoute
   '/p/$projectId/documents/new': typeof PProjectIdDocumentsNewRoute
-  '/p/$projectId/collections/': typeof PProjectIdCollectionsIndexRoute
+  '/p/$projectId/corpora/': typeof PProjectIdCorporaIndexRoute
   '/p/$projectId/documents/': typeof PProjectIdDocumentsIndexRoute
-  '/p/$projectId/collections/$slug/activity': typeof PProjectIdCollectionsSlugActivityRoute
   '/p/$projectId/connectors/mcp/setup': typeof PProjectIdConnectorsMcpSetupRoute
+  '/p/$projectId/corpora/$slug/activity': typeof PProjectIdCorporaSlugActivityRoute
   '/p/$projectId/documents/$slug/versions': typeof PProjectIdDocumentsSlugVersionsRoute
   '/p/$projectId/documents/$slug/': typeof PProjectIdDocumentsSlugIndexRoute
 }
@@ -206,17 +204,17 @@ export interface FileRoutesByTo {
   '/connect/select': typeof ConnectSelectRoute
   '/invite/$invitationId': typeof InviteInvitationIdRoute
   '/admin': typeof AdminIndexRoute
-  '/p/$projectId/changes': typeof PProjectIdChangesRoute
+  '/p/$projectId/activity': typeof PProjectIdActivityRoute
   '/p/$projectId/import': typeof PProjectIdImportRoute
   '/p/$projectId/settings': typeof PProjectIdSettingsRoute
   '/p/$projectId/team': typeof PProjectIdTeamRoute
   '/p/$projectId': typeof PProjectIdIndexRoute
-  '/p/$projectId/collections/$slug': typeof PProjectIdCollectionsSlugRoute
+  '/p/$projectId/corpora/$slug': typeof PProjectIdCorporaSlugRoute
   '/p/$projectId/documents/new': typeof PProjectIdDocumentsNewRoute
-  '/p/$projectId/collections': typeof PProjectIdCollectionsIndexRoute
+  '/p/$projectId/corpora': typeof PProjectIdCorporaIndexRoute
   '/p/$projectId/documents': typeof PProjectIdDocumentsIndexRoute
-  '/p/$projectId/collections/$slug/activity': typeof PProjectIdCollectionsSlugActivityRoute
   '/p/$projectId/connectors/mcp/setup': typeof PProjectIdConnectorsMcpSetupRoute
+  '/p/$projectId/corpora/$slug/activity': typeof PProjectIdCorporaSlugActivityRoute
   '/p/$projectId/documents/$slug/versions': typeof PProjectIdDocumentsSlugVersionsRoute
   '/p/$projectId/documents/$slug': typeof PProjectIdDocumentsSlugIndexRoute
 }
@@ -233,18 +231,18 @@ export interface FileRoutesById {
   '/connect/select': typeof ConnectSelectRoute
   '/invite/$invitationId': typeof InviteInvitationIdRoute
   '/admin/': typeof AdminIndexRoute
-  '/p/$projectId/changes': typeof PProjectIdChangesRoute
+  '/p/$projectId/activity': typeof PProjectIdActivityRoute
   '/p/$projectId/import': typeof PProjectIdImportRoute
   '/p/$projectId/settings': typeof PProjectIdSettingsRoute
   '/p/$projectId/team': typeof PProjectIdTeamRoute
   '/p/$projectId/': typeof PProjectIdIndexRoute
   '/p/$projectId/documents/$slug': typeof PProjectIdDocumentsSlugRouteRouteWithChildren
-  '/p/$projectId/collections/$slug': typeof PProjectIdCollectionsSlugRoute
+  '/p/$projectId/corpora/$slug': typeof PProjectIdCorporaSlugRoute
   '/p/$projectId/documents/new': typeof PProjectIdDocumentsNewRoute
-  '/p/$projectId/collections/': typeof PProjectIdCollectionsIndexRoute
+  '/p/$projectId/corpora/': typeof PProjectIdCorporaIndexRoute
   '/p/$projectId/documents/': typeof PProjectIdDocumentsIndexRoute
-  '/p/$projectId/collections/$slug_/activity': typeof PProjectIdCollectionsSlugActivityRoute
   '/p/$projectId/connectors/mcp/setup': typeof PProjectIdConnectorsMcpSetupRoute
+  '/p/$projectId/corpora/$slug_/activity': typeof PProjectIdCorporaSlugActivityRoute
   '/p/$projectId/documents/$slug/versions': typeof PProjectIdDocumentsSlugVersionsRoute
   '/p/$projectId/documents/$slug/': typeof PProjectIdDocumentsSlugIndexRoute
 }
@@ -262,18 +260,18 @@ export interface FileRouteTypes {
     | '/connect/select'
     | '/invite/$invitationId'
     | '/admin/'
-    | '/p/$projectId/changes'
+    | '/p/$projectId/activity'
     | '/p/$projectId/import'
     | '/p/$projectId/settings'
     | '/p/$projectId/team'
     | '/p/$projectId/'
     | '/p/$projectId/documents/$slug'
-    | '/p/$projectId/collections/$slug'
+    | '/p/$projectId/corpora/$slug'
     | '/p/$projectId/documents/new'
-    | '/p/$projectId/collections/'
+    | '/p/$projectId/corpora/'
     | '/p/$projectId/documents/'
-    | '/p/$projectId/collections/$slug/activity'
     | '/p/$projectId/connectors/mcp/setup'
+    | '/p/$projectId/corpora/$slug/activity'
     | '/p/$projectId/documents/$slug/versions'
     | '/p/$projectId/documents/$slug/'
   fileRoutesByTo: FileRoutesByTo
@@ -287,17 +285,17 @@ export interface FileRouteTypes {
     | '/connect/select'
     | '/invite/$invitationId'
     | '/admin'
-    | '/p/$projectId/changes'
+    | '/p/$projectId/activity'
     | '/p/$projectId/import'
     | '/p/$projectId/settings'
     | '/p/$projectId/team'
     | '/p/$projectId'
-    | '/p/$projectId/collections/$slug'
+    | '/p/$projectId/corpora/$slug'
     | '/p/$projectId/documents/new'
-    | '/p/$projectId/collections'
+    | '/p/$projectId/corpora'
     | '/p/$projectId/documents'
-    | '/p/$projectId/collections/$slug/activity'
     | '/p/$projectId/connectors/mcp/setup'
+    | '/p/$projectId/corpora/$slug/activity'
     | '/p/$projectId/documents/$slug/versions'
     | '/p/$projectId/documents/$slug'
   id:
@@ -313,18 +311,18 @@ export interface FileRouteTypes {
     | '/connect/select'
     | '/invite/$invitationId'
     | '/admin/'
-    | '/p/$projectId/changes'
+    | '/p/$projectId/activity'
     | '/p/$projectId/import'
     | '/p/$projectId/settings'
     | '/p/$projectId/team'
     | '/p/$projectId/'
     | '/p/$projectId/documents/$slug'
-    | '/p/$projectId/collections/$slug'
+    | '/p/$projectId/corpora/$slug'
     | '/p/$projectId/documents/new'
-    | '/p/$projectId/collections/'
+    | '/p/$projectId/corpora/'
     | '/p/$projectId/documents/'
-    | '/p/$projectId/collections/$slug_/activity'
     | '/p/$projectId/connectors/mcp/setup'
+    | '/p/$projectId/corpora/$slug_/activity'
     | '/p/$projectId/documents/$slug/versions'
     | '/p/$projectId/documents/$slug/'
   fileRoutesById: FileRoutesById
@@ -427,11 +425,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdIndexRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
-    '/p/$projectId/changes': {
-      id: '/p/$projectId/changes'
-      path: '/changes'
-      fullPath: '/p/$projectId/changes'
-      preLoaderRoute: typeof PProjectIdChangesRouteImport
+    '/p/$projectId/activity': {
+      id: '/p/$projectId/activity'
+      path: '/activity'
+      fullPath: '/p/$projectId/activity'
+      preLoaderRoute: typeof PProjectIdActivityRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
     '/p/$projectId/import': {
@@ -455,18 +453,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdTeamRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
-    '/p/$projectId/collections/': {
-      id: '/p/$projectId/collections/'
-      path: '/collections'
-      fullPath: '/p/$projectId/collections/'
-      preLoaderRoute: typeof PProjectIdCollectionsIndexRouteImport
+    '/p/$projectId/corpora/': {
+      id: '/p/$projectId/corpora/'
+      path: '/corpora'
+      fullPath: '/p/$projectId/corpora/'
+      preLoaderRoute: typeof PProjectIdCorporaIndexRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
-    '/p/$projectId/collections/$slug': {
-      id: '/p/$projectId/collections/$slug'
-      path: '/collections/$slug'
-      fullPath: '/p/$projectId/collections/$slug'
-      preLoaderRoute: typeof PProjectIdCollectionsSlugRouteImport
+    '/p/$projectId/corpora/$slug': {
+      id: '/p/$projectId/corpora/$slug'
+      path: '/corpora/$slug'
+      fullPath: '/p/$projectId/corpora/$slug'
+      preLoaderRoute: typeof PProjectIdCorporaSlugRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
     '/p/$projectId/documents/': {
@@ -490,18 +488,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdDocumentsNewRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
-    '/p/$projectId/collections/$slug_/activity': {
-      id: '/p/$projectId/collections/$slug_/activity'
-      path: '/collections/$slug/activity'
-      fullPath: '/p/$projectId/collections/$slug/activity'
-      preLoaderRoute: typeof PProjectIdCollectionsSlugActivityRouteImport
-      parentRoute: typeof PProjectIdRouteRoute
-    }
     '/p/$projectId/connectors/mcp/setup': {
       id: '/p/$projectId/connectors/mcp/setup'
       path: '/connectors/mcp/setup'
       fullPath: '/p/$projectId/connectors/mcp/setup'
       preLoaderRoute: typeof PProjectIdConnectorsMcpSetupRouteImport
+      parentRoute: typeof PProjectIdRouteRoute
+    }
+    '/p/$projectId/corpora/$slug_/activity': {
+      id: '/p/$projectId/corpora/$slug_/activity'
+      path: '/corpora/$slug/activity'
+      fullPath: '/p/$projectId/corpora/$slug/activity'
+      preLoaderRoute: typeof PProjectIdCorporaSlugActivityRouteImport
       parentRoute: typeof PProjectIdRouteRoute
     }
     '/p/$projectId/documents/$slug/': {
@@ -552,35 +550,34 @@ const PProjectIdDocumentsSlugRouteRouteWithChildren =
   )
 
 interface PProjectIdRouteRouteChildren {
-  PProjectIdChangesRoute: typeof PProjectIdChangesRoute
+  PProjectIdActivityRoute: typeof PProjectIdActivityRoute
   PProjectIdImportRoute: typeof PProjectIdImportRoute
   PProjectIdSettingsRoute: typeof PProjectIdSettingsRoute
   PProjectIdTeamRoute: typeof PProjectIdTeamRoute
   PProjectIdIndexRoute: typeof PProjectIdIndexRoute
   PProjectIdDocumentsSlugRouteRoute: typeof PProjectIdDocumentsSlugRouteRouteWithChildren
-  PProjectIdCollectionsSlugRoute: typeof PProjectIdCollectionsSlugRoute
+  PProjectIdCorporaSlugRoute: typeof PProjectIdCorporaSlugRoute
   PProjectIdDocumentsNewRoute: typeof PProjectIdDocumentsNewRoute
-  PProjectIdCollectionsIndexRoute: typeof PProjectIdCollectionsIndexRoute
+  PProjectIdCorporaIndexRoute: typeof PProjectIdCorporaIndexRoute
   PProjectIdDocumentsIndexRoute: typeof PProjectIdDocumentsIndexRoute
-  PProjectIdCollectionsSlugActivityRoute: typeof PProjectIdCollectionsSlugActivityRoute
   PProjectIdConnectorsMcpSetupRoute: typeof PProjectIdConnectorsMcpSetupRoute
+  PProjectIdCorporaSlugActivityRoute: typeof PProjectIdCorporaSlugActivityRoute
 }
 
 const PProjectIdRouteRouteChildren: PProjectIdRouteRouteChildren = {
-  PProjectIdChangesRoute: PProjectIdChangesRoute,
+  PProjectIdActivityRoute: PProjectIdActivityRoute,
   PProjectIdImportRoute: PProjectIdImportRoute,
   PProjectIdSettingsRoute: PProjectIdSettingsRoute,
   PProjectIdTeamRoute: PProjectIdTeamRoute,
   PProjectIdIndexRoute: PProjectIdIndexRoute,
   PProjectIdDocumentsSlugRouteRoute:
     PProjectIdDocumentsSlugRouteRouteWithChildren,
-  PProjectIdCollectionsSlugRoute: PProjectIdCollectionsSlugRoute,
+  PProjectIdCorporaSlugRoute: PProjectIdCorporaSlugRoute,
   PProjectIdDocumentsNewRoute: PProjectIdDocumentsNewRoute,
-  PProjectIdCollectionsIndexRoute: PProjectIdCollectionsIndexRoute,
+  PProjectIdCorporaIndexRoute: PProjectIdCorporaIndexRoute,
   PProjectIdDocumentsIndexRoute: PProjectIdDocumentsIndexRoute,
-  PProjectIdCollectionsSlugActivityRoute:
-    PProjectIdCollectionsSlugActivityRoute,
   PProjectIdConnectorsMcpSetupRoute: PProjectIdConnectorsMcpSetupRoute,
+  PProjectIdCorporaSlugActivityRoute: PProjectIdCorporaSlugActivityRoute,
 }
 
 const PProjectIdRouteRouteWithChildren = PProjectIdRouteRoute._addFileChildren(

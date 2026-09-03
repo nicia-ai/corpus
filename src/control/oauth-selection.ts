@@ -59,8 +59,10 @@ export async function selectionKey(
 }
 
 // — Pending-connect intent (userId-keyed). Written by the
-// Collection-page "Connect this collection" action before any OAuth
-// flow exists; read by /connect/select to PRE-SELECT (never to bind).
+// Corpus-page "Connect this corpus" action before any OAuth
+// flow exists. `/connect/select` pre-selects from it — it
+// deliberately does NOT bind (a userId-keyed hint cannot safely
+// bind across concurrent handshakes; see schema/app.ts).
 
 export async function writePendingConnect(
   db: ControlDb,

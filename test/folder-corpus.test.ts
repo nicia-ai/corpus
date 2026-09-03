@@ -16,8 +16,8 @@ async function folderSlugByName(
   return asFolderSlug(f.slug);
 }
 
-describe("folder→collection links — shared resolver expansion", () => {
-  it("a linked folder expands into the collection (docs by filename, then subfolders)", async () => {
+describe("folder→corpus links — shared resolver expansion", () => {
+  it("a linked folder expands into the corpus (docs by filename, then subfolders)", async () => {
     const w = ws();
     await w.importDocumentAtPath({
       path: "a/b/zeta.md",
@@ -29,18 +29,18 @@ describe("folder→collection links — shared resolver expansion", () => {
       markdown: "a",
       changedBy: by,
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("c1"),
       name: "C1",
       changedBy: by,
     });
     const b = await folderSlugByName(w, "b");
 
-    expect((await w.attachFolderToCollection(colSlug("c1"), b, 1, by)).ok).toBe(
+    expect((await w.attachFolderToCorpus(colSlug("c1"), b, 1, by)).ok).toBe(
       true,
     );
 
-    const r = await w.readCollection(colSlug("c1"));
+    const r = await w.readCorpus(colSlug("c1"));
     expect(r.found).toBe(true);
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug)).toEqual(["a-b-alpha", "a-b-zeta"]);
@@ -58,7 +58,7 @@ describe("folder→collection links — shared resolver expansion", () => {
       markdown: "a",
       changedBy: by,
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("c2"),
       name: "C2",
       changedBy: by,
@@ -67,9 +67,9 @@ describe("folder→collection links — shared resolver expansion", () => {
 
     // zeta also included directly at position 1 (before the folder).
     await w.attachDocument(colSlug("c2"), docSlug("a-b-zeta"), 1, by);
-    await w.attachFolderToCollection(colSlug("c2"), b, 2, by);
+    await w.attachFolderToCorpus(colSlug("c2"), b, 2, by);
 
-    const r = await w.readCollection(colSlug("c2"));
+    const r = await w.readCorpus(colSlug("c2"));
     if (!r.found) return;
     // zeta first (direct, pos 1); folder expands alpha (zeta deduped).
     expect(r.documents.map((d) => d.slug)).toEqual(["a-b-zeta", "a-b-alpha"]);
@@ -87,13 +87,13 @@ describe("folder→collection links — shared resolver expansion", () => {
       markdown: "a",
       changedBy: by,
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("c3"),
       name: "C3",
       changedBy: by,
     });
     const b = await folderSlugByName(w, "b");
-    await w.attachFolderToCollection(colSlug("c3"), b, 1, by);
+    await w.attachFolderToCorpus(colSlug("c3"), b, 1, by);
 
     await w.importDocumentAtPath({
       path: "a/b/mid.md",
@@ -101,7 +101,7 @@ describe("folder→collection links — shared resolver expansion", () => {
       changedBy: by,
     });
 
-    const r = await w.readCollection(colSlug("c3"));
+    const r = await w.readCorpus(colSlug("c3"));
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug)).toEqual([
       "a-b-alpha",
@@ -122,16 +122,16 @@ describe("folder→collection links — shared resolver expansion", () => {
       markdown: "d",
       changedBy: by,
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("c4"),
       name: "C4",
       changedBy: by,
     });
     const a = await folderSlugByName(w, "a");
     const b = await folderSlugByName(w, "b");
-    await w.attachFolderToCollection(colSlug("c4"), a, 1, by);
+    await w.attachFolderToCorpus(colSlug("c4"), a, 1, by);
 
-    let r = await w.readCollection(colSlug("c4"));
+    let r = await w.readCorpus(colSlug("c4"));
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug).sort()).toEqual([
       "a-b-deep",
@@ -140,7 +140,7 @@ describe("folder→collection links — shared resolver expansion", () => {
 
     // Move b out to root → it leaves a's subtree.
     expect((await w.moveFolder(b, null, by)).ok).toBe(true);
-    r = await w.readCollection(colSlug("c4"));
+    r = await w.readCorpus(colSlug("c4"));
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug)).toEqual(["a-top"]);
   });
@@ -152,47 +152,47 @@ describe("folder→collection links — shared resolver expansion", () => {
       markdown: "x",
       changedBy: by,
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("c5"),
       name: "C5",
       changedBy: by,
     });
     const b = await folderSlugByName(w, "b");
-    await w.attachFolderToCollection(colSlug("c5"), b, 1, by);
-    expect((await w.detachFolderFromCollection(colSlug("c5"), b, by)).ok).toBe(
+    await w.attachFolderToCorpus(colSlug("c5"), b, 1, by);
+    expect((await w.detachFolderFromCorpus(colSlug("c5"), b, by)).ok).toBe(
       true,
     );
-    const r = await w.readCollection(colSlug("c5"));
+    const r = await w.readCorpus(colSlug("c5"));
     if (!r.found) return;
     expect(r.documents).toEqual([]);
   });
 
-  it("a folder linked by a collection can still be deleted (inbound link released)", async () => {
+  it("a folder linked by a corpus can still be deleted (inbound link released)", async () => {
     const w = ws();
     await w.importDocumentAtPath({
       path: "a/b/x.md",
       markdown: "x",
       changedBy: by,
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("c7"),
       name: "C7",
       changedBy: by,
     });
     const b = await folderSlugByName(w, "b");
-    await w.attachFolderToCollection(colSlug("c7"), b, 1, by);
+    await w.attachFolderToCorpus(colSlug("c7"), b, 1, by);
 
     // Must not roll back on the dangling includes_folder edge.
     expect((await w.deleteFolder(b, by)).ok).toBe(true);
     expect((await w.listFolders()).some((f) => f.slug === b)).toBe(false);
-    const r = await w.readCollection(colSlug("c7"));
+    const r = await w.readCorpus(colSlug("c7"));
     if (!r.found) return;
-    // x is archived with the folder and the collection's folder link
-    // is gone, so the collection now resolves to nothing.
+    // x is archived with the folder and the corpus's folder link
+    // is gone, so the corpus now resolves to nothing.
     expect(r.documents).toEqual([]);
   });
 
-  it("a collection with only direct documents is unchanged (fast path)", async () => {
+  it("a corpus with only direct documents is unchanged (fast path)", async () => {
     const w = ws();
     for (const s of ["alpha", "bravo"]) {
       await w.saveDocument({
@@ -202,14 +202,14 @@ describe("folder→collection links — shared resolver expansion", () => {
         changedBy: by,
       });
     }
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("c6"),
       name: "C6",
       changedBy: by,
     });
     await w.attachDocument(colSlug("c6"), docSlug("bravo"), 2, by);
     await w.attachDocument(colSlug("c6"), docSlug("alpha"), 1, by);
-    const r = await w.readCollection(colSlug("c6"));
+    const r = await w.readCorpus(colSlug("c6"));
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug)).toEqual(["alpha", "bravo"]);
   });
@@ -280,8 +280,8 @@ describe("placeDocumentsInFolder — bulk move", () => {
     expect(byFolder.get("charlie")).toBe(null);
   });
 
-  // Regression: in a folder-linked collection, a direct member's resolved
-  // index (what collectionStructure exposes as `position`) is NOT its stored
+  // Regression: in a folder-linked corpus, a direct member's resolved
+  // index (what corpusStructure exposes as `position`) is NOT its stored
   // includes-edge position. Flipping its delivery tier must NOT round-trip
   // that resolved index back into the edge position — doing so reordered
   // direct members relative to each other.
@@ -311,21 +311,21 @@ describe("placeDocumentsInFolder — bulk move", () => {
       clientVersion: 0,
       changedBy: by,
     });
-    await w.createCollection({ slug: colSlug("c"), name: "C", changedBy: by });
+    await w.createCorpus({ slug: colSlug("c"), name: "C", changedBy: by });
     const b = await folderSlugByName(w, "b");
 
-    await w.attachFolderToCollection(colSlug("c"), b, 1, by);
+    await w.attachFolderToCorpus(colSlug("c"), b, 1, by);
     await w.attachDocument(colSlug("c"), docSlug("mid"), 2, by);
     await w.attachDocument(colSlug("c"), docSlug("last"), 3, by);
 
-    const before = await w.collectionStructure(colSlug("c"));
+    const before = await w.corpusStructure(colSlug("c"));
     expect(before.found).toBe(true);
     if (!before.found) return;
     const orderBefore = before.members.map((m) => m.slug);
     // Resolved: folder docs first, then the two direct docs in edge order.
     expect(orderBefore).toEqual(["a-b-alpha", "a-b-zeta", "mid", "last"]);
 
-    // `mid`'s collectionStructure position is its resolved index (3), not its
+    // `mid`'s corpusStructure position is its resolved index (3), not its
     // stored edge position (2) — the trap the old toggle fell into.
     expect(before.members.find((m) => m.slug === "mid")?.position).toBe(3);
 
@@ -337,7 +337,7 @@ describe("placeDocumentsInFolder — bulk move", () => {
     );
     expect(flip.ok).toBe(true);
 
-    const after = await w.collectionStructure(colSlug("c"));
+    const after = await w.corpusStructure(colSlug("c"));
     if (!after.found) return;
     // Order is byte-for-byte unchanged; only `mid`'s tier flipped.
     expect(after.members.map((m) => m.slug)).toEqual(orderBefore);
@@ -356,7 +356,7 @@ describe("placeDocumentsInFolder — bulk move", () => {
     expect(noop.ok).toBe(false);
 
     // read_collection now ships only the core members, still in order.
-    const read = await w.readCollection(colSlug("c"));
+    const read = await w.readCorpus(colSlug("c"));
     if (!read.found) return;
     expect(read.documents.map((d) => d.slug)).toEqual([
       "a-b-alpha",
@@ -393,20 +393,20 @@ describe("placeDocumentsInFolder — bulk move", () => {
       clientVersion: 0,
       changedBy: by,
     });
-    await w.createCollection({ slug: colSlug("r"), name: "R", changedBy: by });
+    await w.createCorpus({ slug: colSlug("r"), name: "R", changedBy: by });
     const b = await folderSlugByName(w, "b");
-    await w.attachFolderToCollection(colSlug("r"), b, 1, by);
+    await w.attachFolderToCorpus(colSlug("r"), b, 1, by);
     await w.attachDocument(colSlug("r"), docSlug("mid"), 2, by);
     await w.attachDocument(colSlug("r"), docSlug("last"), 3, by);
 
-    const reorder = await w.reorderCollectionDocuments(
+    const reorder = await w.reorderCorpusDocuments(
       colSlug("r"),
       [docSlug("last"), docSlug("mid")],
       by,
     );
     expect(reorder.ok).toBe(true);
 
-    const after = await w.collectionStructure(colSlug("r"));
+    const after = await w.corpusStructure(colSlug("r"));
     if (!after.found) return;
     expect(after.members.map((m) => m.slug)).toEqual([
       "a-b-alpha",
@@ -426,11 +426,11 @@ describe("placeDocumentsInFolder — bulk move", () => {
       markdown: "n",
       changedBy: by,
     });
-    await w.createCollection({ slug: colSlug("d"), name: "D", changedBy: by });
+    await w.createCorpus({ slug: colSlug("d"), name: "D", changedBy: by });
     const b = await folderSlugByName(w, "b");
 
     // Folder linked as core (its docs would be core by inheritance)…
-    await w.attachFolderToCollection(colSlug("d"), b, 1, by, "core");
+    await w.attachFolderToCorpus(colSlug("d"), b, 1, by, "core");
     // …but the same doc is also a direct member, explicitly reference.
     await w.attachDocument(
       colSlug("d"),
@@ -440,13 +440,13 @@ describe("placeDocumentsInFolder — bulk move", () => {
       "reference",
     );
 
-    const s = await w.collectionStructure(colSlug("d"));
+    const s = await w.corpusStructure(colSlug("d"));
     if (!s.found) return;
     expect(s.members.find((m) => m.slug === "a-b-note")?.delivery).toBe(
       "reference",
     );
     // Direct reference wins → excluded from read_collection's core corpus.
-    const read = await w.readCollection(colSlug("d"));
+    const read = await w.readCorpus(colSlug("d"));
     if (!read.found) return;
     expect(read.documents.map((d) => d.slug)).toEqual([]);
   });
@@ -470,33 +470,33 @@ describe("listResolvedMembers — folder-aware document counts", () => {
       markdown: "x",
       changedBy: by,
     });
-    await w.createCollection({ slug: colSlug("c"), name: "C", changedBy: by });
+    await w.createCorpus({ slug: colSlug("c"), name: "C", changedBy: by });
     const b = await folderSlugByName(w, "b");
-    await w.attachFolderToCollection(colSlug("c"), b, 1, by); // pulls one, two
+    await w.attachFolderToCorpus(colSlug("c"), b, 1, by); // pulls one, two
     await w.attachDocument(colSlug("c"), docSlug("loose"), 2, by); // direct
     await w.attachDocument(colSlug("c"), docSlug("a-b-one"), 3, by); // also direct → dedup
 
     const forC = (await w.listResolvedMembers())
-      .filter((m) => m.collectionSlug === "c")
+      .filter((m) => m.corpusSlug === "c")
       .map((m) => m.documentSlug)
       .sort();
     // one + two via folder, loose direct; one counted once despite two edges.
     expect(forC).toEqual(["a-b-one", "a-b-two", "loose"]);
   });
 
-  it("a collection with only a folder link still reports its documents", async () => {
+  it("a corpus with only a folder link still reports its documents", async () => {
     const w = ws();
     await w.importDocumentAtPath({
       path: "docs/x.md",
       markdown: "x",
       changedBy: by,
     });
-    await w.createCollection({ slug: colSlug("f"), name: "F", changedBy: by });
+    await w.createCorpus({ slug: colSlug("f"), name: "F", changedBy: by });
     const docs = await folderSlugByName(w, "docs");
-    await w.attachFolderToCollection(colSlug("f"), docs, 1, by);
+    await w.attachFolderToCorpus(colSlug("f"), docs, 1, by);
 
     const forF = (await w.listResolvedMembers()).filter(
-      (m) => m.collectionSlug === "f",
+      (m) => m.corpusSlug === "f",
     );
     expect(forF.map((m) => m.documentSlug)).toEqual(["docs-x"]);
   });

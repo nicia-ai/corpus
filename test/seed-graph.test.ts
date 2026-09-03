@@ -10,7 +10,7 @@ describe("seedExample (atomic, guarded)", () => {
     expect(await w.seedExample("u")).toEqual({ seeded: true });
 
     const docs = await w.listDocuments();
-    const cols = await w.listCollections();
+    const cols = await w.listCorpora();
     const members = await w.listResolvedMembers();
 
     expect(docs.map((d) => d.slug).sort()).toEqual([
@@ -22,24 +22,24 @@ describe("seedExample (atomic, guarded)", () => {
       "sales-agent",
       "support-agent",
     ]);
-    // The whole point: ONE document, in BOTH collections.
+    // The whole point: ONE document, in BOTH corpora.
     expect(
       members
         .filter((m) => m.documentSlug === "refund-policy")
-        .map((m) => m.collectionSlug)
+        .map((m) => m.corpusSlug)
         .sort(),
     ).toEqual(["sales-agent", "support-agent"]);
     // product is present in Sales only (not stranded).
     expect(
       members
         .filter((m) => m.documentSlug === "product")
-        .map((m) => m.collectionSlug),
+        .map((m) => m.corpusSlug),
     ).toEqual(["sales-agent"]);
     // brand-voice is present in Sales only (not stranded).
     expect(
       members
         .filter((m) => m.documentSlug === "brand-voice")
-        .map((m) => m.collectionSlug),
+        .map((m) => m.corpusSlug),
     ).toEqual(["sales-agent"]);
   });
 
@@ -52,7 +52,7 @@ describe("seedExample (atomic, guarded)", () => {
       reason: "not_empty",
     });
     expect((await w.listDocuments()).length).toBe(3);
-    expect((await w.listCollections()).length).toBe(2);
+    expect((await w.listCorpora()).length).toBe(2);
     // 4 resolved memberships: refund-policy ×2 + product + brand-voice.
     expect((await w.listResolvedMembers()).length).toBe(4);
   });
@@ -69,7 +69,7 @@ describe("seedExample (atomic, guarded)", () => {
       seeded: false,
       reason: "not_empty",
     });
-    expect((await w.listCollections()).length).toBe(0);
+    expect((await w.listCorpora()).length).toBe(0);
   });
 });
 
@@ -78,7 +78,7 @@ describe("listResolvedMembers", () => {
     expect(await ws().listResolvedMembers()).toEqual([]);
   });
 
-  it("reports each resolved collection → document membership", async () => {
+  it("reports each resolved corpus → document membership", async () => {
     const w = ws();
     await w.saveDocument({
       slug: docSlug("a"),
@@ -86,10 +86,10 @@ describe("listResolvedMembers", () => {
       clientVersion: 0,
       changedBy: "u",
     });
-    await w.createCollection({ slug: colSlug("c"), name: "C", changedBy: "u" });
+    await w.createCorpus({ slug: colSlug("c"), name: "C", changedBy: "u" });
     await w.attachDocument(colSlug("c"), docSlug("a"), 1, "u");
     expect(await w.listResolvedMembers()).toEqual([
-      { collectionSlug: "c", documentSlug: "a" },
+      { corpusSlug: "c", documentSlug: "a" },
     ]);
   });
 });

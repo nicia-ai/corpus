@@ -2,10 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
   asFolderSlug,
-  type CollectionSlug,
+  type CorpusSlug,
   type DocumentSlug,
   type FolderSlug,
 } from "@/ids";
@@ -14,35 +14,35 @@ import { changedBy, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
 import type { SeedResult } from "@/project-store";
 import {
-  collectionDelivery,
+  corpusDelivery,
   type CollectionDelivery,
 } from "@/store/domain/collection-expand";
 import { alwaysIncludeBudgetTokensZ, compact, slugify } from "@/util";
 
-export type ColMeta = Readonly<{
-  slug: CollectionSlug;
+export type CorpusMeta = Readonly<{
+  slug: CorpusSlug;
   name: string;
   description?: string;
 }>;
-// Collections list row: ColMeta + how many documents are attached (the
+// Corpora list row: CorpusMeta + how many documents are attached (the
 // "builder" needs this at a glance). One round trip, like getDocumentList.
-export type ColListItem = Readonly<{
-  slug: CollectionSlug;
+export type CorpusListItem = Readonly<{
+  slug: CorpusSlug;
   name: string;
   description?: string;
   documentCount: number;
 }>;
-// A resolved (collection, document) membership pair — the document is in
-// the collection directly OR via a linked folder. Backs every
-// "how many documents" / "in how many collections" count.
-export type CollectionMember = Readonly<{
-  collectionSlug: CollectionSlug;
+// A resolved (corpus, document) membership pair — the document is in
+// the corpus directly OR via a linked folder. Backs every
+// "how many documents" / "in how many corpora" count.
+export type CorpusMember = Readonly<{
+  corpusSlug: CorpusSlug;
   documentSlug: DocumentSlug;
 }>;
 // Provenance-aware builder view. `direct` members carry an `includes`
 // edge (detach/reorder individually); `viaFolder` members are pulled in
 // by a linked folder (manage them by detaching the folder).
-export type ColMemberRow = Readonly<{
+export type CorpusMemberRow = Readonly<{
   slug: DocumentSlug;
   title: string;
   docVersion: number;
@@ -67,13 +67,13 @@ export type ColDetail = Readonly<
       description?: string;
       alwaysIncludeBudgetTokens: number;
       folders: readonly ColFolderLink[];
-      members: readonly ColMemberRow[];
+      members: readonly CorpusMemberRow[];
     }
 >;
 
 // Lightweight head-node lookup for callers that need name/description/
 // budget without the full member structure (e.g. the MCP setup page).
-export type ColMetaResult = Readonly<
+export type CorpusMetaResult = Readonly<
   | { found: false }
   | {
       found: true;
@@ -83,45 +83,44 @@ export type ColMetaResult = Readonly<
     }
 >;
 
-export const colMetas = (
+export const corpusMetas = (
   rows: readonly { slug: string; name: string; description?: string }[],
-): ColMeta[] =>
+): CorpusMeta[] =>
   rows.map((c) =>
     compact({
-      slug: asCollectionSlug(c.slug),
+      slug: asCorpusSlug(c.slug),
       name: c.name,
       description: c.description,
     }),
   );
 
-export const collectionMemberMetas = (
-  rows: readonly { collectionSlug: string; documentSlug: string }[],
-): CollectionMember[] =>
+export const corpusMemberMetas = (
+  rows: readonly { corpusSlug: string; documentSlug: string }[],
+): CorpusMember[] =>
   rows.map((m) => ({
-    collectionSlug: asCollectionSlug(m.collectionSlug),
+    corpusSlug: asCorpusSlug(m.corpusSlug),
     documentSlug: asDocumentSlug(m.documentSlug),
   }));
 
-export const getCollectionList = createServerFn({ method: "GET" })
+export const getCorpusList = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .handler(async ({ context }): Promise<ColListItem[]> => {
-    const store = storeOf(srv(context));
-    const [collections, members] = await Promise.all([
-      store.listCollections(),
+  .handler(async ({ context }): Promise<CorpusListItem[]> => {
+    const c = srv(context);
+    const store = storeOf(c);
+    await store.ensureDefaultCorpus(changedBy(c));
+    const [corpora, members] = await Promise.all([
+      store.listCorpora(),
       store.listResolvedMembers(),
     ]);
-    // One member row per resolved (collection, document), so counting
-    // rows per collection yields the folder-aware document count.
+    // One member row per resolved (corpus, document), so counting
+    // rows per corpus yields the folder-aware document count.
     const countByCol = new Map<string, number>();
     for (const m of members) {
-      countByCol.set(
-        m.collectionSlug,
-        (countByCol.get(m.collectionSlug) ?? 0) + 1,
-      );
+      countByCol.set(m.corpusSlug, (countByCol.get(m.corpusSlug) ?? 0) + 1);
     }
-    return collections.map((c) =>
+    return corpora.map((c) =>
       compact({
-        slug: asCollectionSlug(c.slug),
+        slug: asCorpusSlug(c.slug),
         name: c.name,
         description: c.description,
         documentCount: countByCol.get(c.slug) ?? 0,
@@ -129,28 +128,28 @@ export const getCollectionList = createServerFn({ method: "GET" })
     );
   });
 
-export const createCollection = createServerFn({ method: "POST" })
+export const createCorpus = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({ name: z.string().min(1), description: z.string().optional() }),
   )
-  .handler(async ({ data, context }): Promise<{ slug: CollectionSlug }> => {
+  .handler(async ({ data, context }): Promise<{ slug: CorpusSlug }> => {
     const c = srv(context);
-    const r = await storeOf(c).createCollection(
+    const r = await storeOf(c).createCorpus(
       compact({
-        slug: asCollectionSlug(slugify(data.name)),
+        slug: asCorpusSlug(slugify(data.name)),
         name: data.name,
         description: data.description,
         changedBy: changedBy(c),
       }),
     );
-    return { slug: asCollectionSlug(r.slug) };
+    return { slug: asCorpusSlug(r.slug) };
   });
 
-// Edit a collection's name/description. Slug is identity and is never
+// Edit a corpus's name/description. Slug is identity and is never
 // changed here (renaming the name does not re-slug). An empty
 // description clears it.
-export const updateCollection = createServerFn({ method: "POST" })
+export const updateCorpus = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
@@ -162,9 +161,9 @@ export const updateCollection = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
-    return storeOf(c).updateCollection(
+    return storeOf(c).updateCorpus(
       compact({
-        slug: asCollectionSlug(data.slug),
+        slug: asCorpusSlug(data.slug),
         name: data.name,
         description: data.description,
         alwaysIncludeBudgetTokens: data.alwaysIncludeBudgetTokens,
@@ -173,15 +172,15 @@ export const updateCollection = createServerFn({ method: "POST" })
     );
   });
 
-// One round trip for the collection builder: resolved members with
+// One round trip for the corpus builder: resolved members with
 // direct-vs-folder provenance plus the linked-folder list. Replaces the
-// old readCollection + getDocuments double call on the collection route.
-export const getCollectionDetail = createServerFn({ method: "GET" })
+// old readCorpus + getDocuments double call on the corpus route.
+export const getCorpusDetail = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .validator(z.object({ slug: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<ColDetail> => {
-    const r = await storeOf(srv(context)).collectionStructure(
-      asCollectionSlug(data.slug),
+    const r = await storeOf(srv(context)).corpusStructure(
+      asCorpusSlug(data.slug),
     );
     if (!r.found) return { found: false };
     return {
@@ -193,7 +192,7 @@ export const getCollectionDetail = createServerFn({ method: "GET" })
         slug: asFolderSlug(f.slug),
         name: f.name,
         position: f.position,
-        delivery: collectionDelivery(f.delivery),
+        delivery: corpusDelivery(f.delivery),
       })),
       members: r.members.map((m) =>
         compact({
@@ -204,7 +203,7 @@ export const getCollectionDetail = createServerFn({ method: "GET" })
           updatedAt: m.updatedAt,
           direct: m.direct,
           position: m.position,
-          delivery: collectionDelivery(m.delivery),
+          delivery: corpusDelivery(m.delivery),
           viaFolder:
             m.viaFolder === undefined ? undefined : asFolderSlug(m.viaFolder),
         }),
@@ -212,22 +211,22 @@ export const getCollectionDetail = createServerFn({ method: "GET" })
     };
   });
 
-// Sibling of getCollectionDetail for callers that only need head-node
+// Sibling of getCorpusDetail for callers that only need head-node
 // metadata (name/description/budget). One DO read, no folder subtree
 // walk, no blob hydration — call this from pages whose feature surface
 // doesn't depend on the resolved member structure.
-export const getCollectionMeta = createServerFn({ method: "GET" })
+export const getCorpusMeta = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .validator(z.object({ slug: z.string().min(1) }))
-  .handler(async ({ data, context }): Promise<ColMetaResult> => {
-    return storeOf(srv(context)).collectionMeta(asCollectionSlug(data.slug));
+  .handler(async ({ data, context }): Promise<CorpusMetaResult> => {
+    return storeOf(srv(context)).corpusMeta(asCorpusSlug(data.slug));
   });
 
 export const attachDocument = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
-      collectionSlug: z.string().min(1),
+      corpusSlug: z.string().min(1),
       documentSlug: z.string().min(1),
       position: z.number().int().nonnegative(),
       delivery: z.enum(["core", "reference"]).default("core"),
@@ -236,7 +235,7 @@ export const attachDocument = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
     const r = await storeOf(c).attachDocument(
-      asCollectionSlug(data.collectionSlug),
+      asCorpusSlug(data.corpusSlug),
       asDocumentSlug(data.documentSlug),
       data.position,
       changedBy(c),
@@ -252,7 +251,7 @@ export const setMemberDelivery = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
-      collectionSlug: z.string().min(1),
+      corpusSlug: z.string().min(1),
       documentSlug: z.string().min(1),
       delivery: z.enum(["core", "reference"]),
     }),
@@ -260,7 +259,7 @@ export const setMemberDelivery = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
     const r = await storeOf(c).setMemberDelivery(
-      asCollectionSlug(data.collectionSlug),
+      asCorpusSlug(data.corpusSlug),
       asDocumentSlug(data.documentSlug),
       data.delivery,
       changedBy(c),
@@ -272,32 +271,32 @@ export const detachDocument = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
-      collectionSlug: z.string().min(1),
+      corpusSlug: z.string().min(1),
       documentSlug: z.string().min(1),
     }),
   )
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
     const r = await storeOf(c).detachDocument(
-      asCollectionSlug(data.collectionSlug),
+      asCorpusSlug(data.corpusSlug),
       asDocumentSlug(data.documentSlug),
       changedBy(c),
     );
     return { ok: r.ok };
   });
 
-export const reorderCollectionDocuments = createServerFn({ method: "POST" })
+export const reorderCorpusDocuments = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
-      collectionSlug: z.string().min(1),
+      corpusSlug: z.string().min(1),
       orderedDocumentSlugs: z.array(z.string().min(1)),
     }),
   )
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
-    const r = await storeOf(c).reorderCollectionDocuments(
-      asCollectionSlug(data.collectionSlug),
+    const r = await storeOf(c).reorderCorpusDocuments(
+      asCorpusSlug(data.corpusSlug),
       data.orderedDocumentSlugs.map(asDocumentSlug),
       changedBy(c),
     );

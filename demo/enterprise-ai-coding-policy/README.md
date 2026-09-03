@@ -10,11 +10,11 @@ over MCP. The human accepts, rejects, and applies the useful hunks.
 ## Corpus Setup
 
 1. Start Corpus locally or use a staging project.
-2. Create a Collection named `Leadership Briefing`.
+2. Create a Corpus named `Leadership Briefing`.
 3. Create a document from `brief-seed.md`.
-4. Add the document to the Collection.
+4. Add the document to the Corpus.
 5. Open the document in Corpus review mode before starting the agents.
-6. Connect Claude Code to the Collection's MCP endpoint.
+6. Connect Claude Code to the Corpus's MCP endpoint.
 
 For a clean recording, use two Claude Code terminals side by side or stacked
 offscreen. Paste one prompt into each terminal, then return focus to Corpus.

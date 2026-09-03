@@ -19,9 +19,10 @@ import { listSurface } from "@/components/ui/Surface";
 import { textLinkClass } from "@/components/ui/text-link";
 import { showToast } from "@/components/ui/Toast";
 import type { DocumentSlug, FolderSlug, ProjectId } from "@/ids";
+import { asCorpusSlug } from "@/ids";
 import { cn } from "@/lib/cn";
 import { useSubmit } from "@/lib/forms";
-import type { ColListItem } from "@/lib/server/collections";
+import type { CorpusListItem } from "@/lib/server/corpora";
 import {
   archiveDocuments,
   renameFilename,
@@ -68,13 +69,13 @@ export function DocumentsPage({
   projectId,
   documents,
   folders,
-  collections,
+  corpora,
   proposals,
 }: Readonly<{
   projectId: ProjectId;
   documents: readonly DocListItem[];
   folders: readonly FolderRow[];
-  collections: readonly ColListItem[];
+  corpora: readonly CorpusListItem[];
   proposals: readonly CreateProposalItem[];
 }>): React.ReactElement {
   const router = useRouter();
@@ -567,7 +568,7 @@ export function DocumentsPage({
       {empty ? (
         <EmptyDocuments
           projectId={projectId}
-          collections={collections}
+          corpora={corpora}
           folders={folders}
           documents={documents}
         />
@@ -742,15 +743,17 @@ function SearchSnippetLine({
 // is already on Documents.
 function EmptyDocuments({
   projectId,
-  collections,
+  corpora,
   folders,
   documents,
 }: Readonly<{
   projectId: ProjectId;
-  collections: readonly ColListItem[];
+  corpora: readonly CorpusListItem[];
   folders: readonly FolderRow[];
   documents: readonly DocListItem[];
 }>): React.ReactElement {
+  const defaultCorpus =
+    corpora.find((c) => c.slug === asCorpusSlug("default")) ?? corpora[0];
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-6">
@@ -758,15 +761,21 @@ function EmptyDocuments({
           Add your first document
         </h2>
         <p className="mt-1 text-base text-slate-500">
-          Drag a folder of markdown here, or pick files — then group them into a
-          collection to share with agents.
+          Drag markdown here or pick files — they join your corpus
+          automatically.
         </p>
       </div>
       <DocumentUploader
         projectId={projectId}
-        collections={collections}
+        corpora={corpora}
         folders={folders}
         documents={documents}
+        {...(defaultCorpus === undefined
+          ? {}
+          : {
+              defaultCorpusSlug: defaultCorpus.slug,
+              autoLinkCorpus: true,
+            })}
       />
       <p className="mt-6 text-sm text-slate-500">
         Or{" "}

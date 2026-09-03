@@ -17,12 +17,12 @@ import { storeFor } from "../src/control/store-for";
 import type { EventLogStore } from "../src/event-log-store";
 import {
   asConnectionId,
-  asCollectionSlug,
+  asCorpusSlug,
   asOrganizationId,
   asProjectId,
   asUserId,
   type ConnectionId,
-  type CollectionSlug,
+  type CorpusSlug,
   type OrganizationId,
   type ProjectId,
   type UserId,
@@ -31,10 +31,7 @@ import type { ProjectStore } from "../src/project-store";
 
 // Branded fixture constructors — tests cross the same trust boundary as
 // production callers, so they build ids the same way.
-export {
-  asCollectionSlug as colSlug,
-  asDocumentSlug as docSlug,
-} from "../src/ids";
+export { asCorpusSlug as colSlug, asDocumentSlug as docSlug } from "../src/ids";
 
 // vitest-pool-workers isolates storage per test FILE (each file is its own
 // Worker isolate with its own D1 + DO storage; verified — a row written in
@@ -149,36 +146,34 @@ export async function addProject(
   return asProjectId(proj?.id ?? "");
 }
 
-// Seed a Connection (Project + one Collection) — the agent-facing
+// Seed a Connection (Project + one Corpus) — the agent-facing
 // credential unit (v4). Tests that mint keys / drive OAuth bind to a
 // Connection, never a Project. Mirrors createOrg's direct-insert style.
 export async function createConnection(
   args: Readonly<{
     organizationId: OrganizationId;
     projectId: ProjectId;
-    collectionSlug?: string;
+    corpusSlug?: string;
     name?: string;
     isDefaultForCollection?: boolean;
   }>,
-): Promise<
-  Readonly<{ connectionId: ConnectionId; collectionSlug: CollectionSlug }>
-> {
+): Promise<Readonly<{ connectionId: ConnectionId; corpusSlug: CorpusSlug }>> {
   n += 1;
   const db = connectControlDb(env.DB);
-  const collectionSlug = args.collectionSlug ?? `col-${SALT}-${String(n)}`;
+  const corpusSlug = args.corpusSlug ?? `col-${SALT}-${String(n)}`;
   const [row] = await db
     .insert(connection)
     .values({
       organizationId: args.organizationId,
       projectId: args.projectId,
-      collectionSlug,
-      name: args.name ?? collectionSlug,
+      collectionSlug: corpusSlug,
+      name: args.name ?? corpusSlug,
       isDefaultForCollection: args.isDefaultForCollection ?? false,
     })
     .returning({ id: connection.id });
   return {
     connectionId: asConnectionId(row?.id ?? ""),
-    collectionSlug: asCollectionSlug(collectionSlug),
+    corpusSlug: asCorpusSlug(corpusSlug),
   };
 }
 
@@ -207,21 +202,21 @@ export async function seedOAuthClient(connectionId: string): Promise<string> {
   return clientId;
 }
 
-// Create the bound Collection in the per-Project DO so the respondMcp
-// preflight (collectionMembers) finds it. Returns the slug for chaining.
-// Empty members; tests that need docs in the Collection attach them via
+// Create the bound Corpus in the per-Project DO so the respondMcp
+// preflight (corpusMembers) finds it. Returns the slug for chaining.
+// Empty members; tests that need docs in the Corpus attach them via
 // the DO's normal createDocument/attach flow.
-export async function createCollectionFor(
+export async function createCorpusFor(
   projectId: ProjectId,
-  collectionSlug: CollectionSlug,
-  name: string = collectionSlug,
-): Promise<CollectionSlug> {
-  await storeFor(env, projectId).createCollection({
-    slug: collectionSlug,
+  corpusSlug: CorpusSlug,
+  name: string = corpusSlug,
+): Promise<CorpusSlug> {
+  await storeFor(env, projectId).createCorpus({
+    slug: corpusSlug,
     name,
     changedBy: "test-helper",
   });
-  return collectionSlug;
+  return corpusSlug;
 }
 
 export function freshStore(prefix = "proj"): DurableObjectStub<ProjectStore> {

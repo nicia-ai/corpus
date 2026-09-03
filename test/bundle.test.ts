@@ -126,7 +126,7 @@ describe("bundle round-trip (the alignment contract)", () => {
       clientVersion: 0,
       changedBy: "u",
     });
-    await a.createCollection({
+    await a.createCorpus({
       slug: colSlug("team"),
       name: "Team",
       description: "shared",
@@ -139,7 +139,7 @@ describe("bundle round-trip (the alignment contract)", () => {
 
     const b = freshStore("bundle-b");
     const imp = await b.importBundle(b1);
-    expect(imp).toEqual({ ok: true, documents: 2, collections: 1 });
+    expect(imp).toEqual({ ok: true, documents: 2, corpora: 1 });
 
     const b2 = await b.exportBundle(SOURCE);
 
@@ -151,7 +151,7 @@ describe("bundle round-trip (the alignment contract)", () => {
       "# Alpha\nv2 expanded",
     );
     expect(await b.verifyHistory()).toEqual({ ok: true });
-    const col = await b.readCollection(colSlug("team"));
+    const col = await b.readCorpus(colSlug("team"));
     expect(col.found).toBe(true);
     if (col.found) {
       expect(col.documents.map((d) => d.slug)).toEqual(["alpha", "beta"]);
@@ -166,7 +166,7 @@ describe("bundle round-trip (the alignment contract)", () => {
       clientVersion: 0,
       changedBy: "u",
     });
-    await a.createCollection({
+    await a.createCorpus({
       slug: colSlug("mkt"),
       name: "Marketing",
       alwaysIncludeBudgetTokens: 32_000,
@@ -185,7 +185,7 @@ describe("bundle round-trip (the alignment contract)", () => {
     expect((await b.importBundle(b1)).ok).toBe(true);
 
     // The value is live in the imported project, not merely re-exportable.
-    const live = await b.collectionStructure(colSlug("mkt"));
+    const live = await b.corpusStructure(colSlug("mkt"));
     expect(live.found && live.alwaysIncludeBudgetTokens).toBe(32_000);
 
     const b2 = await b.exportBundle(SOURCE);
@@ -206,7 +206,7 @@ describe("bundle round-trip (the alignment contract)", () => {
       clientVersion: 0,
       changedBy: "u",
     });
-    await a.createCollection({
+    await a.createCorpus({
       slug: colSlug("agent"),
       name: "Agent",
       changedBy: "u",
@@ -238,7 +238,7 @@ describe("bundle round-trip (the alignment contract)", () => {
     expect((await b.importBundle(b1)).ok).toBe(true);
     expect(stable(await b.exportBundle(SOURCE))).toBe(stable(b1));
 
-    const live = await b.readCollection(colSlug("agent"));
+    const live = await b.readCorpus(colSlug("agent"));
     expect(live.found).toBe(true);
     if (live.found) {
       expect(live.documents.map((d) => d.slug)).toEqual(["core-doc"]);
@@ -264,12 +264,12 @@ describe("bundle round-trip (the alignment contract)", () => {
     });
     const bFolder = (await a.listFolders()).find((f) => f.name === "b");
     if (bFolder === undefined) throw new Error("folder b missing");
-    await a.createCollection({
+    await a.createCorpus({
       slug: colSlug("team"),
       name: "Team",
       changedBy: "u",
     });
-    await a.attachFolderToCollection(
+    await a.attachFolderToCorpus(
       colSlug("team"),
       asFolderSlug(bFolder.slug),
       1,
@@ -289,16 +289,16 @@ describe("bundle round-trip (the alignment contract)", () => {
 
     const b = freshStore("bundle-g");
     const imp = await b.importBundle(b1);
-    expect(imp).toEqual({ ok: true, documents: 3, collections: 1 });
+    expect(imp).toEqual({ ok: true, documents: 3, corpora: 1 });
 
     const b2 = await b.exportBundle(SOURCE);
     expect(stable(b2)).toBe(stable(b1));
     expect(b2.manifest.integrity.rootHash).toBe(b1.manifest.integrity.rootHash);
 
-    // Functional after import: chain verifies, the folder→collection
+    // Functional after import: chain verifies, the folder→corpus
     // snapshot resolved to its pinned (expanded) members.
     expect(await b.verifyHistory()).toEqual({ ok: true });
-    const col = await b.readCollection(colSlug("team"));
+    const col = await b.readCorpus(colSlug("team"));
     expect(col.found).toBe(true);
     if (col.found) {
       expect(col.documents.map((d) => d.slug)).toEqual([
@@ -315,22 +315,22 @@ describe("bundle round-trip (the alignment contract)", () => {
       markdown: "# First",
       changedBy: "u",
     });
-    await a.createCollection({
+    await a.createCorpus({
       slug: colSlug("team"),
       name: "Team",
       changedBy: "u",
     });
     const folderA = (await a.listFolders()).find((f) => f.name === "a");
     if (folderA === undefined) throw new Error("folder a missing");
-    await a.attachFolderToCollection(
+    await a.attachFolderToCorpus(
       colSlug("team"),
       asFolderSlug(folderA.slug),
       1,
       "u",
     );
 
-    // Added AFTER the folder→collection link, with no explicit
-    // collection action — readCollection shows it, so the bundle must
+    // Added AFTER the folder→corpus link, with no explicit
+    // corpus action — readCorpus shows it, so the bundle must
     // too.
     await a.importDocumentAtPath({
       path: "a/second.md",
@@ -350,7 +350,7 @@ describe("bundle round-trip (the alignment contract)", () => {
     expect((await b.importBundle(b1)).ok).toBe(true);
     const b2 = await b.exportBundle(SOURCE);
     expect(stable(b2)).toBe(stable(b1));
-    const imported = await b.readCollection(colSlug("team"));
+    const imported = await b.readCorpus(colSlug("team"));
     expect(imported.found).toBe(true);
     if (imported.found) {
       expect(imported.documents.map((d) => d.slug).sort()).toEqual([
@@ -367,14 +367,14 @@ describe("bundle round-trip (the alignment contract)", () => {
       markdown: "# Doc",
       changedBy: "u",
     });
-    await a.createCollection({
+    await a.createCorpus({
       slug: colSlug("team"),
       name: "Team",
       changedBy: "u",
     });
     const folderA = (await a.listFolders()).find((f) => f.name === "a");
     if (folderA === undefined) throw new Error("folder a missing");
-    await a.attachFolderToCollection(
+    await a.attachFolderToCorpus(
       colSlug("team"),
       asFolderSlug(folderA.slug),
       1,
@@ -390,8 +390,8 @@ describe("bundle round-trip (the alignment contract)", () => {
       true,
     );
 
-    // readCollection and exportBundle must agree: the link is gone.
-    const live = await a.readCollection(colSlug("team"));
+    // readCorpus and exportBundle must agree: the link is gone.
+    const live = await a.readCorpus(colSlug("team"));
     expect(live.found && live.documents).toEqual([]);
     const after = await a.exportBundle(SOURCE);
     expect(
@@ -454,11 +454,11 @@ describe("parseBundle (import preflight)", () => {
         },
         documents: [],
         folders: [],
-        collections: [],
+        corpora: [],
         integrity: { algorithm: "sha256", rootHash: "x" },
       },
       documents: {},
-      collections: {},
+      corpora: {},
       history: {},
       blobs: {},
     };

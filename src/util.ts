@@ -74,15 +74,15 @@ export function pluralize(n: number, word: string): string {
   return `${String(n)} ${word}${n === 1 ? "" : "s"}`;
 }
 
-// Default per-collection always-include budget assigned to new
-// collections (the Collection node's `alwaysIncludeBudgetTokens` field).
+// Default per-corpus always-include budget assigned to new
+// corpora (the Corpus node's `alwaysIncludeBudgetTokens` field).
 // The budget is authoring-side guidance only — the BudgetMeter in the
 // edit pane compares the assembled `delivery=core` set against it; MCP
 // `read_collection` never enforces. Owners with a larger context window
-// can raise it per-collection.
+// can raise it per-corpus.
 export const DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS = 8000;
 
-// Hard upper bound shared across the client form, the updateCollection
+// Hard upper bound shared across the client form, the updateCorpus
 // server-fn validator, the bundle schema, and the TypeGraph node — so a
 // scripted caller, a tampered bundle, or a future bug can't persist a
 // nonsense value that breaks the meter forever. Past today's largest
@@ -90,8 +90,8 @@ export const DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS = 8000;
 export const MAX_ALWAYS_INCLUDE_BUDGET_TOKENS = 1_000_000;
 
 // THE single Zod field for `alwaysIncludeBudgetTokens` — the TypeGraph
-// node schema (`src/graph.ts`), the `updateCollection` server-fn input
-// validator (`src/lib/server/collections.ts`), and the bundle Collection
+// node schema (`src/graph.ts`), the `updateCorpus` server-fn input
+// validator (`src/lib/server/corpora.ts`), and the bundle Corpus
 // + Manifest schemas (`src/store/domain/bundle.ts`) all reference this
 // so the bound can never drift between the four trust boundaries.
 export const alwaysIncludeBudgetTokensZ = z
@@ -136,8 +136,8 @@ export const markdownBodyZ = z
   .string()
   .max(MAX_MARKDOWN_BYTES, MARKDOWN_TOO_LARGE_MESSAGE);
 
-// Sum of per-document token estimates for an assembled collection — the
-// value the BudgetMeter compares against the collection's configured
+// Sum of per-document token estimates for an assembled corpus — the
+// value the BudgetMeter compares against the corpus's configured
 // `alwaysIncludeBudgetTokens`.
 export function manifestTokens(
   items: readonly { readonly size: number }[],

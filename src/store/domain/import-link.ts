@@ -1,6 +1,6 @@
 import type { FolderSlug } from "../../ids";
 
-// Pure, zero-IO rule for what an upload links to a collection. The DO
+// Pure, zero-IO rule for what an upload links to a corpus. The DO
 // derives it from ground truth observed during import — never from a
 // client-supplied flag — which is what makes the folder-vs-documents
 // choice un-forgeable. Unit-tested without a DO (test/import-link.test.ts).
@@ -13,7 +13,7 @@ export type ImportLinkTarget = Readonly<
 // (root→leaf folder slugs; `[]` = project root) and the set of folders
 // THIS import created. Link the fresh wrapper — the topmost folder the
 // import created that is a common ancestor of every imported document —
-// so documents added to it later join the collection (the live link).
+// so documents added to it later join the corpus (the live link).
 // Its subtree is entirely this import's (it did not exist before), so
 // linking it never exposes pre-existing content. When there is no such
 // fresh common folder (a root upload, or a merge into a folder that

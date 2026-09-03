@@ -16,12 +16,12 @@ evidence goes there — do not append release notes to this file.
 
 **Corpus** — a Git-free **canonical markdown context store for teams**:
 non-engineers write markdown documents, group them into ordered **agent
-collections**, and agents consume those collections over **MCP** (OAuth
+corpora**, and agents consume those corpora over **MCP** (OAuth
 bearer). Multi-tenant — **Organization → Project** (one default Project
 materialized per Org, hidden until a second exists). A central D1
 control plane (identity, organizations, projects, membership) plus one
 per-Project `ProjectStore` Durable Object holding that project's
-documents, collections, and folders in SQLite. Web UI is TanStack Start.
+documents, corpora, and folders in SQLite. Web UI is TanStack Start.
 
 "Workspace" is a reserved word — no row, type, route, or id. Tenancy is
 Org / Project only.
@@ -84,11 +84,11 @@ re-run.
 
 Two planes. **Control plane** = D1 (`src/control/*`), central across
 orgs / projects. **Data plane** = per-Project `ProjectStore` SQLite. A
-Collection is an entity _inside_ the DO, never a partition key —
-Documents are shared across Collections via `includes`; the whole
+Corpus is an entity _inside_ the DO, never a partition key —
+Documents are shared across Corpora via `includes`; the whole
 graph lives in one DO per Project, written in one transaction.
 
-Tenancy: `organization` → `project` → `{Documents, Collections}`.
+Tenancy: `organization` → `project` → `{Documents, Corpora}`.
 `organization`, `member`, `invitation` are owned by the Better Auth
 organization plugin — not hand-rolled. Nicia owns only `project`,
 FK'd to `organization.id`. Membership is the Better Auth `member`
@@ -295,7 +295,7 @@ live project's policy and calls `ProjectStore.reapExpired(retention)`
 in one atomic tx. Invariants the reap upholds:
 
 - A document's head version and any version still pinned by a live
-  `CollectionVersion` are never reaped.
+  `CorpusVersion` are never reaped.
 - A blob is deleted only when no surviving `Document` /
   `DocumentVersion` references its hash.
 - The verifier treats a pruned-ancestor gap as expected (asserts
@@ -395,7 +395,7 @@ Deliberate exceptions — do not "fix" these:
 - `asLedgerDb()` in `src/project-store.ts` and the `as*` brand
   constructors in `src/ids.ts` are the only sanctioned casts.
 - DTOs in `src/lib/server/*.ts` intentionally mirror DO return shapes;
-  cross-cutting ones (`DocMeta`, `ColMeta`, `Attachment`) co-locate
+  cross-cutting ones (`DocMeta`, `CorpusMeta`, `Attachment`) co-locate
   with their feature file and are imported by `session.ts` (acyclic).
 - Only `control/schema/index.ts` is a sanctioned barrel; broad
   `index.ts` re-exports are rejected (tree-shaking, cycle risk).

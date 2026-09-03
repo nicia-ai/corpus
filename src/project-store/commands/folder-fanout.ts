@@ -1,4 +1,4 @@
-import { asCollectionSlug } from "../../ids";
+import { asCorpusSlug } from "../../ids";
 import {
   collectionFolderTreeChanged,
   type CollectionChange,
@@ -14,7 +14,7 @@ export async function folderTreeFanOutChanges(
   for (const slug of await u.cols.collectionsWithFolderLinks()) {
     out.push(
       collectionFolderTreeChanged({
-        collectionSlug: asCollectionSlug(slug),
+        corpusSlug: asCorpusSlug(slug),
         changedBy,
         changedAt: now,
       }),

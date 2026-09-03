@@ -1,5 +1,5 @@
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
   asFolderSlug,
   type DocumentSlug,
@@ -287,19 +287,14 @@ export async function archiveOneDocumentCommand(
   const directHandled = new Set<string>();
 
   for (const cs of await ctx.u.cols.collectionsIncluding(input.slug)) {
-    const collectionSlug = asCollectionSlug(cs);
-    const position = await ctx.u.cols.detach(collectionSlug, input.slug);
+    const corpusSlug = asCorpusSlug(cs);
+    const position = await ctx.u.cols.detach(corpusSlug, input.slug);
     if (position === undefined) continue;
-    await ctx.collection.snapshot(
-      ctx.u,
-      collectionSlug,
-      input.changedBy,
-      ctx.now,
-    );
-    directHandled.add(collectionSlug);
+    await ctx.corpus.snapshot(ctx.u, corpusSlug, input.changedBy, ctx.now);
+    directHandled.add(corpusSlug);
     changes.push(
       documentDetached({
-        collectionSlug,
+        corpusSlug,
         documentSlug: input.slug,
         position,
         changedBy: input.changedBy,
@@ -313,16 +308,11 @@ export async function archiveOneDocumentCommand(
       await ctx.u.cols.collectionsIncludingFolders(folderAncestors);
     for (const cs of folderLinked) {
       if (directHandled.has(cs)) continue;
-      const collectionSlug = asCollectionSlug(cs);
-      await ctx.collection.snapshot(
-        ctx.u,
-        collectionSlug,
-        input.changedBy,
-        ctx.now,
-      );
+      const corpusSlug = asCorpusSlug(cs);
+      await ctx.corpus.snapshot(ctx.u, corpusSlug, input.changedBy, ctx.now);
       changes.push(
         collectionFolderTreeChanged({
-          collectionSlug,
+          corpusSlug,
           changedBy: input.changedBy,
           changedAt: ctx.now,
         }),

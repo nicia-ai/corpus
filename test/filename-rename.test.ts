@@ -25,7 +25,7 @@ const countReordered = async (store: ReturnType<typeof ws>): Promise<number> =>
 // not a widening of the title-only `renameDocument`. It is head-only
 // (no blob / DocumentVersion / docVersion bump) but, unlike a title
 // rename, it is a path-map mutation and so fans out to folder-linking
-// collections.
+// corpora.
 describe("renameFilename — head-only, distinct event", () => {
   it("changes filename without touching the content-addressed chain", async () => {
     const w = ws();
@@ -160,7 +160,7 @@ describe("renameFilename — cross-type sibling-namespace collision", () => {
 });
 
 describe("renameFilename — path-map fan-out (title rename does NOT)", () => {
-  it("re-notifies folder-linking collections; renameDocument does not", async () => {
+  it("re-notifies folder-linking corpora; renameDocument does not", async () => {
     const w = ws();
     const rs = await w.importDocumentAtPath({
       path: "team/setup.md",
@@ -173,8 +173,8 @@ describe("renameFilename — path-map fan-out (title rename does NOT)", () => {
       markdown: "# Other",
       changedBy: by,
     });
-    await w.createCollection({ slug: colSlug("k"), name: "K", changedBy: by });
-    await w.attachFolderToCollection(
+    await w.createCorpus({ slug: colSlug("k"), name: "K", changedBy: by });
+    await w.attachFolderToCorpus(
       colSlug("k"),
       await folderSlug(w, "team"),
       1,
@@ -192,7 +192,7 @@ describe("renameFilename — path-map fan-out (title rename does NOT)", () => {
     expect(await countReordered(w)).toBe(base);
 
     // Filename rename shifts the path map → exactly one fan-out event
-    // for the single linking collection, plus the distinct doc event.
+    // for the single linking corpus, plus the distinct doc event.
     await w.renameFilename({
       slug: docSlug(rs.slug),
       filename: "setup-guide.md",

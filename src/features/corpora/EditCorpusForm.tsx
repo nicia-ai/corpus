@@ -3,10 +3,10 @@ import { useState } from "react";
 import { Field, fieldInputClass } from "@/components/Field";
 import { Button } from "@/components/ui/Button";
 import { cardClass } from "@/components/ui/Surface";
-import type { CollectionSlug, ProjectId } from "@/ids";
+import type { CorpusSlug, ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
 import { useSubmit } from "@/lib/forms";
-import { updateCollection } from "@/lib/server/collections";
+import { updateCorpus } from "@/lib/server/corpora";
 import {
   alwaysIncludeBudgetTokensZ,
   DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS,
@@ -15,7 +15,7 @@ import {
 } from "@/util";
 
 // Quick-pick budgets sized to common context windows. First entry is
-// the new-collection default so a fresh collection's preset highlights
+// the new-corpus default so a fresh corpus's preset highlights
 // without drift if the default ever changes. Click sets the input to
 // the formatted number; the underlying validation/save path is
 // identical to typing it. All entries are kept >= 1000 so the chip
@@ -37,7 +37,7 @@ function parseBudget(input: string): BudgetState {
     return {
       ok: false,
       error:
-        "Required. Use 0 to assert the collection should have no always-included documents.",
+        "Required. Use 0 to assert the corpus should have no always-included documents.",
     };
   }
   const cleaned = trimmed.replace(/[,_\s]/g, "");
@@ -72,8 +72,8 @@ function parseBudget(input: string): BudgetState {
 
 // Name / description / always-include budget editor. Slug is identity
 // (never re-derived from the new name); membership is untouched so this
-// cuts no `CollectionVersion`. Rendered as a focused card by the route.
-export function EditCollectionForm({
+// cuts no `CorpusVersion`. Rendered as a focused card by the route.
+export function EditCorpusForm({
   slug,
   projectId,
   initialName,
@@ -82,7 +82,7 @@ export function EditCollectionForm({
   onCancel,
   onSaved,
 }: Readonly<{
-  slug: CollectionSlug;
+  slug: CorpusSlug;
   projectId: ProjectId;
   initialName: string;
   initialDescription: string;
@@ -102,7 +102,7 @@ export function EditCollectionForm({
     if (!budget.ok) {
       throw new Error(budget.error);
     }
-    const r = await updateCollection({
+    const r = await updateCorpus({
       data: {
         projectId,
         slug,
@@ -122,7 +122,7 @@ export function EditCollectionForm({
         void run();
       }}
     >
-      <h1 className="text-xl font-semibold">Edit collection</h1>
+      <h1 className="text-xl font-semibold">Edit corpus</h1>
       <Field label="Name" value={name} onChange={setName} />
       <Field
         label="Description"
@@ -174,8 +174,8 @@ export function EditCollectionForm({
         <p id={helpId} className="max-w-prose text-sm text-slate-500">
           The size threshold the meter compares the always-included documents
           against. Authoring-side guidance only — read_collection still ships
-          whatever you mark “Always include.” Raise it for collections feeding
-          larger context windows; lower it to keep this collection lean.
+          whatever you mark “Always include.” Raise it for corpora feeding
+          larger context windows; lower it to keep this corpus lean.
         </p>
       </div>
       <div className="flex items-center gap-3">

@@ -1,7 +1,7 @@
 import type { BlobStore } from "../store/repos/blob-store";
 import type { BlockMapRepo } from "../store/repos/block-map";
 import type { ChangeLog } from "../store/repos/change-log";
-import type { CollectionGraph } from "../store/repos/collection-graph";
+import type { CorpusGraph } from "../store/repos/collection-graph";
 import type { CommentRepo } from "../store/repos/comment";
 import type { DocumentRepo } from "../store/repos/document-repo";
 import type { FolderRepo } from "../store/repos/folder-repo";
@@ -15,7 +15,7 @@ import type { VersionRepo } from "../store/repos/version-repo";
 // handlers rather than opened above the DO.
 export type ProjectUnit = Readonly<{
   docs: DocumentRepo;
-  cols: CollectionGraph;
+  cols: CorpusGraph;
   folders: FolderRepo;
   log: ChangeLog;
   blobs: BlobStore;

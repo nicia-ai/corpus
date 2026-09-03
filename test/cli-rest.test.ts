@@ -11,7 +11,7 @@ import { apiKey } from "../src/control/schema/app";
 import { storeFor } from "../src/control/store-for";
 
 import {
-  createCollectionFor,
+  createCorpusFor,
   createConnection,
   createOrg,
   docSlug,
@@ -22,9 +22,9 @@ const MEMBER_SLUG = "member-doc";
 const OUTSIDER_SLUG = "outsider-doc";
 
 // Mint an api-key bound to a fresh Connection, and seed the per-Project DO
-// with two documents: one ATTACHED to the bound Collection (the key may
-// touch it) and one that exists in the Project but is NOT in the Collection
-// (the key must not). The key's authority is the Collection, not its tenant
+// with two documents: one ATTACHED to the bound Corpus (the key may
+// touch it) and one that exists in the Project but is NOT in the Corpus
+// (the key must not). The key's authority is the Corpus, not its tenant
 // — these fixtures let every route assert that boundary.
 async function mintKey(): Promise<string> {
   const ownerUserId = await signUp("v1");
@@ -34,7 +34,7 @@ async function mintKey(): Promise<string> {
     organizationId: ref.organizationId,
     projectId: ref.projectId,
   });
-  await createCollectionFor(ref.projectId, conn.collectionSlug);
+  await createCorpusFor(ref.projectId, conn.corpusSlug);
 
   const store = storeFor(env, ref.projectId);
   await store.saveDocument({
@@ -44,7 +44,7 @@ async function mintKey(): Promise<string> {
     changedBy: ownerUserId,
   });
   await store.attachDocument(
-    conn.collectionSlug,
+    conn.corpusSlug,
     docSlug(MEMBER_SLUG),
     0,
     ownerUserId,
@@ -68,10 +68,10 @@ async function mintKey(): Promise<string> {
   return token;
 }
 
-// Mint a key whose bound Collection was NEVER created in the DO — the
-// "collection gone" shape `collectionMembers` reports as `undefined`. The
+// Mint a key whose bound Corpus was NEVER created in the DO — the
+// "corpus gone" shape `corpusMembers` reports as `undefined`. The
 // REST surface must fail CLOSED on this (403), never widen to the Project.
-async function mintKeyWithoutCollection(): Promise<string> {
+async function mintKeyWithoutCorpus(): Promise<string> {
   const ownerUserId = await signUp("nc");
   const db = connectControlDb(env.DB);
   const ref = await createOrg(ownerUserId, "Org nc");
@@ -111,7 +111,7 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     expect((await call("/api/v1/docs", undefined)).status).toBe(401);
   });
 
-  it("round-trips a collection-member document, and a stale push 409s", async () => {
+  it("round-trips a corpus-member document, and a stale push 409s", async () => {
     const token = await mintKey();
 
     const get = await call(`/api/v1/docs/${MEMBER_SLUG}`, token);
@@ -141,7 +141,7 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     });
   });
 
-  it("lists only the bound collection's members", async () => {
+  it("lists only the bound corpus's members", async () => {
     const token = await mintKey();
     const body: { documents: readonly { slug: string }[] } = await (
       await call("/api/v1/docs", token)
@@ -151,14 +151,14 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     expect(slugs).not.toContain(OUTSIDER_SLUG);
   });
 
-  it("404s a document outside the bound collection (no existence leak)", async () => {
+  it("404s a document outside the bound corpus (no existence leak)", async () => {
     const token = await mintKey();
     expect((await call(`/api/v1/docs/${OUTSIDER_SLUG}`, token)).status).toBe(
       404,
     );
   });
 
-  it("403s a write to a document outside the bound collection", async () => {
+  it("403s a write to a document outside the bound corpus", async () => {
     const token = await mintKey();
     const r = await call(`/api/v1/docs/${OUTSIDER_SLUG}`, token, {
       markdown: "tamper",
@@ -167,7 +167,7 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     expect(r.status).toBe(403);
   });
 
-  it("creates a brand-new slug into the bound collection, and it round-trips", async () => {
+  it("creates a brand-new slug into the bound corpus, and it round-trips", async () => {
     const token = await mintKey();
     const created = await call("/api/v1/docs/brand-new", token, {
       markdown: "fresh",
@@ -176,7 +176,7 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     expect(created.status).toBe(200);
     expect(await created.json()).toMatchObject({ ok: true, docVersion: 1 });
 
-    // The new doc is now a member of the bound collection: readable + listed.
+    // The new doc is now a member of the bound corpus: readable + listed.
     const get = await call("/api/v1/docs/brand-new", token);
     expect(get.status).toBe(200);
     expect(await get.json()).toMatchObject({
@@ -204,8 +204,8 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     expect(r.status).toBe(400);
   });
 
-  it("fails closed (403) on every route when the bound collection is gone", async () => {
-    const token = await mintKeyWithoutCollection();
+  it("fails closed (403) on every route when the bound corpus is gone", async () => {
+    const token = await mintKeyWithoutCorpus();
     expect((await call("/api/v1/docs", token)).status).toBe(403);
     expect((await call("/api/v1/docs/anything", token)).status).toBe(403);
     const write = await call("/api/v1/docs/anything", token, {

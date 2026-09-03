@@ -6,14 +6,13 @@ import { fieldInputClass } from "@/components/Field";
 import { Button } from "@/components/ui/Button";
 import { cardClass, listSurface } from "@/components/ui/Surface";
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asFolderSlug,
-  type CollectionSlug,
+  type CorpusSlug,
   type FolderSlug,
   type ProjectId,
 } from "@/ids";
 import { useSubmit } from "@/lib/forms";
-import type { DocListItem } from "@/lib/server/documents";
 import {
   type FolderRow,
   type ImportAndLinkResult,
@@ -28,7 +27,8 @@ import {
   dropHasFiles,
   placeEntries,
 } from "@/lib/upload/collect";
-import type { ImportCollectionLink } from "@/project-store";
+import { importLinkForUpload } from "@/lib/upload/import-link";
+import type { ImportCorpusLink } from "@/project-store";
 
 // The whole upload flow as one component, shared between the dedicated
 // /import route (page mode, with a Done summary) and the Documents
@@ -94,16 +94,26 @@ function folderOptions(
 export function DocumentUploader(
   props: Readonly<{
     projectId: ProjectId;
-    collections: readonly Readonly<{ slug: CollectionSlug; name: string }>[];
+    corpora: readonly Readonly<{ slug: CorpusSlug; name: string }>[];
     folders: readonly FolderRow[];
-    documents: readonly DocListItem[];
+    documents: readonly Readonly<{ path: string }>[];
+    defaultCorpusSlug?: CorpusSlug;
+    autoLinkCorpus?: boolean;
     // page mode hands the result back so the route can render a Done
     // summary; inline mode is fire-and-forget — router.invalidate()
     // unmounts the empty state when the new documents land.
     onComplete?: (r: ImportAndLinkResult) => void;
   }>,
 ): React.ReactElement {
-  const { projectId, collections, folders, documents, onComplete } = props;
+  const {
+    projectId,
+    corpora,
+    folders,
+    documents,
+    defaultCorpusSlug,
+    autoLinkCorpus,
+    onComplete,
+  } = props;
   const router = useRouter();
   const [collected, setCollected] = useState<Collected | null>(null);
   const [dropError, setDropError] = useState<string>();
@@ -111,13 +121,17 @@ export function DocumentUploader(
   const [makeNew, setMakeNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [keepWrapper, setKeepWrapper] = useState(true);
-  const [link, setLink] = useState<ImportCollectionLink>({ mode: "none" });
+  const [link, setLink] = useState<ImportCorpusLink>(() =>
+    importLinkForUpload({ autoLinkCorpus, defaultCorpusSlug }),
+  );
   const [dragging, setDragging] = useState(false);
   const filesRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
 
   // A fresh drop is a fresh upload: clear the destination + link choices
   // so the previous upload's selections never silently carry over.
+  // autoLinkCorpus must survive the reset — otherwise the copy lies and
+  // docs land unattached (Documents empty promises a link).
   function ingest(c: Collected) {
     // A drop the browser handed us files for, but none were readable text
     // (e.g. only binaries) — surface the picker fallback.
@@ -132,7 +146,7 @@ export function DocumentUploader(
     setMakeNew(false);
     setNewName("");
     setKeepWrapper(true);
-    setLink({ mode: "none" });
+    setLink(importLinkForUpload({ autoLinkCorpus, defaultCorpusSlug }));
     setCollected(c);
   }
 
@@ -310,13 +324,21 @@ export function DocumentUploader(
             destLabel={parentSegments.join(" / ")}
           />
 
-          <LinkPicker
-            collections={collections}
-            value={link}
-            onChange={setLink}
-            willLinkFolder={willLinkFolder}
-            docCount={docCount}
-          />
+          {!autoLinkCorpus && (
+            <LinkPicker
+              corpora={corpora}
+              value={link}
+              onChange={setLink}
+              willLinkFolder={willLinkFolder}
+              docCount={docCount}
+            />
+          )}
+
+          {autoLinkCorpus && (
+            <p className="text-sm text-slate-500">
+              Imported documents join your default corpus automatically.
+            </p>
+          )}
 
           {error && <p className="text-base text-red-600">{error}</p>}
           <Button type="submit" disabled={pending || placed.length === 0}>
@@ -517,22 +539,22 @@ function DestinationPicker({
 }
 
 function LinkPicker({
-  collections,
+  corpora,
   value,
   onChange,
   willLinkFolder,
   docCount,
 }: Readonly<{
-  collections: readonly Readonly<{ slug: CollectionSlug; name: string }>[];
-  value: ImportCollectionLink;
-  onChange: (v: ImportCollectionLink) => void;
+  corpora: readonly Readonly<{ slug: CorpusSlug; name: string }>[];
+  value: ImportCorpusLink;
+  onChange: (v: ImportCorpusLink) => void;
   willLinkFolder: boolean;
   docCount: number;
 }>) {
   return (
     <fieldset className="space-y-2">
       <legend className="mb-1 text-sm font-medium text-slate-700">
-        Link this upload to a collection
+        Link this upload to a corpus
       </legend>
       <label className="flex items-center gap-2 text-base text-slate-700">
         <input
@@ -550,14 +572,14 @@ function LinkPicker({
           checked={value.mode === "new"}
           onChange={() => onChange({ mode: "new", name: "" })}
         />
-        New collection
+        New corpus
       </label>
       {value.mode === "new" && (
         <input
           autoFocus
           value={value.name}
           onChange={(e) => onChange({ mode: "new", name: e.target.value })}
-          placeholder="Collection name"
+          placeholder="Corpus name"
           className={fieldInputClass("ml-6 w-[calc(100%-1.5rem)]!")}
         />
       )}
@@ -565,17 +587,17 @@ function LinkPicker({
         <input
           type="radio"
           name="link"
-          disabled={collections.length === 0}
+          disabled={corpora.length === 0}
           checked={value.mode === "existing"}
           onChange={() =>
             onChange({
               mode: "existing",
-              slug: collections[0]?.slug ?? asCollectionSlug(""),
+              slug: corpora[0]?.slug ?? asCorpusSlug(""),
             })
           }
         />
-        Existing collection
-        {collections.length === 0 && (
+        Existing corpus
+        {corpora.length === 0 && (
           <span className="text-sm text-slate-400">(none yet)</span>
         )}
       </label>
@@ -585,12 +607,12 @@ function LinkPicker({
           onChange={(e) =>
             onChange({
               mode: "existing",
-              slug: asCollectionSlug(e.target.value),
+              slug: asCorpusSlug(e.target.value),
             })
           }
           className={fieldInputClass("ml-6 w-[calc(100%-1.5rem)]!")}
         >
-          {collections.map((c) => (
+          {corpora.map((c) => (
             <option key={c.slug} value={c.slug}>
               {c.name}
             </option>
@@ -600,10 +622,10 @@ function LinkPicker({
       {value.mode !== "none" && (
         <p className="text-sm text-slate-500">
           {willLinkFolder
-            ? "This upload creates a new folder; linking it is live — files added to it later are in the collection automatically."
+            ? "This upload creates a new folder; linking it is live — files added to it later are in the corpus automatically."
             : `The ${docCount} uploaded document${
                 docCount === 1 ? "" : "s"
-              } will be added to the collection.`}
+              } will be added to the corpus.`}
         </p>
       )}
     </fieldset>

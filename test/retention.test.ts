@@ -84,7 +84,7 @@ describe("reapExpired (DO end-to-end, clock-seamed)", () => {
     // Pin v2 by attaching before v3 would be ideal, but attach snapshots
     // the current head — so attach now pins v3 (the head). v1 + v2 are
     // unpinned non-head and older than the (future-clocked) window.
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("c"),
       name: "C",
       changedBy: "u",

@@ -5,9 +5,9 @@ import { RelativeTime } from "@/components/ui/DateTime";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { EmptyState, listSurface } from "@/components/ui/Surface";
 import { actor, humanize, subject } from "@/lib/changes-format";
-import { getChanges } from "@/lib/server/changes";
+import { getChanges, type Change } from "@/lib/server/changes";
 
-export const Route = createFileRoute("/p/$projectId/changes")({
+export const Route = createFileRoute("/p/$projectId/activity")({
   component: Changes,
   loader: async ({ params }) => ({
     changes: await getChanges({ data: { projectId: params.projectId } }),
@@ -28,7 +28,7 @@ function Changes() {
         </EmptyState>
       ) : (
         <ol className={listSurface("divide-y divide-slate-200")}>
-          {changes.map((c) => {
+          {changes.map((c: Change) => {
             const subj = subject(c);
             return (
               <li key={c.id}>

@@ -21,15 +21,15 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 
 import { ledgerMigrations } from "../drizzle-do/migrations";
 
-import type { AssembledCollection } from "./corpus";
+import type { AssembledCorpus } from "./corpus";
 import type { LedgerDb } from "./db";
 import { ConflictError, isUniqueViolation, RollbackProbe } from "./errors";
 import { canonicalGraph } from "./graph";
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
   asFolderSlug,
-  type CollectionSlug,
+  type CorpusSlug,
   type DocumentSlug,
   type FolderSlug,
   asProjectId,
@@ -38,7 +38,7 @@ import {
 } from "./ids";
 import {
   type CommandOutcome,
-  collectionSnapshotMembers,
+  corpusSnapshotMembers,
   type DomainChange,
   isDocumentChange,
   type ProjectCommandContext,
@@ -47,17 +47,6 @@ import {
   exportBundleProjection,
   importBundleCommand,
 } from "./project-store/commands/bundle";
-import {
-  attachDocumentCommand,
-  attachFolderToCollectionCommand,
-  createCollectionCommand,
-  detachDocumentCommand,
-  detachFolderFromCollectionCommand,
-  reorderCollectionDocumentsCommand,
-  setFolderLinkDeliveryCommand,
-  setMemberDeliveryCommand,
-  updateCollectionCommand,
-} from "./project-store/commands/collections";
 import {
   addCommentCommand,
   type AddCommentInput,
@@ -70,6 +59,17 @@ import {
   type ResolveThreadInput,
 } from "./project-store/commands/comments";
 import {
+  attachDocumentCommand,
+  attachFolderToCorpusCommand,
+  createCorpusCommand,
+  detachDocumentCommand,
+  detachFolderFromCorpusCommand,
+  reorderCorpusDocumentsCommand,
+  setFolderLinkDeliveryCommand,
+  setMemberDeliveryCommand,
+  updateCorpusCommand,
+} from "./project-store/commands/corpora";
+import {
   archiveDocumentsCommand,
   archiveOneDocumentCommand,
   FilenameCollision,
@@ -80,6 +80,7 @@ import {
   renameFilenameCommand,
   saveDocumentCommand,
 } from "./project-store/commands/documents";
+import { ensureDefaultCorpusCommand } from "./project-store/commands/ensure-default-corpus";
 import {
   createFolderCommand,
   deleteFolderCommand,
@@ -120,8 +121,8 @@ import {
   type SuggestionView,
 } from "./project-store/commands/suggestions";
 import type {
-  CollectionOutline,
-  CreateInCollectionResult,
+  CorpusOutline,
+  CreateInCorpusResult,
   DocumentHistoryEntry,
   DocumentHistoryMeta,
   DocumentSearchHit,
@@ -139,7 +140,8 @@ import type {
   SaveDocumentInput,
   SaveResult,
   SeedResult,
-  UpdateCollectionInput,
+  EnsureDefaultCorpusResult,
+  UpdateCorpusInput,
 } from "./project-store/contracts";
 import { ProjectInstrumentation } from "./project-store/outbox";
 import {
@@ -150,19 +152,19 @@ import {
   type SocketMeta,
 } from "./project-store/presence";
 import {
-  collectionMembersProjection,
-  collectionMetaProjection,
-  collectionOutlineProjection,
-  collectionStructureProjection,
+  corpusMembersProjection,
+  corpusMetaProjection,
+  corpusOutlineProjection,
+  corpusStructureProjection,
   documentHistoryProjection,
   documentHistoryPageProjection,
   getDocumentProjection,
   documentHistoryVersionProjection,
   resolvedMembersProjection,
-  listCollectionsProjection,
+  listCorporaProjection,
   listDocumentsProjection,
   listDocumentRefsProjection,
-  readCollectionProjection,
+  readCorpusProjection,
   resolvedViews,
   searchDocumentsProjection,
   usageSnapshotProjection,
@@ -186,10 +188,7 @@ import type { CorpusStore, GraphHandle } from "./store/handle";
 import { BlobStore } from "./store/repos/blob-store";
 import { BlockMapRepo } from "./store/repos/block-map";
 import { ChangeLog, type RecentChange } from "./store/repos/change-log";
-import {
-  CollectionGraph,
-  type CollectionMeta,
-} from "./store/repos/collection-graph";
+import { CorpusGraph, type CorpusMeta } from "./store/repos/collection-graph";
 import { CommentRepo } from "./store/repos/comment";
 import { DocumentRepo } from "./store/repos/document-repo";
 import {
@@ -207,12 +206,12 @@ import { graphStatementLogger } from "./store/statement-log";
 import { compact, sha256, slugify } from "./util";
 
 export type {
-  CollectionOutline,
-  CreateInCollectionResult,
+  CorpusOutline,
+  CreateInCorpusResult,
   DocumentHistoryEntry,
   ImportAndLinkInput,
   ImportAndLinkResult,
-  ImportCollectionLink,
+  ImportCorpusLink,
   ImportDocResult,
   ImportResult,
   ImportSummary,
@@ -224,7 +223,8 @@ export type {
   SaveDocumentInput,
   SaveResult,
   SeedResult,
-  UpdateCollectionInput,
+  EnsureDefaultCorpusResult,
+  UpdateCorpusInput,
 } from "./project-store/contracts";
 
 type Unit = ProjectUnit;
@@ -257,15 +257,15 @@ export type DocumentHistoryPageSnapshot = Readonly<{
   active: DocumentHistoryEntry | undefined;
 }>;
 
-// Internal sentinel: a scoped create's bound collection vanished between
+// Internal sentinel: a scoped create's bound corpus vanished between
 // scope resolution and the create transaction, so the attach failed.
 // Thrown to roll the create back (never leave a document created but
 // unattached — outside its own caller's scope) and map to a fail-closed
-// 403, matching the collection-gone path in `apiKeyScope`.
-class CollectionUnavailable extends Error {
+// 403, matching the corpus-gone path in `apiKeyScope`.
+class CorpusUnavailable extends Error {
   constructor() {
-    super("collection unavailable");
-    this.name = "CollectionUnavailable";
+    super("corpus unavailable");
+    this.name = "CorpusUnavailable";
   }
 }
 
@@ -296,7 +296,7 @@ function realtimeChangeFromDomain(
   changes: readonly DomainChange[],
 ): RealtimeChange | undefined {
   // Prefer the document change when a command emits several (archiving a doc
-  // that's in collections emits detach/reorder changes first, then the
+  // that's in corpora emits detach/reorder changes first, then the
   // document.archived — the document one is what a viewer needs to hear).
   const change = changes.find(isDocumentChange) ?? changes[0];
   if (change === undefined) return undefined;
@@ -311,7 +311,7 @@ function realtimeChangeFromDomain(
     });
   }
   return compact({
-    area: "collection" as const,
+    area: "corpus" as const,
     action: change.kind,
     actorId: change.changedBy,
     collectionSlug: change.collectionSlug,
@@ -320,7 +320,7 @@ function realtimeChangeFromDomain(
 }
 
 // One ProjectStore instance per Project. TypeGraph (Document/
-// DocumentVersion/Collection/CollectionVersion/edges) and the Drizzle
+// DocumentVersion/Corpus/CorpusVersion/edges) and the Drizzle
 // content/event ledger share this DO's SQLite, so every mutation is one
 // atomic ctx.storage.transaction (TypeGraph 0.26 do-sqlite). This class
 // orchestrates; persistence lives in store/repos, pure rules in
@@ -340,13 +340,13 @@ export class ProjectStore extends DurableObject<Env> {
   // pure function of its immutable bytes, so it is parsed once per
   // contentHash and never invalidated (content never mutates).
   private readonly parsedLinksByHash = new Map<string, readonly ParsedLink[]>();
-  // Per-(callerRef, collectionSlug) version-fingerprint cache. A
+  // Per-(callerRef, corpusSlug) version-fingerprint cache. A
   // routine repeat poll with no intervening edit produces the same
   // fingerprint as the prior cached read, so the cross-DO append is
   // skipped entirely. The cache is ephemeral (DO restart loses it);
   // a re-emit after restart collapses at the EventLogStore via the
   // unique idempotency_key, so the projection never double-counts.
-  // Bounded by the active set of callers × collections.
+  // Bounded by the active set of callers × corpora.
   private readonly readDedupCache = new Map<string, string>();
   private instrumentationOutbox: ProjectInstrumentation | undefined;
   // Cleared until the one-time `searchText` backfill has run for this DO
@@ -381,10 +381,10 @@ export class ProjectStore extends DurableObject<Env> {
       u,
       now,
       hash: sha256,
-      collection: {
+      corpus: {
         resolvedViews,
         snapshot: (unit, slug, changedBy, changedAt) =>
-          this.snapshotCollection(unit, slug, changedBy, changedAt),
+          this.snapshotCorpus(unit, slug, changedBy, changedAt),
       },
     };
   }
@@ -519,20 +519,20 @@ export class ProjectStore extends DurableObject<Env> {
   // — Read-path event emission ————————————————————————————————————————
 
   // Record an MCP read for the freshness moment. The scoped executor
-  // hands us the CallerRef, the bound collectionSlug, and the
+  // hands us the CallerRef, the bound corpusSlug, and the
   // version-set the read actually saw. We emit at most ONE event per
   // state change:
-  //   * first time this caller reads this collection → `read.first`
+  //   * first time this caller reads this corpus → `read.first`
   //   * subsequent read whose captured-version-set differs from the
   //     prior cached fingerprint → `read.after-edit`
   //   * subsequent read with the same fingerprint → no event
   // Failures are logged and swallowed — same posture as save events.
   async recordRead(
     callerRef: CallerRef,
-    collectionSlug: string,
+    corpusSlug: string,
     versionCapturedAtRead: Readonly<Record<string, number>>,
   ): Promise<void> {
-    const cacheKey = `${callerRef}|${collectionSlug}`;
+    const cacheKey = `${callerRef}|${corpusSlug}`;
     const fingerprint = fingerprintVersions(versionCapturedAtRead);
     const prior = this.readDedupCache.get(cacheKey);
     if (prior === fingerprint) return;
@@ -540,12 +540,12 @@ export class ProjectStore extends DurableObject<Env> {
       prior === undefined
         ? buildEvent.readFirst({
             callerRef,
-            collectionSlug,
+            corpusSlug,
             versionCapturedAtRead,
           })
         : buildEvent.readAfterEdit({
             callerRef,
-            collectionSlug,
+            corpusSlug,
             versionCapturedAtRead,
           });
     // Emit BEFORE updating the cache. If emit transiently fails the
@@ -670,7 +670,7 @@ export class ProjectStore extends DurableObject<Env> {
   private unit(graph: GraphHandle, ledger: LedgerDb): Unit {
     return {
       docs: new DocumentRepo(graph),
-      cols: new CollectionGraph(graph),
+      cols: new CorpusGraph(graph),
       folders: new FolderRepo(graph),
       log: new ChangeLog(ledger),
       blobs: new BlobStore(ledger),
@@ -830,19 +830,19 @@ export class ProjectStore extends DurableObject<Env> {
     this.searchBackfilled = true;
   }
 
-  async listCollections(): Promise<readonly CollectionMeta[]> {
-    return listCollectionsProjection(await this.read());
+  async listCorpora(): Promise<readonly CorpusMeta[]> {
+    return listCorporaProjection(await this.read());
   }
 
   async usageSnapshot(): Promise<ProjectUsageSnapshot> {
     return usageSnapshotProjection(await this.read());
   }
 
-  // Single-collection head-node lookup — for callers that need
+  // Single-corpus head-node lookup — for callers that need
   // name/description/budget but not the resolved member structure (e.g.
   // the MCP setup page's prompt template). One DO read, no folder
   // subtree walk, no blob hydration.
-  async collectionMeta(collectionSlug: CollectionSlug): Promise<
+  async corpusMeta(corpusSlug: CorpusSlug): Promise<
     | { found: false }
     | {
         found: true;
@@ -851,40 +851,40 @@ export class ProjectStore extends DurableObject<Env> {
         alwaysIncludeBudgetTokens: number;
       }
   > {
-    return collectionMetaProjection(await this.read(), collectionSlug);
+    return corpusMetaProjection(await this.read(), corpusSlug);
   }
 
-  async readCollection(collectionSlug: CollectionSlug): Promise<
+  async readCorpus(corpusSlug: CorpusSlug): Promise<
     | { found: false }
     | ({
         found: true;
         name: string;
         description?: string;
-      } & AssembledCollection)
+      } & AssembledCorpus)
   > {
-    return readCollectionProjection(await this.read(), collectionSlug);
+    return readCorpusProjection(await this.read(), corpusSlug);
   }
 
-  // The resolved member slug set of a collection (direct + folder-
+  // The resolved member slug set of a corpus (direct + folder-
   // expanded), for the MCP soft relevance scope: `list_documents` /
   // `read_document` filter to this set when an agent declares the
-  // collection it is working in. Shares `resolvedViews` with
-  // `readCollection` so the scope cannot disagree with what would be
+  // corpus it is working in. Shares `resolvedViews` with
+  // `readCorpus` so the scope cannot disagree with what would be
   // assembled, but skips blob hydration + corpus assembly — the scope
-  // check needs only slugs. `undefined` = no such collection.
-  async collectionMembers(
-    collectionSlug: CollectionSlug,
+  // check needs only slugs. `undefined` = no such corpus.
+  async corpusMembers(
+    corpusSlug: CorpusSlug,
   ): Promise<readonly string[] | undefined> {
-    return collectionMembersProjection(await this.read(), collectionSlug);
+    return corpusMembersProjection(await this.read(), corpusSlug);
   }
 
-  // The collection-builder view: the resolved member order plus
+  // The corpus-builder view: the resolved member order plus
   // *provenance* — which members are there via a direct `includes`
   // edge (individually detachable / reorderable) vs pulled in by a
   // linked folder (the folder is the unit; the doc is read-only here).
-  // Separate from `readCollection` so the MCP / bundle paths (which
+  // Separate from `readCorpus` so the MCP / bundle paths (which
   // route through `resolvedViews` directly) are untouched.
-  async collectionStructure(collectionSlug: CollectionSlug): Promise<
+  async corpusStructure(corpusSlug: CorpusSlug): Promise<
     | { found: false }
     | {
         found: true;
@@ -910,19 +910,19 @@ export class ProjectStore extends DurableObject<Env> {
         }>[];
       }
   > {
-    return collectionStructureProjection(await this.read(), collectionSlug);
+    return corpusStructureProjection(await this.read(), corpusSlug);
   }
 
-  // Flat edge list (collection → document, with position) for the
+  // Flat edge list (corpus → document, with position) for the
   // whole project — the project-graph data source. Deliberately lean:
   // reuses `cols.ordered` (Document heads only) and never resolves
-  // blob bytes, so it stays cheap even though `readCollection` (which
+  // blob bytes, so it stays cheap even though `readCorpus` (which
   // assembles full corpus text) shares the same accessor.
-  // Resolved (collection, document) membership for every collection —
-  // direct + folder-expanded, deduped. Backs all document/collection
+  // Resolved (corpus, document) membership for every corpus —
+  // direct + folder-expanded, deduped. Backs all document/corpus
   // count surfaces so a linked folder's docs are counted everywhere.
   async listResolvedMembers(): Promise<
-    readonly Readonly<{ collectionSlug: string; documentSlug: string }>[]
+    readonly Readonly<{ corpusSlug: string; documentSlug: string }>[]
   > {
     return resolvedMembersProjection(await this.read());
   }
@@ -961,7 +961,7 @@ export class ProjectStore extends DurableObject<Env> {
 
   // Reap records past the Project's retention window. One atomic tx so
   // the version-node, edge, change-event, and blob deletions cannot tear.
-  // Heads and versions still pinned by a live CollectionVersion are never
+  // Heads and versions still pinned by a live CorpusVersion are never
   // reaped, so `getDocument` and `verifyHistory` stay green afterwards.
   // Blobs go only when no surviving Document/DocumentVersion references
   // the hash. An absent window = "forever" (that pass is skipped).
@@ -988,8 +988,8 @@ export class ProjectStore extends DurableObject<Env> {
   // Rebuild a Project from a bundle in one atomic tx. The root hash is
   // recomputed and must match (tamper / drift rejection) before any
   // write. Dependency order: blobs → document head → its version chain
-  // (the `versions_of` edge needs the head node) → collections
-  // (`includes` edges + the `CollectionVersion` snapshot, members
+  // (the `versions_of` edge needs the head node) → corpora
+  // (`includes` edges + the `CorpusVersion` snapshot, members
   // pinned verbatim).
   async importBundle(bundle: Bundle): Promise<ImportResult> {
     const now = new Date().toISOString();
@@ -1065,26 +1065,26 @@ export class ProjectStore extends DurableObject<Env> {
     }
   }
 
-  // Create a NEW document into `collectionSlug` in a single transaction —
-  // the collection-scoped REST surface's create path, entered when the
+  // Create a NEW document into `corpusSlug` in a single transaction —
+  // the corpus-scoped REST surface's create path, entered when the
   // transport's (necessarily stale) member snapshot didn't list the slug.
   // The whole decision is re-made inside the write, so it is race-correct:
   //
-  //   - slug already exists AND is in the bound collection → another
+  //   - slug already exists AND is in the bound corpus → another
   //     client won a concurrent create; the caller IS authorized, so
   //     delegate to the normal save and let `clientVersion` decide (a
   //     stale version yields a retryable 409, never a misleading 403).
-  //   - slug exists but is NOT in the bound collection → genuinely another
+  //   - slug exists but is NOT in the bound corpus → genuinely another
   //     scope's document → `forbidden` (403).
   //   - slug is new → create + attach together; "created" must mean
-  //     "created AND attached", so if the bound collection vanished under
+  //     "created AND attached", so if the bound corpus vanished under
   //     us the attach fails and the whole unit rolls back (fail-closed
   //     403) rather than orphaning the document outside its own scope.
-  async createDocumentInCollection(
+  async createDocumentInCorpus(
     input: SaveDocumentInput,
-    collectionSlug: CollectionSlug,
+    corpusSlug: CorpusSlug,
     position: number,
-  ): Promise<CreateInCollectionResult> {
+  ): Promise<CreateInCorpusResult> {
     const now = new Date().toISOString();
     try {
       const outcome = await this.writeCommand<
@@ -1092,10 +1092,7 @@ export class ProjectStore extends DurableObject<Env> {
       >(now, async (ctx) => {
         const head = await ctx.u.docs.find(input.slug);
         if (head !== undefined) {
-          const members = await collectionMembersProjection(
-            ctx.u,
-            collectionSlug,
-          );
+          const members = await corpusMembersProjection(ctx.u, corpusSlug);
           if (members?.includes(input.slug) !== true) {
             return { result: { forbidden: true }, changes: [] };
           }
@@ -1111,13 +1108,13 @@ export class ProjectStore extends DurableObject<Env> {
         // member into the always-include payload, matching the web UI's
         // attach — an agent push must not grow every read_collection.
         const attached = await attachDocumentCommand(ctx, {
-          collectionSlug,
+          corpusSlug,
           documentSlug: input.slug,
           position,
           delivery: "reference",
           changedBy: input.changedBy,
         });
-        if (!attached.result.ok) throw new CollectionUnavailable();
+        if (!attached.result.ok) throw new CorpusUnavailable();
         return {
           result: { docVersion: saved.result.docVersion },
           changes: [...saved.changes, ...attached.changes],
@@ -1127,7 +1124,7 @@ export class ProjectStore extends DurableObject<Env> {
         ? { ok: false, forbidden: true }
         : { ok: true, docVersion: outcome.result.docVersion };
     } catch (err) {
-      if (err instanceof CollectionUnavailable) {
+      if (err instanceof CorpusUnavailable) {
         return { ok: false, forbidden: true };
       }
       return this.saveError(err, input);
@@ -1324,7 +1321,7 @@ export class ProjectStore extends DurableObject<Env> {
   }
 
   // The MCP write path (agent-as-suggester). The scoped executor has
-  // already membership-gated `slug` to the caller's bound Collection and
+  // already membership-gated `slug` to the caller's bound Corpus and
   // passes the resolved `callerRef` as the author — the agent proposes,
   // only a human accepts. Delegates to createSuggestion so the
   // ConflictError→409 mapping, the write transaction, and the post-commit
@@ -1374,7 +1371,7 @@ export class ProjectStore extends DurableObject<Env> {
 
   // The MCP create-proposal path (agent proposes a NEW document). Only the
   // scoped executor reaches this method, and it overwrites
-  // `originCollectionSlug` with its bound Collection before the call — so a
+  // `originCollectionSlug` with its bound Corpus before the call — so a
   // human apply attaches the created document back where the agent works.
   // Same channel discipline as suggestEdit: this method IS the MCP entry.
   async suggestCreate(
@@ -1663,8 +1660,8 @@ export class ProjectStore extends DurableObject<Env> {
   // saveDocument: no blob, no DocumentVersion, no docVersion bump — the
   // content-addressed chain is untouched, so verifyHistory stays green.
   // ok:false only when the document is absent; an unchanged title is
-  // an idempotent ok:true no-op (no event, mirrors createCollection).
-  // The rename still fans out to collections that include the doc so
+  // an idempotent ok:true no-op (no event, mirrors createCorpus).
+  // The rename still fans out to corpora that include the doc so
   // subscribed agents see the new title.
   async renameDocument(input: RenameDocumentInput): Promise<{ ok: boolean }> {
     const now = new Date().toISOString();
@@ -1694,32 +1691,30 @@ export class ProjectStore extends DurableObject<Env> {
     return outcome.result;
   }
 
-  async createCollection(input: {
-    slug: CollectionSlug;
+  async createCorpus(input: {
+    slug: CorpusSlug;
     name: string;
     description?: string;
     alwaysIncludeBudgetTokens?: number;
     changedBy: string;
-  }): Promise<{ slug: CollectionSlug }> {
+  }): Promise<{ slug: CorpusSlug }> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
-      createCollectionCommand(ctx, input),
+      createCorpusCommand(ctx, input),
     );
     return outcome.result;
   }
 
-  // Edit a collection's name/description. Membership is unchanged, so
-  // NO new `CollectionVersion` is cut (head-node metadata only) and
-  // slug — the identity pinned in every `CollectionVersion` / the
+  // Edit a corpus's name/description. Membership is unchanged, so
+  // NO new `CorpusVersion` is cut (head-node metadata only) and
+  // slug — the identity pinned in every `CorpusVersion` / the
   // bundle sort key — is never touched. ok:false only when the
-  // collection is absent; an unchanged name+description is an
+  // corpus is absent; an unchanged name+description is an
   // idempotent ok:true no-op.
-  async updateCollection(
-    input: UpdateCollectionInput,
-  ): Promise<{ ok: boolean }> {
+  async updateCorpus(input: UpdateCorpusInput): Promise<{ ok: boolean }> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
-      updateCollectionCommand(ctx, input),
+      updateCorpusCommand(ctx, input),
     );
     return { ok: outcome.result.status !== "missing" };
   }
@@ -1728,20 +1723,18 @@ export class ProjectStore extends DurableObject<Env> {
   // derived paths and resolved relative links — the whole hierarchy +
   // link graph in one read. Canonical bytes are never rewritten; links
   // are resolved here against the current path map.
-  async collectionOutline(
-    collectionSlug: CollectionSlug,
-  ): Promise<CollectionOutline> {
-    return collectionOutlineProjection(
+  async corpusOutline(corpusSlug: CorpusSlug): Promise<CorpusOutline> {
+    return corpusOutlineProjection(
       await this.read(),
-      collectionSlug,
+      corpusSlug,
       this.parsedLinksByHash,
     );
   }
 
-  // Attach (or re-position) a document in a collection. A new edge emits
-  // collection.attached; moving an existing one collection.reordered.
+  // Attach (or re-position) a document in a corpus. A new edge emits
+  // corpus.attached; moving an existing one corpus.reordered.
   async attachDocument(
-    collectionSlug: CollectionSlug,
+    corpusSlug: CorpusSlug,
     documentSlug: DocumentSlug,
     position: number,
     changedBy: string,
@@ -1750,7 +1743,7 @@ export class ProjectStore extends DurableObject<Env> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
       attachDocumentCommand(ctx, {
-        collectionSlug,
+        corpusSlug,
         documentSlug,
         position,
         delivery,
@@ -1760,50 +1753,50 @@ export class ProjectStore extends DurableObject<Env> {
     return outcome.result;
   }
 
-  // Membership-affecting change → fresh immutable CollectionVersion, exactly
+  // Membership-affecting change → fresh immutable CorpusVersion, exactly
   // like attach. `mutate` performs the edge change and returns the
   // CollectionChange (or undefined for a no-op); the snapshot + ledger
   // append are shared so detach and reorder can't drift from attach.
-  // Cut a fresh immutable CollectionVersion from the current resolved
+  // Cut a fresh immutable CorpusVersion from the current resolved
   // expansion. The single place a snapshot is taken — every
   // membership-affecting path (attach/detach/reorder, and folder
-  // delete's link release) routes through here so a collection's
-  // latest `CollectionVersion` never lags what `readCollection` /
+  // delete's link release) routes through here so a corpus's
+  // latest `CorpusVersion` never lags what `readCorpus` /
   // `exportBundle` show.
-  private async snapshotCollection(
+  private async snapshotCorpus(
     u: Unit,
-    collectionSlug: CollectionSlug,
+    corpusSlug: CorpusSlug,
     changedBy: string,
     now: string,
   ): Promise<void> {
-    const colNode = await u.cols.findCollection(collectionSlug);
-    const views = await resolvedViews(u, collectionSlug);
+    const colNode = await u.cols.findCorpus(corpusSlug);
+    const views = await resolvedViews(u, corpusSlug);
     if (colNode === undefined || views === undefined) return;
     const nextColVersion =
-      (await u.versions.latestCollectionVersion(collectionSlug)) + 1;
+      (await u.versions.latestCollectionVersion(corpusSlug)) + 1;
     await u.versions.appendCollectionVersion(
       colNode.id,
       collectionVersionSnapshot({
-        collectionSlug,
+        collectionSlug: corpusSlug,
         collectionVersion: nextColVersion,
-        members: collectionSnapshotMembers(views),
+        members: corpusSnapshotMembers(views),
         changedAt: now,
         changedBy,
       }),
     );
   }
 
-  // Remove a document from a collection. No-op (ok:false) when the
+  // Remove a document from a corpus. No-op (ok:false) when the
   // edge wasn't there, so a double-click can't double-snapshot.
   async detachDocument(
-    collectionSlug: CollectionSlug,
+    corpusSlug: CorpusSlug,
     documentSlug: DocumentSlug,
     changedBy: string,
   ): Promise<{ ok: boolean }> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
       detachDocumentCommand(ctx, {
-        collectionSlug,
+        corpusSlug,
         documentSlug,
         changedBy,
       }),
@@ -1837,18 +1830,18 @@ export class ProjectStore extends DurableObject<Env> {
     return outcome.result;
   }
 
-  // Set the absolute order of a collection's documents (the UI sends
+  // Set the absolute order of a corpus's documents (the UI sends
   // the full current membership in the new order). One snapshot,
   // one event.
-  async reorderCollectionDocuments(
-    collectionSlug: CollectionSlug,
+  async reorderCorpusDocuments(
+    corpusSlug: CorpusSlug,
     orderedDocumentSlugs: readonly DocumentSlug[],
     changedBy: string,
   ): Promise<{ ok: boolean }> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
-      reorderCollectionDocumentsCommand(ctx, {
-        collectionSlug,
+      reorderCorpusDocumentsCommand(ctx, {
+        corpusSlug,
         orderedDocumentSlugs,
         changedBy,
       }),
@@ -1858,14 +1851,14 @@ export class ProjectStore extends DurableObject<Env> {
 
   // Flip a document member's delivery tier (core ↔ reference) WITHOUT
   // re-attaching. A tier change is membership-affecting (the resolved
-  // corpus changes), so it cuts a fresh CollectionVersion + event via the
+  // corpus changes), so it cuts a fresh CorpusVersion + event via the
   // shared mutation path — but it must NOT go through attach, whose
   // position argument (the caller only has the *resolved* index, not
   // the stored edge position) would corrupt member order in
-  // folder-linked collections. `ok:false` when the doc isn't a member
+  // folder-linked corpora. `ok:false` when the doc isn't a member
   // or is already that tier.
   async setMemberDelivery(
-    collectionSlug: CollectionSlug,
+    corpusSlug: CorpusSlug,
     documentSlug: DocumentSlug,
     delivery: CollectionDelivery,
     changedBy: string,
@@ -1873,7 +1866,7 @@ export class ProjectStore extends DurableObject<Env> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
       setMemberDeliveryCommand(ctx, {
-        collectionSlug,
+        corpusSlug,
         documentSlug,
         delivery,
         changedBy,
@@ -1884,7 +1877,7 @@ export class ProjectStore extends DurableObject<Env> {
 
   // Folder-link counterpart of `setMemberDelivery`.
   async setFolderLinkDelivery(
-    collectionSlug: CollectionSlug,
+    corpusSlug: CorpusSlug,
     folderSlug: FolderSlug,
     delivery: CollectionDelivery,
     changedBy: string,
@@ -1892,7 +1885,7 @@ export class ProjectStore extends DurableObject<Env> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
       setFolderLinkDeliveryCommand(ctx, {
-        collectionSlug,
+        corpusSlug,
         folderSlug,
         delivery,
         changedBy,
@@ -1901,11 +1894,11 @@ export class ProjectStore extends DurableObject<Env> {
     return outcome.result;
   }
 
-  // Attach (or re-position) a folder→collection link. Membership-affecting
-  // → a fresh CollectionVersion is cut via the shared resolved() snapshot
+  // Attach (or re-position) a folder→corpus link. Membership-affecting
+  // → a fresh CorpusVersion is cut via the shared resolved() snapshot
   // path, exactly like a document attach.
-  async attachFolderToCollection(
-    collectionSlug: CollectionSlug,
+  async attachFolderToCorpus(
+    corpusSlug: CorpusSlug,
     folderSlug: FolderSlug,
     position: number,
     changedBy: string,
@@ -1913,8 +1906,8 @@ export class ProjectStore extends DurableObject<Env> {
   ): Promise<{ ok: boolean }> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
-      attachFolderToCollectionCommand(ctx, {
-        collectionSlug,
+      attachFolderToCorpusCommand(ctx, {
+        corpusSlug,
         folderSlug,
         position,
         delivery,
@@ -1924,15 +1917,15 @@ export class ProjectStore extends DurableObject<Env> {
     return outcome.result;
   }
 
-  async detachFolderFromCollection(
-    collectionSlug: CollectionSlug,
+  async detachFolderFromCorpus(
+    corpusSlug: CorpusSlug,
     folderSlug: FolderSlug,
     changedBy: string,
   ): Promise<{ ok: boolean }> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
-      detachFolderFromCollectionCommand(ctx, {
-        collectionSlug,
+      detachFolderFromCorpusCommand(ctx, {
+        corpusSlug,
         folderSlug,
         changedBy,
       }),
@@ -1945,9 +1938,9 @@ export class ProjectStore extends DurableObject<Env> {
   // Authoring-plane organization (single-parent tree). Mutations are
   // web / server-fn only (MCP stays read-only). A path-space mutation
   // (rename / move / delete-rehome / re-place) changes the resolved
-  // expansion of every folder-linking collection without changing any
-  // single document — so we fan out a coarse `collection.reordered`
-  // event to those collections. `readCollection` re-resolves the tree
+  // expansion of every folder-linking corpus without changing any
+  // single document — so we fan out a coarse `corpus.reordered`
+  // event to those corpora. `readCorpus` re-resolves the tree
   // on the next read, so the event is purely audit/notification.
 
   // Slug is derived from the name at creation (collision-suffixed
@@ -1991,11 +1984,11 @@ export class ProjectStore extends DurableObject<Env> {
     ).then((outcome) => outcome.result);
   }
 
-  // Delete releases each linking collection's `includes_folder` edge;
-  // that is a membership change, so those collections get a fresh
+  // Delete releases each linking corpus's `includes_folder` edge;
+  // that is a membership change, so those corpora get a fresh
   // snapshot in the SAME tx (otherwise they'd drop out of the
   // folder-linked set and `exportBundle` would serve a stale pre-delete
-  // snapshot). Other still-folder-linked collections get the coarse
+  // snapshot). Other still-folder-linked corpora get the coarse
   // path-map signal.
   async deleteFolder(
     slug: FolderSlug,
@@ -2148,10 +2141,8 @@ export class ProjectStore extends DurableObject<Env> {
       return { summary, linkedTo: undefined };
     }
 
-    const collectionSlug =
-      link.mode === "existing"
-        ? link.slug
-        : asCollectionSlug(slugify(link.name));
+    const corpusSlug =
+      link.mode === "existing" ? link.slug : asCorpusSlug(slugify(link.name));
     const now = new Date().toISOString();
 
     // Derive the link target from ground truth, never a client flag:
@@ -2183,14 +2174,14 @@ export class ProjectStore extends DurableObject<Env> {
       target.kind === "folder"
         ? linkImportedFolderCommand(ctx, {
             folderSlug: target.folderSlug,
-            collectionSlug,
+            corpusSlug,
             link,
             delivery: "reference",
             changedBy: input.changedBy,
           })
         : linkImportedDocumentsCommand(ctx, {
             documentSlugs: imported.map((d) => d.slug),
-            collectionSlug,
+            corpusSlug,
             link,
             delivery: "reference",
             changedBy: input.changedBy,
@@ -2200,17 +2191,30 @@ export class ProjectStore extends DurableObject<Env> {
   }
 
   // The example project: refund-policy + product + brand-voice,
-  // Support + Sales collections. refund-policy linked into BOTH (the
+  // Support + Sales corpora. refund-policy linked into BOTH (the
   // shared-node "no copies" teaching moment); product and brand-voice
   // into Sales only (present, not stranded). One atomic tx over all
   // writes — a partial seed (the broken half-graph) is impossible.
-  // No-op if the project already has any document or collection, so a
+  // No-op if the project already has any document or corpus, so a
   // double-click on a populated project never errors on a brand-new
   // user's first action.
   async seedExample(changedBy: string): Promise<SeedResult> {
     const now = new Date().toISOString();
     const outcome = await this.writeCommand(now, (ctx) =>
       seedExampleCommand(ctx, changedBy),
+    );
+    return outcome.result;
+  }
+
+  // Materialize the empty default corpus on first access so uploads and
+  // agent writes have a target without asking the user to name one.
+  // Idempotent — safe on every dashboard load.
+  async ensureDefaultCorpus(
+    changedBy: string,
+  ): Promise<EnsureDefaultCorpusResult> {
+    const now = new Date().toISOString();
+    const outcome = await this.writeCommand(now, (ctx) =>
+      ensureDefaultCorpusCommand(ctx, changedBy),
     );
     return outcome.result;
   }

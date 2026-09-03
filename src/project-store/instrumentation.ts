@@ -10,14 +10,14 @@ import {
 } from "../store/domain/instrumentation-events";
 import { compact } from "../util";
 
-function collectionMetadataFromChange(
+function corpusMetadataFromChange(
   side: Readonly<Record<string, unknown>> | undefined,
 ): CollectionMetadata | undefined {
   if (side === undefined) return undefined;
   const parsed = CollectionMetadataSchema.safeParse(side);
   if (!parsed.success) {
     console.warn(
-      "collectionMetadataFromChange: schema mismatch (audit data dropped)",
+      "corpusMetadataFromChange: schema mismatch (audit data dropped)",
       { issues: parsed.error.issues },
     );
     return undefined;
@@ -65,7 +65,7 @@ export function documentInstrumentationEvent(
             });
 }
 
-export function collectionInstrumentationEvent(
+export function corpusInstrumentationEvent(
   change: CollectionChange,
 ): InstrumentationEvent {
   const folderSlug =
@@ -87,23 +87,23 @@ export function collectionInstrumentationEvent(
 
   switch (change.kind) {
     case "collection.created":
-      return buildEvent.collectionCreated({
-        collectionSlug: change.collectionSlug,
+      return buildEvent.corpusCreated({
+        corpusSlug: change.collectionSlug,
         changedBy: change.changedBy,
       });
     case "collection.updated":
-      return buildEvent.collectionUpdated(
+      return buildEvent.corpusUpdated(
         compact({
-          collectionSlug: change.collectionSlug,
-          before: collectionMetadataFromChange(change.before),
-          after: collectionMetadataFromChange(change.after),
+          corpusSlug: change.collectionSlug,
+          before: corpusMetadataFromChange(change.before),
+          after: corpusMetadataFromChange(change.after),
           changedBy: change.changedBy,
         }),
       );
     case "collection.attached":
-      return buildEvent.collectionAttached(
+      return buildEvent.corpusAttached(
         compact({
-          collectionSlug: change.collectionSlug,
+          corpusSlug: change.collectionSlug,
           documentSlug: change.documentSlug,
           folderSlug,
           position:
@@ -114,9 +114,9 @@ export function collectionInstrumentationEvent(
         }),
       );
     case "collection.detached":
-      return buildEvent.collectionDetached(
+      return buildEvent.corpusDetached(
         compact({
-          collectionSlug: change.collectionSlug,
+          corpusSlug: change.collectionSlug,
           documentSlug: change.documentSlug,
           folderSlug,
           changedBy: change.changedBy,
@@ -126,9 +126,9 @@ export function collectionInstrumentationEvent(
       const resolvedReason:
         "delivery-changed" | "folder-tree-changed" | "drag-reorder" =
         reason ?? "drag-reorder";
-      return buildEvent.collectionReordered(
+      return buildEvent.corpusReordered(
         compact({
-          collectionSlug: change.collectionSlug,
+          corpusSlug: change.collectionSlug,
           reason: resolvedReason,
           documentSlug: change.documentSlug,
           folderSlug,

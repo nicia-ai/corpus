@@ -35,16 +35,16 @@ import { scopedExecutor } from "./scoped-executor";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "./util";
 
 // Shared MCP responder: parse the JSON-RPC envelope (the trust
-// boundary), preflight the bound Collection, and dispatch through the
+// boundary), preflight the bound Corpus, and dispatch through the
 // scope-enforcing executor. Both auth paths (API-key bearer, OAuth JWT)
 // resolve a `ConnectionRef` upstream and funnel here so MCP behavior
 // has one home.
 //
-// The bound-Collection preflight is the fail-closed point: it has to
+// The bound-Corpus preflight is the fail-closed point: it has to
 // live here because `handleMcp` emits only JSON-RPC and a missing
-// Collection inside it maps to a JSON-RPC not-found inside an HTTP 200
-// — an agent could read that as "empty Collection." Cost: one DO
-// `collectionMembers` round-trip on every /mcp request, including
+// Corpus inside it maps to a JSON-RPC not-found inside an HTTP 200
+// — an agent could read that as "empty Corpus." Cost: one DO
+// `corpusMembers` round-trip on every /mcp request, including
 // `initialize`/`tools/list` that need no member set — the accepted
 // price of failing closed at the transport. Not cached; a short
 // per-credential TTL alongside the resolution path is the lever if
@@ -69,11 +69,11 @@ async function respondMcp(
   }
   const scope = await resolveScope(env, ref);
   if (scope === undefined) {
-    // The Connection's bound Collection is gone — fail closed at the
+    // The Connection's bound Corpus is gone — fail closed at the
     // transport. Never "therefore the whole Project," never a soft
-    // JSON-RPC not-found that an agent could read as an empty Collection.
+    // JSON-RPC not-found that an agent could read as an empty Corpus.
     return Response.json(
-      { error: "connection's collection unavailable" },
+      { error: "connection's corpus unavailable" },
       { status: 403 },
     );
   }
@@ -92,7 +92,7 @@ async function respondMcp(
   // the projection's "second distinct caller connected" signal
   // latches once and stays.
   await inner.recordCallerConnected(callerRef);
-  const exec = scopedExecutor(inner, ref.collectionSlug, members, callerRef, {
+  const exec = scopedExecutor(inner, ref.corpusSlug, members, callerRef, {
     baseUrl: env.BETTER_AUTH_URL,
     projectId: ref.projectId,
   });
@@ -104,9 +104,9 @@ function bearer(authorization: string | undefined): string | undefined {
   return m?.[1]?.trim();
 }
 
-// The one place a Connection's bound-Collection scope is resolved: its
+// The one place a Connection's bound-Corpus scope is resolved: its
 // Project store plus the resolved member-slug set. `undefined` = the
-// bound Collection is gone, and every caller fails closed on that (never
+// bound Corpus is gone, and every caller fails closed on that (never
 // widening to the whole Project). Sharing it keeps the /mcp and REST
 // surfaces from drifting on the tenant/scope boundary.
 async function resolveScope(
@@ -117,7 +117,7 @@ async function resolveScope(
   | undefined
 > {
   const store = storeFor(env, ref.projectId);
-  const members = await store.collectionMembers(ref.collectionSlug);
+  const members = await store.corpusMembers(ref.corpusSlug);
   return members === undefined ? undefined : { store, members };
 }
 
@@ -219,12 +219,12 @@ type ApiKeyScope = Readonly<{
 // OAuth discovery — the external/agent contract.
 //
 // Resolve an api-key bearer to its Project store AND the bound
-// Collection's resolved member-slug set — the REST tenant *and* scope
+// Corpus's resolved member-slug set — the REST tenant *and* scope
 // boundary in one step. An api-key is a Connection credential bound to a
-// single Collection, so the CLI/automation surface must see exactly that
-// Collection's documents, never the whole Project: the bearer's authority
-// is the Collection, not its tenant. Shares `resolveScope` with the /mcp
-// preflight and fails closed (403) when the bound Collection is gone —
+// single Corpus, so the CLI/automation surface must see exactly that
+// Corpus's documents, never the whole Project: the bearer's authority
+// is the Corpus, not its tenant. Shares `resolveScope` with the /mcp
+// preflight and fails closed (403) when the bound Corpus is gone —
 // never widening to "therefore the whole Project." Returns the 401/403
 // Response itself on failure so each route early-returns it unchanged.
 async function apiKeyScope(
@@ -237,7 +237,7 @@ async function apiKeyScope(
   if (ref === undefined) return c.json({ error: "unauthorized" }, 401);
   const scope = await resolveScope(c.env, ref);
   if (scope === undefined) {
-    return c.json({ error: "connection's collection unavailable" }, 403);
+    return c.json({ error: "connection's corpus unavailable" }, 403);
   }
   return { store: scope.store, members: new Set(scope.members), ref };
 }
@@ -273,12 +273,12 @@ export const api = new Hono<{ Bindings: Env }>()
     );
   })
   // — REST surface for the CLI / automation (api-key bearer) ——————————
-  // Every route scopes through the api-key's bound Collection: an agent
-  // credential never reads or writes a document outside its Collection.
+  // Every route scopes through the api-key's bound Corpus: an agent
+  // credential never reads or writes a document outside its Corpus.
   // List filters to members; a non-member read 404s (no existence leak).
   // Writes: a member is updated; a wholly-new slug is CREATED into the
-  // bound Collection; a slug that already exists outside it 403s (that is
-  // another scope's document — the key may grow its own Collection, never
+  // bound Corpus; a slug that already exists outside it 403s (that is
+  // another scope's document — the key may grow its own Corpus, never
   // reach into one it doesn't already contain).
   .get("/api/v1/docs", async (c) => {
     const scope = await apiKeyScope(c);
@@ -327,16 +327,16 @@ export const api = new Hono<{ Bindings: Env }>()
       changedBy: scope.ref.userId,
     });
     // A member is plainly updated; a non-member slug is created INTO the
-    // bound collection (atomic save+attach, appended after the current
+    // bound corpus (atomic save+attach, appended after the current
     // members). `members` is a snapshot, so the create path re-decides
     // inside its transaction: a slug that a racing create already landed
-    // in this collection yields a retryable 409 (clientVersion decides),
-    // and only a slug existing OUTSIDE the collection is `forbidden`.
+    // in this corpus yields a retryable 409 (clientVersion decides),
+    // and only a slug existing OUTSIDE the corpus is `forbidden`.
     const r = scope.members.has(slug)
       ? await scope.store.saveDocument(save)
-      : await scope.store.createDocumentInCollection(
+      : await scope.store.createDocumentInCorpus(
           save,
-          scope.ref.collectionSlug,
+          scope.ref.corpusSlug,
           scope.members.size,
         );
     if (r.ok) return c.json({ ok: true, docVersion: r.docVersion });
@@ -390,7 +390,7 @@ export const api = new Hono<{ Bindings: Env }>()
   //      `${base}/connection` claim → resolveConnection. No claim /
   //      no resolvable Connection → 403 (the mandatory invariant).
   // Either way the resolved Connection's ProjectStore is the tenant
-  // boundary and its Collection is the read scope.
+  // boundary and its Corpus is the read scope.
   .all("/mcp", async (c) => {
     const token = bearer(c.req.header("authorization"));
     if (token?.startsWith(API_KEY_PREFIX)) {

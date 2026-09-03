@@ -1,7 +1,7 @@
 // `tone` carries the page's primary/secondary hierarchy: a primary
 // section is a solid slate-900 title with an optional count chip; a
 // secondary section is a quiet medium-weight slate-500 label. One
-// component so the styling can't drift between Collection detail and
+// component so the styling can't drift between Corpus detail and
 // Activity.
 
 export function Section({

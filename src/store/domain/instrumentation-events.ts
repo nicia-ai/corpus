@@ -58,13 +58,13 @@ const DocumentFilenameChangedSchema = z.object({
   changedBy: z.string(),
 });
 
-// — Collection lifecycle. `collection.attached`/`detached` carry
+// — Corpus lifecycle. `collection.attached`/`detached` carry
 // exactly one of `documentSlug` / `folderSlug` — a member can be either
 // a direct document or a folder include (the bridge from the local
 // ChangeLog vocabulary in `emitFromCollectionChange` preserves which).
-const CollectionCreatedSchema = z.object({
+const CorpusCreatedSchema = z.object({
   type: z.literal("collection.created"),
-  collectionSlug: z.string(),
+  corpusSlug: z.string(),
   changedBy: z.string(),
 });
 
@@ -75,26 +75,26 @@ const CollectionCreatedSchema = z.object({
 // tweaks all flow through this one event). Optional in the wire schema
 // so v2-era rows decoded from the log — written before this shape was
 // added — stay readable.
-const CollectionUpdatedSchema = z.object({
+const CorpusUpdatedSchema = z.object({
   type: z.literal("collection.updated"),
-  collectionSlug: z.string(),
+  corpusSlug: z.string(),
   before: CollectionMetadataSchema.optional(),
   after: CollectionMetadataSchema.optional(),
   changedBy: z.string(),
 });
 
-const CollectionAttachedSchema = z.object({
+const CorpusAttachedSchema = z.object({
   type: z.literal("collection.attached"),
-  collectionSlug: z.string(),
+  corpusSlug: z.string(),
   documentSlug: z.string().optional(),
   folderSlug: z.string().optional(),
   position: z.number().int().nonnegative(),
   changedBy: z.string(),
 });
 
-const CollectionDetachedSchema = z.object({
+const CorpusDetachedSchema = z.object({
   type: z.literal("collection.detached"),
-  collectionSlug: z.string(),
+  corpusSlug: z.string(),
   documentSlug: z.string().optional(),
   folderSlug: z.string().optional(),
   changedBy: z.string(),
@@ -105,13 +105,13 @@ const CollectionDetachedSchema = z.object({
 //   `delivery-changed`  — `core` ↔ `reference` tier flip (member identity stays;
 //                         the resolved corpus changes, so it reuses `.reordered`)
 //   `folder-tree-changed` — a path-map mutation upstream (folder rename/move/
-//                         delete) — every folder-linking collection's resolved
+//                         delete) — every folder-linking corpus's resolved
 //                         expansion may differ even though no member edge moved
 // `documentSlug`/`folderSlug` identify the affected member for `delivery-changed`;
 // `delivery` is the new tier. `drag-reorder` carries none of these.
-const CollectionReorderedSchema = z.object({
+const CorpusReorderedSchema = z.object({
   type: z.literal("collection.reordered"),
-  collectionSlug: z.string(),
+  corpusSlug: z.string(),
   reason: z
     .enum(["drag-reorder", "delivery-changed", "folder-tree-changed"])
     .optional(),
@@ -121,25 +121,25 @@ const CollectionReorderedSchema = z.object({
   changedBy: z.string(),
 });
 
-// — The funnel-critical signal: an agent (caller) read a collection.
+// — The funnel-critical signal: an agent (caller) read a corpus.
 // `versionCapturedAtRead` is the per-doc {slug: docVersion} snapshot
 // the caller actually saw — comparing it against current versions on a
 // later read is how the activity view derives Fresh vs Stale
 // (evidence-based, never time-based). Only state-change moments are
 // emitted; routine repeat reads are silent no-ops:
-//   `first`       — this caller's first read of this collection, ever.
+//   `first`       — this caller's first read of this corpus, ever.
 //   `after-edit`  — first read after a teammate edit superseded what
 //                   this caller had last captured.
 const ReadEventSchema = z.object({
   type: z.literal("read"),
   kind: z.enum(["first", "after-edit"]),
   callerRef: z.string(), // `apikey:<api_key.id>` | `oauth:<jwt.sub>:connection:<connection.id>`
-  collectionSlug: z.string(),
+  corpusSlug: z.string(),
   versionCapturedAtRead: z.record(z.string(), z.number().int().positive()),
 });
 
 // — Caller-connection moments. Distinct from `read.first`: a caller can
-// "connect" (auth + first MCP call) before resolving a collection. Emitted
+// "connect" (auth + first MCP call) before resolving a corpus. Emitted
 // once per distinct callerRef per project; "second distinct caller
 // connects" is the wedge-defining team-rollout signal.
 const CallerConnectedSchema = z.object({
@@ -171,11 +171,11 @@ export const InstrumentationEventSchema = z.discriminatedUnion("type", [
   DocumentRenamedSchema,
   DocumentArchivedSchema,
   DocumentFilenameChangedSchema,
-  CollectionCreatedSchema,
-  CollectionUpdatedSchema,
-  CollectionAttachedSchema,
-  CollectionDetachedSchema,
-  CollectionReorderedSchema,
+  CorpusCreatedSchema,
+  CorpusUpdatedSchema,
+  CorpusAttachedSchema,
+  CorpusDetachedSchema,
+  CorpusReorderedSchema,
   ReadEventSchema,
   CallerConnectedSchema,
   PromptAnsweredSchema,
@@ -229,20 +229,20 @@ export const events = {
   documentFilenameChanged: (
     fields: Omit<z.infer<typeof DocumentFilenameChangedSchema>, "type">,
   ): InstrumentationEvent => ({ type: "document.filename_changed", ...fields }),
-  collectionCreated: (
-    fields: Omit<z.infer<typeof CollectionCreatedSchema>, "type">,
+  corpusCreated: (
+    fields: Omit<z.infer<typeof CorpusCreatedSchema>, "type">,
   ): InstrumentationEvent => ({ type: "collection.created", ...fields }),
-  collectionUpdated: (
-    fields: Omit<z.infer<typeof CollectionUpdatedSchema>, "type">,
+  corpusUpdated: (
+    fields: Omit<z.infer<typeof CorpusUpdatedSchema>, "type">,
   ): InstrumentationEvent => ({ type: "collection.updated", ...fields }),
-  collectionAttached: (
-    fields: Omit<z.infer<typeof CollectionAttachedSchema>, "type">,
+  corpusAttached: (
+    fields: Omit<z.infer<typeof CorpusAttachedSchema>, "type">,
   ): InstrumentationEvent => ({ type: "collection.attached", ...fields }),
-  collectionDetached: (
-    fields: Omit<z.infer<typeof CollectionDetachedSchema>, "type">,
+  corpusDetached: (
+    fields: Omit<z.infer<typeof CorpusDetachedSchema>, "type">,
   ): InstrumentationEvent => ({ type: "collection.detached", ...fields }),
-  collectionReordered: (
-    fields: Omit<z.infer<typeof CollectionReorderedSchema>, "type">,
+  corpusReordered: (
+    fields: Omit<z.infer<typeof CorpusReorderedSchema>, "type">,
   ): InstrumentationEvent => ({ type: "collection.reordered", ...fields }),
   readFirst: (
     fields: Omit<z.infer<typeof ReadEventSchema>, "type" | "kind">,
@@ -288,11 +288,11 @@ export function idempotencyKey(
         ? `${event.type}:${event.slug}:v${String(event.docVersion)}`
         : `${event.type}:${event.slug}:e${String(localEventId)}`;
     case "collection.created":
-      return `${event.type}:${event.collectionSlug}`;
+      return `${event.type}:${event.corpusSlug}`;
     case "collection.updated":
       return localEventId === undefined
-        ? `${event.type}:${event.collectionSlug}`
-        : `${event.type}:${event.collectionSlug}:e${String(localEventId)}`;
+        ? `${event.type}:${event.corpusSlug}`
+        : `${event.type}:${event.corpusSlug}:e${String(localEventId)}`;
     case "collection.attached":
     case "collection.detached": {
       // Either documentSlug or folderSlug identifies the member; the
@@ -304,14 +304,14 @@ export function idempotencyKey(
           : event.folderSlug !== undefined
             ? `folder:${event.folderSlug}`
             : "unknown";
-      return `${event.type}:${event.collectionSlug}:${member}`;
+      return `${event.type}:${event.corpusSlug}:${member}`;
     }
     case "collection.reordered":
-      // Reason discriminates: a `drag-reorder` collapses by collection +
+      // Reason discriminates: a `drag-reorder` collapses by corpus +
       // author (matches the existing change_events behavior); a
       // `delivery-changed` is keyed by member identity so back-to-back
       // flips on different members do not collapse; a
-      // `folder-tree-changed` collapses by collection (one fan-out per
+      // `folder-tree-changed` collapses by corpus (one fan-out per
       // upstream tree mutation).
       switch (event.reason) {
         case "delivery-changed": {
@@ -321,16 +321,16 @@ export function idempotencyKey(
               : event.folderSlug !== undefined
                 ? `folder:${event.folderSlug}`
                 : "unknown";
-          return `${event.type}:delivery-changed:${event.collectionSlug}:${member}:${event.delivery ?? ""}`;
+          return `${event.type}:delivery-changed:${event.corpusSlug}:${member}:${event.delivery ?? ""}`;
         }
         case "folder-tree-changed":
-          return `${event.type}:folder-tree-changed:${event.collectionSlug}:${event.changedBy}`;
+          return `${event.type}:folder-tree-changed:${event.corpusSlug}:${event.changedBy}`;
         case "drag-reorder":
         default:
-          return `${event.type}:${event.collectionSlug}:${event.changedBy}`;
+          return `${event.type}:${event.corpusSlug}:${event.changedBy}`;
       }
     case "read":
-      // Both kinds key on (caller, collection, version-set-fingerprint)
+      // Both kinds key on (caller, corpus, version-set-fingerprint)
       // so a repeat read against the same state collapses to one row
       // BUT a re-emit after a DO restart (cache lost) at a different
       // state does NOT collide with the original `read.first` row —
@@ -338,9 +338,9 @@ export function idempotencyKey(
       // event payload's `kind` preserves the first-vs-after-edit
       // semantic distinction even when both keys share a shape.
       if (event.kind === "first") {
-        return `read.first:${event.callerRef}:${event.collectionSlug}:${fingerprintVersionMap(event.versionCapturedAtRead)}`;
+        return `read.first:${event.callerRef}:${event.corpusSlug}:${fingerprintVersionMap(event.versionCapturedAtRead)}`;
       }
-      return `read.after-edit:${event.callerRef}:${event.collectionSlug}:${fingerprintVersionMap(event.versionCapturedAtRead)}`;
+      return `read.after-edit:${event.callerRef}:${event.corpusSlug}:${fingerprintVersionMap(event.versionCapturedAtRead)}`;
     case "caller.connected":
       return `caller.connected:${event.callerRef}`;
     case "prompt.answered":

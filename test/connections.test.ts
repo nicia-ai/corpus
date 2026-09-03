@@ -16,12 +16,12 @@ import { connectControlDb } from "../src/control/db";
 import { deleteProject } from "../src/control/project-admin";
 import { apiKey, connection } from "../src/control/schema/app";
 import { member } from "../src/control/schema/better-auth";
-import { asCollectionSlug } from "../src/ids";
+import { asCorpusSlug } from "../src/ids";
 
 import { createConnection, createOrg, signUp } from "./_helpers";
 
-// A credential resolves to a Connection → (projectId, collectionSlug),
-// gated by a LIVE user-bound membership join (D1 only — Collection
+// A credential resolves to a Connection → (projectId, corpusSlug),
+// gated by a LIVE user-bound membership join (D1 only — Corpus
 // existence is the respondMcp preflight's contract, not asserted here).
 async function seed(name: string) {
   const userId = await signUp("conn");
@@ -30,7 +30,7 @@ async function seed(name: string) {
   const conn = await createConnection({
     organizationId: org.organizationId,
     projectId: org.projectId,
-    collectionSlug: `marketing-${name}`,
+    corpusSlug: `marketing-${name}`,
   });
   const token = generateApiKeyToken();
   await db.insert(apiKey).values({
@@ -45,7 +45,7 @@ async function seed(name: string) {
 }
 
 describe("credential resolves to a Connection", () => {
-  it("resolveApiKey → ConnectionRef with the bound (projectId, collectionSlug) + apiKeyId", async () => {
+  it("resolveApiKey → ConnectionRef with the bound (projectId, corpusSlug) + apiKeyId", async () => {
     const { org, conn, token } = await seed("ak");
     const ref = await resolveApiKey(connectControlDb(env.DB), token);
     expect(ref).toEqual({
@@ -54,7 +54,7 @@ describe("credential resolves to a Connection", () => {
       userId: expect.any(String),
       role: "owner",
       connectionId: conn.connectionId,
-      collectionSlug: conn.collectionSlug,
+      corpusSlug: conn.corpusSlug,
       // api_key.id populated for namespaced CallerRef construction.
       apiKeyId: expect.any(String),
     });
@@ -79,7 +79,7 @@ describe("credential resolves to a Connection", () => {
       connectionId: conn.connectionId,
     });
     expect(ref?.projectId).toBe(org.projectId);
-    expect(ref?.collectionSlug).toBe(conn.collectionSlug);
+    expect(ref?.corpusSlug).toBe(conn.corpusSlug);
     expect(ref?.connectionId).toBe(conn.connectionId);
   });
 
@@ -123,7 +123,7 @@ describe("credential resolves to a Connection", () => {
       );
     const viaKey = await resolveApiKey(db, token);
     expect(viaKey?.role).toBe("member");
-    expect(viaKey?.collectionSlug).toBe(conn.collectionSlug);
+    expect(viaKey?.corpusSlug).toBe(conn.corpusSlug);
     const viaConn = await resolveConnection(db, {
       userId,
       connectionId: conn.connectionId,
@@ -151,10 +151,10 @@ describe("credential resolves to a Connection", () => {
 // Regression: the existing tests above use the createConnection helper
 // in _helpers.ts which does a direct insert into the connection table,
 // bypassing upsertCanonicalConnection's ON CONFLICT path entirely. The
-// "Connect this collection" button in the UI exercises upsertCanonicalConnection
+// "Connect this corpus" button in the UI exercises upsertCanonicalConnection
 // directly and a mismatch between the migration's partial-index predicate
-// (qualified `"connection"."is_default_for_collection"`) and the conflict
-// clause's targetWhere (had been unqualified `"is_default_for_collection"`)
+// (qualified `"connection"."is_default_for_corpus"`) and the conflict
+// clause's targetWhere (had been unqualified `"is_default_for_corpus"`)
 // caused SQLite to reject the insert with "no unique or exclusion
 // constraint matching the ON CONFLICT specification". The tests below
 // exercise upsertCanonicalConnection through the real D1 path so this
@@ -167,7 +167,7 @@ describe("upsertCanonicalConnection (reuse-or-create — select-then-insert)", (
     const id = await upsertCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("sales-agent"),
+      corpusSlug: asCorpusSlug("sales-agent"),
     });
     expect(id).toBeTruthy();
     const [row] = await db
@@ -178,19 +178,19 @@ describe("upsertCanonicalConnection (reuse-or-create — select-then-insert)", (
     expect(row?.isDefaultForCollection).toBe(true);
   });
 
-  it("second call for the same (projectId, collectionSlug) reuses the canonical row", async () => {
+  it("second call for the same (projectId, corpusSlug) reuses the canonical row", async () => {
     const userId = await signUp("ccc-reuse");
     const org = await createOrg(userId, "Org CCC reuse");
     const db = connectControlDb(env.DB);
     const first = await upsertCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("alerts"),
+      corpusSlug: asCorpusSlug("alerts"),
     });
     const second = await upsertCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("alerts"),
+      corpusSlug: asCorpusSlug("alerts"),
       name: "renamed",
     });
     expect(second).toBe(first);
@@ -207,7 +207,7 @@ describe("upsertCanonicalConnection (reuse-or-create — select-then-insert)", (
     expect(rows[0]?.name).toBe("renamed");
   });
 
-  it("same collection across two DIFFERENT projects yields two distinct canonical rows", async () => {
+  it("same corpus across two DIFFERENT projects yields two distinct canonical rows", async () => {
     const userId = await signUp("ccc-cross");
     const orgA = await createOrg(userId, "Org CCC A");
     const orgB = await createOrg(userId, "Org CCC B");
@@ -215,12 +215,12 @@ describe("upsertCanonicalConnection (reuse-or-create — select-then-insert)", (
     const a = await upsertCanonicalConnection(db, {
       organizationId: orgA.organizationId,
       projectId: orgA.projectId,
-      collectionSlug: asCollectionSlug("docs"),
+      corpusSlug: asCorpusSlug("docs"),
     });
     const b = await upsertCanonicalConnection(db, {
       organizationId: orgB.organizationId,
       projectId: orgB.projectId,
-      collectionSlug: asCollectionSlug("docs"),
+      corpusSlug: asCorpusSlug("docs"),
     });
     expect(a).not.toBe(b);
   });

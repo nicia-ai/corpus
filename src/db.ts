@@ -42,7 +42,7 @@ export const changeEvents = sqliteTable("change_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   eventType: text("event_type").notNull(),
   documentSlug: text("document_slug"),
-  collectionSlug: text("collection_slug"),
+  corpusSlug: text("collection_slug"),
   beforeJson: text("before_json"),
   afterJson: text("after_json"),
   changedAt: text("changed_at").notNull(),

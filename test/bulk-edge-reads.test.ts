@@ -62,7 +62,7 @@ function expectSameCost(few: readonly string[], many: readonly string[]): void {
 }
 
 describe("set-oriented graph reads (statement count is independent of N)", () => {
-  async function withCollectionMembers(
+  async function withCorpusMembers(
     count: number,
   ): Promise<
     Readonly<{ store: Store; slugs: readonly ReturnType<typeof docSlug>[] }>
@@ -71,7 +71,7 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     const slugs = Array.from({ length: count }, (_, i) =>
       docSlug(`m-${String(i)}`),
     );
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("team"),
       name: "Team",
       changedBy: "u",
@@ -85,7 +85,7 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
       });
       await store.attachDocument(colSlug("team"), slug, i + 1, "u");
     }
-    await store.readCollection(colSlug("team"));
+    await store.readCorpus(colSlug("team"));
     return { store, slugs };
   }
 
@@ -172,8 +172,8 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     expectSameCost(forFew.statements, forMany.statements);
   });
 
-  it("checks every collection's folder links in one read on a folder rename", async () => {
-    async function withCollections(count: number): Promise<
+  it("checks every corpus's folder links in one read on a folder rename", async () => {
+    async function withCorpuss(count: number): Promise<
       Readonly<{
         store: Store;
         folderSlug: ReturnType<typeof asFolderSlug>;
@@ -183,7 +183,7 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
       const folder = await store.createFolder("docs", null);
       if (!folder.ok) throw new Error("fixture: folder");
       for (let i = 0; i < count; i += 1) {
-        await store.createCollection({
+        await store.createCorpus({
           slug: colSlug(`c-${String(i)}`),
           name: `C ${String(i)}`,
           changedBy: "u",
@@ -193,8 +193,8 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     }
 
     const [few, many] = await Promise.all([
-      withCollections(SMALL),
-      withCollections(LARGE),
+      withCorpuss(SMALL),
+      withCorpuss(LARGE),
     ]);
     const forFew = await measure(
       async () => await few.store.renameFolder(few.folderSlug, "renamed", "u"),
@@ -257,16 +257,16 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     expectSameCost(forFew.statements, forMany.statements);
   });
 
-  it("hydrates a collection's members in one read, not one per member", async () => {
+  it("hydrates a corpus's members in one read, not one per member", async () => {
     const [few, many] = await Promise.all([
-      withCollectionMembers(SMALL),
-      withCollectionMembers(LARGE),
+      withCorpusMembers(SMALL),
+      withCorpusMembers(LARGE),
     ]);
     const forFew = await measure(
-      async () => await few.store.readCollection(colSlug("team")),
+      async () => await few.store.readCorpus(colSlug("team")),
     );
     const forMany = await measure(
-      async () => await many.store.readCollection(colSlug("team")),
+      async () => await many.store.readCorpus(colSlug("team")),
     );
 
     expect(forFew.result.found).toBe(true);
@@ -277,21 +277,21 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     expectSameCost(forFew.statements, forMany.statements);
   });
 
-  it("hydrates collection members once when reordering", async () => {
+  it("hydrates corpus members once when reordering", async () => {
     const [few, many] = await Promise.all([
-      withCollectionMembers(SMALL),
-      withCollectionMembers(LARGE),
+      withCorpusMembers(SMALL),
+      withCorpusMembers(LARGE),
     ]);
     const reorder = (
-      fixture: Awaited<ReturnType<typeof withCollectionMembers>>,
+      fixture: Awaited<ReturnType<typeof withCorpusMembers>>,
     ) => {
       const [first, second, ...rest] = fixture.slugs;
       if (first === undefined || second === undefined) {
-        throw new Error("fixture: at least two collection members");
+        throw new Error("fixture: at least two corpus members");
       }
       return measure(
         async () =>
-          await fixture.store.reorderCollectionDocuments(
+          await fixture.store.reorderCorpusDocuments(
             colSlug("team"),
             [second, first, ...rest],
             "u",

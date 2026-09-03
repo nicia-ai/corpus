@@ -4,7 +4,7 @@ import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const ws = () => freshStore("arch");
 
-async function seedDocInCollection() {
+async function seedDocInCorpus() {
   const w = ws();
   await w.saveDocument({
     slug: docSlug("alpha"),
@@ -18,15 +18,15 @@ async function seedDocInCollection() {
     clientVersion: 0,
     changedBy: "u",
   });
-  await w.createCollection({ slug: colSlug("c"), name: "C", changedBy: "u" });
+  await w.createCorpus({ slug: colSlug("c"), name: "C", changedBy: "u" });
   await w.attachDocument(colSlug("c"), docSlug("alpha"), 1, "u");
   await w.attachDocument(colSlug("c"), docSlug("bravo"), 2, "u");
   return w;
 }
 
 describe("document soft-delete (archive)", () => {
-  it("detaches from collections, hides from list/get/read, keeps history", async () => {
-    const w = await seedDocInCollection();
+  it("detaches from corpora, hides from list/get/read, keeps history", async () => {
+    const w = await seedDocInCorpus();
 
     expect(await w.archiveDocument(docSlug("alpha"), "dana")).toEqual({
       ok: true,
@@ -36,8 +36,8 @@ describe("document soft-delete (archive)", () => {
     expect((await w.listDocuments()).map((d) => d.slug)).toEqual(["bravo"]);
     expect(await w.getDocument(docSlug("alpha"))).toBeUndefined();
 
-    // Detached: the collection no longer serves it.
-    const r = await w.readCollection(colSlug("c"));
+    // Detached: the corpus no longer serves it.
+    const r = await w.readCorpus(colSlug("c"));
     expect(r.found).toBe(true);
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug)).toEqual(["bravo"]);
@@ -55,7 +55,7 @@ describe("document soft-delete (archive)", () => {
   });
 
   it("is idempotent: re-archiving is a no-op", async () => {
-    const w = await seedDocInCollection();
+    const w = await seedDocInCorpus();
     expect(await w.archiveDocument(docSlug("alpha"), "u")).toEqual({
       ok: true,
     });
@@ -68,7 +68,7 @@ describe("document soft-delete (archive)", () => {
   });
 
   it("bulk archive returns the count and skips missing/already-archived", async () => {
-    const w = await seedDocInCollection();
+    const w = await seedDocInCorpus();
     await w.archiveDocument(docSlug("alpha"), "u");
 
     expect(
@@ -79,7 +79,7 @@ describe("document soft-delete (archive)", () => {
     ).toEqual({ archived: 1 });
 
     expect(await w.listDocuments()).toEqual([]);
-    const r = await w.readCollection(colSlug("c"));
+    const r = await w.readCorpus(colSlug("c"));
     expect(r.found).toBe(true);
     if (!r.found) return;
     expect(r.documents).toEqual([]);

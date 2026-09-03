@@ -246,11 +246,11 @@ function create(env: Env, runtime: ServerEnv) {
             shouldRedirect: async ({ user }) => {
               const state = await getOAuthProviderState();
               if (state?.query === undefined) return false;
-              const picked = await readSelection(
-                connectControlDb(env.DB),
-                state.query,
-                user.id,
-              );
+              const db = connectControlDb(env.DB);
+              const picked = await readSelection(db, state.query, user.id);
+              // No handshake-keyed selection yet → land on /connect/select.
+              // pending_connect is userId-keyed and only pre-selects there;
+              // binding it here would cross-bind concurrent handshakes.
               return picked === undefined;
             },
             // Read (never delete — fires more than once per flow) the

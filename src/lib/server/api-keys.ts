@@ -8,13 +8,13 @@ import {
   listApiKeys,
 } from "@/control/api-keys";
 import {
-  findCanonicalConnectionByCollection,
+  findCanonicalConnectionByCorpus,
   listProjectConnections,
 } from "@/control/connections";
 import { connectControlDb } from "@/control/db";
 import { entitlementsOf } from "@/control/entitlements";
 import { UnauthorizedError, ValidationError } from "@/errors";
-import { asApiKeyId, asCollectionSlug } from "@/ids";
+import { asApiKeyId, asCorpusSlug } from "@/ids";
 import { authMiddleware, projectMiddleware } from "@/lib/middleware";
 import { authedUserId, requireProjectOwner } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
@@ -43,7 +43,7 @@ export type ApiKeyCreated = Readonly<{
 }>;
 
 // `connectionId` lets the form mint a new key without re-resolving the
-// Collection; `keys` is the user's keys against that Connection only.
+// Corpus; `keys` is the user's keys against that Connection only.
 export type ConnectionKeysView = Readonly<{
   connectionId: string;
   keys: ApiKeyMeta[];
@@ -51,17 +51,17 @@ export type ConnectionKeysView = Readonly<{
 
 export const listConnectionApiKeys = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .validator(z.object({ collectionSlug: z.string().trim().min(1) }))
+  .validator(z.object({ corpusSlug: z.string().trim().min(1) }))
   .handler(
     async ({ data, context }): Promise<ConnectionKeysView | undefined> => {
       const c = srv(context);
       const ref = c.project;
       if (ref === undefined) throw new UnauthorizedError("No project");
       const db = connectControlDb(c.env.DB);
-      const connectionId = await findCanonicalConnectionByCollection(
+      const connectionId = await findCanonicalConnectionByCorpus(
         db,
         ref.projectId,
-        asCollectionSlug(data.collectionSlug),
+        asCorpusSlug(data.corpusSlug),
       );
       if (connectionId === undefined) return undefined;
       const rows = await listApiKeys(db, authedUserId(c), connectionId);

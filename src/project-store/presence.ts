@@ -35,7 +35,7 @@ export type PresenceUser = Readonly<{
 }>;
 
 // Review/project actions have no durable change-event counterpart; the
-// document/collection actions are derived from the domain vocabulary so the
+// document/corpus actions are derived from the domain vocabulary so the
 // two lists can never drift (a new event type is a compile-time addition here).
 const REVIEW_ACTIONS = [
   "project.changed",
@@ -55,14 +55,14 @@ const RealtimeActions = [
 ] as const;
 
 export const RealtimeChange = z.object({
-  area: z.enum(["project", "document", "collection", "review"]),
+  area: z.enum(["project", "document", "corpus", "review"]),
   action: z.enum(RealtimeActions),
   actorId: z.string().optional(),
   actorName: z.string().optional(),
   docSlug: z.string().optional(),
   docVersion: z.number().int().nonnegative().optional(),
   title: z.string().optional(),
-  collectionSlug: z.string().optional(),
+  corpusSlug: z.string().optional(),
   channel: z.enum(CALLER_CHANNELS).optional(),
 });
 export type RealtimeChange = Readonly<z.infer<typeof RealtimeChange>>;

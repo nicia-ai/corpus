@@ -101,7 +101,7 @@ export class DocumentRepo {
   // Soft-delete: stamp `archivedAt` on the head only (same partial-merge
   // primitive as `rename`/`setFilename`). The content-addressed
   // `DocumentVersion` chain and blobs are deliberately untouched so
-  // existing CollectionVersion snapshots and bundle export still resolve.
+  // existing CorpusVersion snapshots and bundle export still resolve.
   // `searchText` is cleared so the archived doc leaves the fulltext index
   // (there is no unarchive path; a future one would recompute it).
   async archive(node: DocumentNode, archivedAt: string): Promise<DocumentNode> {

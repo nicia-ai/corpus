@@ -12,32 +12,32 @@ import {
 // criterion depends on. Consumed only by the empty-state teaching graph
 // (ProjectGraph) — the populated home is a dashboard, not a node diagram.
 //
-//   col 0: Documents   col 1: Collections   col 2: Agents
-//   [Doc]──includes──▶( Collection )──reads──▶[ Agent ]
+//   col 0: Documents   col 1: Corpora   col 2: Agents
+//   [Doc]──includes──▶( Corpus )──reads──▶[ Agent ]
 //
-// A document attached to multiple collections is ONE node with multiple
+// A document attached to multiple corpora is ONE node with multiple
 // outgoing edges (the "no copies" linkage made visible). The example
 // supplies `agents` + `agentLinks` to illustrate concrete agents reading
-// the collections.
+// the corpora.
 
 export type GraphInput = Readonly<{
   documents: readonly Readonly<{ slug: string; title: string }>[];
-  collections: readonly Readonly<{ slug: string; name: string }>[];
+  corpora: readonly Readonly<{ slug: string; name: string }>[];
   attachments: readonly Readonly<{
-    collectionSlug: string;
+    corpusSlug: string;
     documentSlug: string;
     position: number;
   }>[];
-  // Example/ghost only — concrete agents reading the collections. Absent on
+  // Example/ghost only — concrete agents reading the corpora. Absent on
   // the live graph (col 2 is then the single MCP endpoint).
   agents?: readonly Readonly<{ slug: string; name: string }>[];
   agentLinks?: readonly Readonly<{
     agentSlug: string;
-    collectionSlug: string;
+    corpusSlug: string;
   }>[];
 }>;
 
-export type NodeKind = "document" | "collection" | "agent";
+export type NodeKind = "document" | "corpus" | "agent";
 
 export type GraphNode = Readonly<{
   id: string;
@@ -49,8 +49,8 @@ export type GraphNode = Readonly<{
   y: number;
   w: number;
   h: number;
-  // documents only: number of distinct collections this doc is linked into.
-  collectionCount?: number;
+  // documents only: number of distinct corpora this doc is linked into.
+  corpusCount?: number;
 }>;
 
 export type GraphEdge = Readonly<{
@@ -61,7 +61,7 @@ export type GraphEdge = Readonly<{
   y1: number;
   x2: number;
   y2: number;
-  // doc → collection edges carry the attachment position; collection →
+  // doc → corpus edges carry the attachment position; corpus →
   // agent edges do not.
   position?: number;
 }>;
@@ -93,16 +93,16 @@ const rowY = (row: number): number => PAD + row * ROW_GAP;
 const bySlug = <T extends { slug: string }>(a: T, b: T): number =>
   a.slug.localeCompare(b.slug);
 
-// Sorted distinct collections each document is attached to
-// (slug-keyed), so the "In N collections" badge and edge fan-out are
+// Sorted distinct corpora each document is attached to
+// (slug-keyed), so the "In N corpora" badge and edge fan-out are
 // deterministic.
-function collectionCounts(
+function corpusCounts(
   attachments: GraphInput["attachments"],
 ): ReadonlyMap<string, number> {
   const perDoc = new Map<string, Set<string>>();
   for (const a of attachments) {
     const set = perDoc.get(a.documentSlug) ?? new Set<string>();
-    set.add(a.collectionSlug);
+    set.add(a.corpusSlug);
     perDoc.set(a.documentSlug, set);
   }
   return new Map([...perDoc].map(([slug, set]) => [slug, set.size]));
@@ -110,10 +110,10 @@ function collectionCounts(
 
 export function layout(input: GraphInput): GraphLayout {
   const documents = [...input.documents].sort(bySlug);
-  const collections = [...input.collections].sort(bySlug);
-  const empty = documents.length === 0 && collections.length === 0;
+  const corpora = [...input.corpora].sort(bySlug);
+  const empty = documents.length === 0 && corpora.length === 0;
 
-  const counts = collectionCounts(input.attachments);
+  const counts = corpusCounts(input.attachments);
 
   const docNodes: GraphNode[] = documents.map((d, i) => {
     const count = counts.get(d.slug);
@@ -127,13 +127,13 @@ export function layout(input: GraphInput): GraphLayout {
       y: rowY(i),
       w: NODE_W,
       h: NODE_H,
-      ...(count === undefined ? {} : { collectionCount: count }),
+      ...(count === undefined ? {} : { corpusCount: count }),
     };
   });
 
-  const colNodes: GraphNode[] = collections.map((c, i) => ({
-    id: `collection:${c.slug}`,
-    kind: "collection",
+  const colNodes: GraphNode[] = corpora.map((c, i) => ({
+    id: `corpus:${c.slug}`,
+    kind: "corpus",
     slug: c.slug,
     label: c.name,
     col: 1,
@@ -143,7 +143,7 @@ export function layout(input: GraphInput): GraphLayout {
     h: NODE_H,
   }));
 
-  // Column 2: the concrete agents reading the collections (one node each,
+  // Column 2: the concrete agents reading the corpora (one node each,
   // slug-sorted, top-aligned like the other columns).
   const agents = [...(input.agents ?? [])].sort(bySlug);
   const col2Nodes: readonly GraphNode[] = agents.map((a, i) => ({
@@ -171,11 +171,11 @@ export function layout(input: GraphInput): GraphLayout {
     n.y + n.h / 2,
   ];
 
-  // doc → collection, sorted (collectionSlug, position, documentSlug)
+  // doc → corpus, sorted (corpusSlug, position, documentSlug)
   // so the edge list is stable across loads.
   const attachments = [...input.attachments].sort(
     (a, b) =>
-      a.collectionSlug.localeCompare(b.collectionSlug) ||
+      a.corpusSlug.localeCompare(b.corpusSlug) ||
       a.position - b.position ||
       a.documentSlug.localeCompare(b.documentSlug),
   );
@@ -183,12 +183,12 @@ export function layout(input: GraphInput): GraphLayout {
   const docEdges: GraphEdge[] = [];
   for (const a of attachments) {
     const from = nodeById.get(`document:${a.documentSlug}`);
-    const to = nodeById.get(`collection:${a.collectionSlug}`);
+    const to = nodeById.get(`corpus:${a.corpusSlug}`);
     if (from === undefined || to === undefined) continue;
     const [x1, y1] = rightMid(from);
     const [x2, y2] = leftMid(to);
     docEdges.push({
-      id: `e:${a.documentSlug}->${a.collectionSlug}`,
+      id: `e:${a.documentSlug}->${a.corpusSlug}`,
       fromId: from.id,
       toId: to.id,
       x1,
@@ -199,22 +199,22 @@ export function layout(input: GraphInput): GraphLayout {
     });
   }
 
-  // collection → agent: each declared (collection, agent) link, sorted
+  // corpus → agent: each declared (corpus, agent) link, sorted
   // so the edge list is stable across loads.
   const links = [...(input.agentLinks ?? [])].sort(
     (a, b) =>
-      a.collectionSlug.localeCompare(b.collectionSlug) ||
+      a.corpusSlug.localeCompare(b.corpusSlug) ||
       a.agentSlug.localeCompare(b.agentSlug),
   );
   const col2Edges: GraphEdge[] = [];
   for (const l of links) {
-    const from = nodeById.get(`collection:${l.collectionSlug}`);
+    const from = nodeById.get(`corpus:${l.corpusSlug}`);
     const to = nodeById.get(`agent:${l.agentSlug}`);
     if (from === undefined || to === undefined) continue;
     const [x1, y1] = rightMid(from);
     const [x2, y2] = leftMid(to);
     col2Edges.push({
-      id: `e:${l.collectionSlug}->${l.agentSlug}`,
+      id: `e:${l.corpusSlug}->${l.agentSlug}`,
       fromId: from.id,
       toId: to.id,
       x1,
@@ -225,7 +225,7 @@ export function layout(input: GraphInput): GraphLayout {
   }
 
   const nodes = [...docNodes, ...colNodes, ...col2Nodes];
-  const rows = Math.max(documents.length, collections.length, agents.length, 1);
+  const rows = Math.max(documents.length, corpora.length, agents.length, 1);
   return {
     nodes,
     edges: [...docEdges, ...col2Edges],
@@ -236,16 +236,16 @@ export function layout(input: GraphInput): GraphLayout {
 }
 
 // The screen-reader source of truth for linkage: one sentence per document
-// listing the collections it feeds. Derived from the SAME data the visual
+// listing the corpora it feeds. Derived from the SAME data the visual
 // layout uses, so the accessible and visual paths can never disagree.
 export function linkageSentences(
   input: GraphInput,
 ): readonly Readonly<{ documentSlug: string; sentence: string }>[] {
-  const colName = new Map(input.collections.map((c) => [c.slug, c.name]));
+  const colName = new Map(input.corpora.map((c) => [c.slug, c.name]));
   const perDoc = new Map<string, Set<string>>();
   for (const a of input.attachments) {
     const set = perDoc.get(a.documentSlug) ?? new Set<string>();
-    set.add(a.collectionSlug);
+    set.add(a.corpusSlug);
     perDoc.set(a.documentSlug, set);
   }
   return [...input.documents].sort(bySlug).map((d) => {
@@ -253,16 +253,16 @@ export function linkageSentences(
     const names = colSlugs.map((s) => colName.get(s) ?? s);
     const sentence =
       names.length === 0
-        ? `${d.title} — not used by any collection`
+        ? `${d.title} — not used by any corpus`
         : `${d.title} — used by ${names.join(", ")}`;
     return { documentSlug: d.slug, sentence };
   });
 }
 
 // The canonical example shape: refund-policy linked into BOTH
-// collections (the shared-node "no copies" moment), product and
-// brand-voice into Sales only (one collection — present, not
-// stranded). Document/collection/attachment shape and the markdown
+// corpora (the shared-node "no copies" moment), product and
+// brand-voice into Sales only (one corpus — present, not
+// stranded). Document/corpus/attachment shape and the markdown
 // bodies live in `src/sample-project.ts` (the segregated demo
 // content); the agent tier is ghost-only and stays here because the
 // seed deliberately does not write it. Composing — not duplicating —
@@ -270,7 +270,7 @@ export function linkageSentences(
 // silently disagreeing.
 export const EXAMPLE_GRAPH: GraphInput = {
   documents: EXAMPLE_DOCS.map(({ slug, title }) => ({ slug, title })),
-  collections: EXAMPLE_COLLECTIONS,
+  corpora: EXAMPLE_COLLECTIONS,
   attachments: EXAMPLE_ATTACHMENTS,
   agents: EXAMPLE_AGENTS,
   agentLinks: EXAMPLE_AGENT_LINKS,
