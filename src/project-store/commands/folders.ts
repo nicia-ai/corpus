@@ -113,10 +113,10 @@ export async function deleteFolderCommand(
   );
   for (const cs of r.unlinkedCollections) {
     if (alreadySnapshotted.has(cs)) continue;
-    await ctx.collection.snapshot(ctx.u, cs, input.changedBy, ctx.now);
+    await ctx.corpus.snapshot(ctx.u, cs, input.changedBy, ctx.now);
     changes.push(
       collectionFolderTreeChanged({
-        collectionSlug: cs,
+        corpusSlug: cs,
         changedBy: input.changedBy,
         changedAt: ctx.now,
       }),

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { alwaysIncludeBudgetTokensZ, sha256 } from "../../util";
 
 import {
-  collectionDelivery,
+  corpusDelivery,
   DEFAULT_COLLECTION_DELIVERY,
 } from "./collection-expand";
 import type { CollectionMember } from "./versions";
@@ -76,7 +76,7 @@ export function bundleMembersOf(
       documentVersion: m.docVersion,
       contentHash: m.contentHash,
       position: m.position,
-      delivery: collectionDelivery(m.delivery),
+      delivery: corpusDelivery(m.delivery),
     }));
 }
 
@@ -90,7 +90,7 @@ export function collectionMembersOf(
       docVersion: m.documentVersion,
       contentHash: m.contentHash,
       position: m.position,
-      delivery: collectionDelivery(m.delivery),
+      delivery: corpusDelivery(m.delivery),
     }));
 }
 

@@ -62,7 +62,7 @@ and every Corpus write rides `ProjectStore.write()`'s single enlisted
 interactive path.
 
 Measured with `setGraphStatementSinkForTest` across the 0.52→0.53 hop:
-create-document 18, update-document 16, create-collection 14,
+create-document 18, update-document 16, create-corpus 14,
 list-documents 10 statements — identical on both releases.
 
 ## Why the data plane is a DO and not D1

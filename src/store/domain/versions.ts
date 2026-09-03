@@ -1,4 +1,4 @@
-import type { CollectionSlug, DocumentSlug } from "../../ids";
+import type { CorpusSlug, DocumentSlug } from "../../ids";
 import { compact } from "../../util";
 
 import type { CollectionDelivery } from "./collection-expand";
@@ -24,7 +24,7 @@ export type DocumentVersionProps = Readonly<{
   diffSummary?: string;
 }>;
 
-// One resolved, position-ordered member of a collection snapshot, each
+// One resolved, position-ordered member of a corpus snapshot, each
 // pinned to the document's current DocumentVersion.
 export type CollectionMember = Readonly<{
   documentSlug: string;
@@ -35,7 +35,7 @@ export type CollectionMember = Readonly<{
 }>;
 
 export type CollectionVersionSnapshot = Readonly<{
-  collectionSlug: CollectionSlug;
+  collectionSlug: CorpusSlug;
   collectionVersion: number;
   members: readonly CollectionMember[];
   changedAt: string;
@@ -68,10 +68,10 @@ export function documentVersion(
 }
 
 // Snapshot the resolved member set (already position-ordered) at a
-// monotonically increasing per-collection version.
+// monotonically increasing per-corpus version.
 export function collectionVersionSnapshot(
   args: Readonly<{
-    collectionSlug: CollectionSlug;
+    collectionSlug: CorpusSlug;
     collectionVersion: number;
     members: readonly CollectionMember[];
     changedAt: string;

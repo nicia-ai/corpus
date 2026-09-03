@@ -14,7 +14,7 @@ import {
 
 import { isDocumentChange, type DomainChange } from "./command";
 import {
-  collectionInstrumentationEvent,
+  corpusInstrumentationEvent,
   documentInstrumentationEvent,
 } from "./instrumentation";
 import type { ProjectUnit } from "./unit";
@@ -56,7 +56,7 @@ export class ProjectInstrumentation {
     for (const change of changes) {
       const localEventId = isDocumentChange(change)
         ? await u.log.append(change)
-        : await u.log.appendCollection(change);
+        : await u.log.appendCorpus(change);
       const event = this.eventForChange(change);
       await u.outbox.enqueue({
         localEventId,
@@ -65,7 +65,7 @@ export class ProjectInstrumentation {
         // `localEventId` (the ledger row) is this mutation's unique identity,
         // so distinct edits never collapse — while a drain retry reuses the
         // stored key and still dedups. See idempotencyKey for which event
-        // kinds rely on it (head-only renames, collection.updated).
+        // kinds rely on it (head-only renames, corpus.updated).
         idempotencyKey: idempotencyKey(event, localEventId),
         eventType: eventTypeOf(event),
         payload: encodeEvent(event),
@@ -91,7 +91,7 @@ export class ProjectInstrumentation {
   private eventForChange(change: DomainChange): InstrumentationEvent {
     return isDocumentChange(change)
       ? documentInstrumentationEvent(change)
-      : collectionInstrumentationEvent(change);
+      : corpusInstrumentationEvent(change);
   }
 
   private async deleteOutboxRow(id: number): Promise<void> {

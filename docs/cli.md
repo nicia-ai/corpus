@@ -1,25 +1,25 @@
 ---
 title: CLI
-description: A tiny, Git-free pull/push CLI for editing Corpus documents from your terminal or CI — authenticated by an API key and scoped to one collection.
+description: A tiny, Git-free pull/push CLI for editing Corpus documents from your terminal or CI — authenticated by an API key and scoped to one corpus.
 sidebar:
   order: 7
 ---
 
 The Corpus CLI is a small terminal tool for listing, pulling, and pushing
-the documents in **one collection**, using an [API key](./api-keys.md). It
+the documents in **one corpus**, using an [API key](./api-keys.md). It
 is the way automation edits canonical documents without a browser: a CI job
 that regenerates a runbook, a script that syncs docs from another system, or
 just you, editing in your own `$EDITOR` instead of the web UI.
 
 Unlike [MCP](./connect-your-agent.md) — whose only write is a human-reviewed
 proposal — the CLI **reads and writes canonical documents**. That is why it
-deliberately uses the collection-scoped REST API and an API key instead of the
+deliberately uses the corpus-scoped REST API and an API key instead of the
 MCP/OAuth transport. It pushes new versions through the same
 optimistic-concurrency contract the web editor enforces, so nothing is ever
 silently overwritten.
 
-> The CLI is scoped to the **one collection** its API key is bound to. It
-> can only see and edit that collection's documents — never the rest of the
+> The CLI is scoped to the **one corpus** its API key is bound to. It
+> can only see and edit that corpus's documents — never the rest of the
 > project.
 
 ## Install and setup
@@ -75,7 +75,7 @@ From a Corpus source checkout, `pnpm corpus` remains an equivalent development
 entry point:
 
 ```sh
-pnpm corpus <setup|doctor|list|pull|push> …
+pnpm corpus <setup|doctor|mcp|list|pull|push> …
 ```
 
 It is a thin wrapper over the REST endpoints documented [below](#rest-api) —
@@ -83,9 +83,27 @@ if you'd rather call those directly from CI or `curl`, you can.
 
 ## Commands
 
+### `mcp add`
+
+Write an OAuth MCP server entry for Cursor, Claude Code, or VS Code — the
+fast path after **Connect this corpus** in the UI. No API key required;
+the agent completes browser sign-in on first use.
+
+```sh
+corpus mcp add --client cursor --name corpus-default
+corpus mcp add --client claude-code --name corpus-marketing
+corpus mcp add --client vscode --url https://corpus.example.com --name corpus-ops
+```
+
+| Flag       | Default                                            | Notes                                                                                                                                   |
+| ---------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `--client` | `cursor`                                           | `cursor` writes `~/.cursor/mcp.json`; `vscode` writes `.vscode/mcp.json` in the cwd; `claude-code` prints the `claude mcp add` command. |
+| `--url`    | `$CORPUS_URL/mcp` or `https://corpus.nicia.ai/mcp` | Hosted or self-hosted MCP endpoint.                                                                                                     |
+| `--name`   | `corpus-default`                                   | Local MCP server name — use `corpus-<slug>` to match the UI.                                                                            |
+
 ### `list`
 
-List the documents in the bound collection, one per line as
+List the documents in the bound corpus, one per line as
 `slug`, version, and title:
 
 ```sh
@@ -94,7 +112,7 @@ api-style-guide   v4   API Style Guide
 deploy-runbook    v2   Deploy Runbook
 ```
 
-Only the collection's members appear — this is the same scope an agent sees
+Only the corpus's members appear — this is the same scope an agent sees
 over MCP.
 
 ### `pull <slug> [path]`
@@ -110,7 +128,7 @@ pulled api-style-guide (v4) → api-style-guide.md
 Alongside the markdown, `pull` writes a small **version sidecar** —
 `api-style-guide.md.corpus.json` — recording the version you fetched. Keep
 it next to the file; `push` reads it to detect conflicts. Pulling a slug
-that isn't in your collection fails with `not found`.
+that isn't in your corpus fails with `not found`.
 
 ### `push <slug> [path]`
 
@@ -153,7 +171,7 @@ artifact: leave it beside the markdown, and don't hand-edit it. A file with
 ## Creating documents
 
 Pushing a slug that doesn't exist yet **creates** it — and adds it to the
-collection your key is bound to, so it shows up in `list` and is readable
+corpus your key is bound to, so it shows up in `list` and is readable
 immediately:
 
 ```sh
@@ -173,13 +191,13 @@ it in the web editor.)
 
 ## Scope & permissions
 
-An API key is a **Connection** credential, bound to a single collection. The
+An API key is a **Connection** credential, bound to a single corpus. The
 CLI inherits that scope exactly:
 
-- `list` shows only that collection's documents.
-- `pull` of a document outside the collection returns `not found`.
-- `push` to a slug that already exists **outside** the collection is
-  refused — the key can grow its own collection, never reach into another.
+- `list` shows only that corpus's documents.
+- `pull` of a document outside the corpus returns `not found`.
+- `push` to a slug that already exists **outside** the corpus is
+  refused — the key can grow its own corpus, never reach into another.
 
 Any project member's key can read and write through it; **minting** keys is
 owner-only. Revoke a key the moment it might be exposed — see
@@ -199,11 +217,11 @@ corpus push deploy-runbook           # → new version, sidecar updated
 ## REST API
 
 The CLI is a thin client over three endpoints under `/api/v1/docs`. Each
-takes the API key as a bearer token and is scoped to the key's collection:
+takes the API key as a bearer token and is scoped to the key's corpus:
 
 | Method & path            | Does                                                               |
 | ------------------------ | ------------------------------------------------------------------ |
-| `GET /api/v1/docs`       | List the collection's documents (`slug`, `title`, `docVersion`).   |
+| `GET /api/v1/docs`       | List the corpus's documents (`slug`, `title`, `docVersion`).       |
 | `GET /api/v1/docs/:slug` | Fetch one document's `markdown` + metadata. `404` if not a member. |
 | `PUT /api/v1/docs/:slug` | Write a new version. Body: `{ markdown, clientVersion, title? }`.  |
 
@@ -213,7 +231,7 @@ curl -H "Authorization: Bearer $CORPUS_API_KEY" \
 ```
 
 A `PUT` whose `clientVersion` is behind the server returns `409` with the
-`currentVersion`; a `PUT` to a slug that exists outside the bound collection
+`currentVersion`; a `PUT` to a slug that exists outside the bound corpus
 returns `403`. These are exactly the conflict and scope rules the CLI
 surfaces above.
 

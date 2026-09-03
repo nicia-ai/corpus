@@ -1,20 +1,21 @@
 ---
 title: Connect your agent
-description: Wire Claude Code, Claude Desktop, Cursor, or VS Code to a specific Collection — OAuth or API key — and see what tools the agent gets.
+description: Wire Claude Code, Claude Desktop, Cursor, or VS Code to a specific Corpus — OAuth or API key — and see what tools the agent gets.
 sidebar:
   order: 5
 ---
 
 In Corpus, an agent connects through a **Connection** — a named binding
-of one **Project** and exactly one **Collection**. The Connection is the
-agent's entire world: it reads that Collection's documents and **only**
-that Collection's documents. Switching what an agent sees means editing
-the Collection (or pointing it at a different Connection), not the
+of one **Project** and exactly one **Corpus**. The Connection is the
+agent's entire world: it reads that Corpus's documents and **only**
+that Corpus's documents. Switching what an agent sees means editing
+the Corpus (or pointing it at a different Connection), not the
 credential.
 
-The fastest path is **"Connect this collection"** on the Collection page —
-that creates (or reuses) the Connection for that Collection and shows you
-the setup snippet.
+The fastest path is **"Connect agent"** on Home / Get Started, or
+**"Connect this corpus"** on a Corpus page — that creates (or reuses)
+the Connection, shows an OAuth snippet (or `corpus mcp add`), and on
+first agent sign-in binds that Corpus automatically (no second picker).
 
 ## Two ways to authenticate
 
@@ -24,13 +25,13 @@ the setup snippet.
 | **API key**             | Scripts, CI, or agents that can't do an OAuth flow.                 | A bearer token bound to one Connection (see [API keys](./api-keys.md)).        |
 
 Either way, the credential reaches **only** the Connection's bound
-Collection. Documents in other Collections — or in the same Project but not
-attached to this Collection — are not reachable.
+Corpus. Documents in other Corpora — or in the same Project but not
+attached to this Corpus — are not reachable.
 
 ## Client setup
 
-Use a **per-Connection local server name** in every client: `corpus-<collection>`
-(e.g. `corpus-marketing`, `corpus-hr`). If you connect two Collections from
+Use a **per-Connection local server name** in every client: `corpus-<corpus>`
+(e.g. `corpus-marketing`, `corpus-hr`). If you connect two Corpora from
 one client, two distinctly-named entries are the only way to keep their
 sign-ins from overwriting each other.
 
@@ -39,15 +40,22 @@ sign-ins from overwriting each other.
 ```bash
 claude mcp add \
   --transport http \
-  corpus-<collection> \
+  corpus-<corpus> \
   https://your-corpus-host/mcp
 ```
 
-Then run `/mcp` inside Claude Code and complete the sign-in the first
-time. The consent screen asks which Collection to grant — pick the one
-this agent should see. For API-key auth, add
+Then run `/mcp` inside Claude Code and complete the browser sign-in the
+first time. If you started from **Connect this corpus**, consent is
+enough — that Corpus is already bound. Otherwise you'll pick a Corpus
+once. For API-key auth, add
 `--header "Authorization: Bearer <YOUR_API_KEY>"` and skip the consent
 step (the key is already bound to a Connection).
+
+Or let the CLI write the entry:
+
+```bash
+corpus mcp add --client claude-code --name corpus-<corpus>
+```
 
 ### Claude Desktop
 
@@ -56,7 +64,7 @@ Add to `claude_desktop_config.json`, then restart the app:
 ```json
 {
   "mcpServers": {
-    "corpus-<collection>": {
+    "corpus-<corpus>": {
       "command": "npx",
       "args": ["mcp-remote", "https://your-corpus-host/mcp"]
     }
@@ -69,12 +77,18 @@ to `args`.
 
 ### Cursor
 
-Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
+Fastest — from a machine with the [CLI](./cli.md) installed:
+
+```bash
+corpus mcp add --client cursor --name corpus-<corpus>
+```
+
+Or add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
 
 ```json
 {
   "mcpServers": {
-    "corpus-<collection>": {
+    "corpus-<corpus>": {
       "url": "https://your-corpus-host/mcp"
     }
   }
@@ -85,12 +99,16 @@ For API-key auth, add `"headers": { "Authorization": "Bearer <YOUR_API_KEY>" }`.
 
 ### VS Code
 
-Add to `.vscode/mcp.json` in your workspace:
+```bash
+corpus mcp add --client vscode --name corpus-<corpus>
+```
+
+Or add to `.vscode/mcp.json` in your workspace:
 
 ```json
 {
   "servers": {
-    "corpus-<collection>": {
+    "corpus-<corpus>": {
       "type": "http",
       "url": "https://your-corpus-host/mcp"
     }
@@ -103,32 +121,32 @@ For API-key auth, add `"headers": { "Authorization": "Bearer <YOUR_API_KEY>" }`.
 ## What the agent can do
 
 Once connected, the agent has these tools, all scoped to
-the Connection's bound Collection:
+the Connection's bound Corpus:
 
 | Tool                    | Does                                                                                                                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_collections`      | The Collection this connection is bound to (a connection targets exactly one).                                                                                                    |
-| `read_collection`       | The always-included guidance for the bound Collection. No `collectionSlug` is needed.                                                                                             |
-| `list_documents`        | The documents in the bound Collection — path, slug, title, version, size, and a `delivery` field (`"core"` = always-included, `"reference"` = on-demand).                         |
+| `list_collections`      | The Corpus this connection is bound to (a connection targets exactly one).                                                                                                        |
+| `read_collection`       | The always-included guidance for the bound Corpus. No `collectionSlug` is needed.                                                                                                 |
+| `list_documents`        | The documents in the bound Corpus — path, slug, title, version, size, and a `delivery` field (`"core"` = always-included, `"reference"` = on-demand).                             |
 | `read_document`         | Read one document's markdown, verbatim, by `path` or `slug`.                                                                                                                      |
-| `read_document_meta`    | Parsed YAML frontmatter for one document in the bound Collection, by `path` or `slug`.                                                                                            |
-| `verify_history`        | Verify a document's (or the bound Collection's) version chain is intact.                                                                                                          |
+| `read_document_meta`    | Parsed YAML frontmatter for one document in the bound Corpus, by `path` or `slug`.                                                                                                |
+| `verify_history`        | Verify a document's (or the bound Corpus's) version chain is intact.                                                                                                              |
 | `suggest_edit`          | Propose an edit to a document — or a NEW document (pass a fresh slug/path with `baseDocVersion: 0`). Always a reviewable suggestion a human applies; never an auto-applied write. |
 | `get_proposal_result`   | Check one of this caller's proposals for its human outcome, accepted hunks, resulting document version, and optional reviewer note. Other callers' proposals remain invisible.    |
 | `await_proposal_review` | Wait up to 25 seconds for one of this caller's open proposals to receive a human decision, returning early when it settles.                                                       |
 | `reply_to_proposal`     | Reply inside one of this caller's still-open proposals. It cannot access document comments, resolve feedback, or act on another caller's proposal.                                |
 
 The same data is also exposed as MCP **resources**:
-`collection://<slug>`, `collection://<slug>/outline`, and
+`corpus://<slug>`, `corpus://<slug>/outline`, and
 `document://<slug>` — handy for clients that browse resources rather
 than call tools. Resources are scoped the same way; you won't see
-slugs outside the bound Collection.
+slugs outside the bound Corpus.
 
 There is **no direct canonical write tool and no search tool**. Agents consume
-your canonical collection; the only thing they can file is a
+your canonical corpus; the only thing they can file is a
 _proposal_ (`suggest_edit` — an edit, or a new document) that a human
 reviews and applies, and retrieval/RAG is deliberately out of scope —
-you decide what's in a Collection, not a similarity score. Bundle
+you decide what's in a Corpus, not a similarity score. Bundle
 export is the owner path (web UI), never the agent surface.
 
 After `suggest_edit` returns a `suggestionId` and canonical `reviewUrl`, hand
@@ -151,20 +169,20 @@ the reply tool neither resolves feedback nor changes canonical content. A
 revised proposal starts a new review thread; the settled predecessor remains an
 immutable audit record rather than silently carrying messages into new work.
 
-For anything beyond a small rules-style Collection, toggle **Always
+For anything beyond a small rules-style Corpus, toggle **Always
 include** on for the documents the agent must always start from and
 leave the rest on-demand. `read_collection` returns the always-included
-set; the agent browses `collection://<slug>/outline` and calls
+set; the agent browses `corpus://<slug>/outline` and calls
 `read_document` for on-demand documents when relevant. A large
 always-include set dilutes the agent's attention and burns its window,
-so keep it small (or raise the collection's always-include budget if
+so keep it small (or raise the corpus's always-include budget if
 you're feeding a larger context window).
 
 ## Edits take effect on the next call
 
-Adding or removing a document from the bound Collection — or editing one
+Adding or removing a document from the bound Corpus — or editing one
 in place — takes effect on the agent's **next request**. No re-paste,
-no reconnect, no token reissue. The Collection is the live source of
+no reconnect, no token reissue. The Corpus is the live source of
 truth.
 
 ## Telling the agent to use it
@@ -172,12 +190,12 @@ truth.
 Connecting only makes the tools available. Instruct the agent to use
 them — in a prompt, or in the agent's own rules file:
 
-> Work from the corpus collection you're connected to. Read the
+> Work from the corpus corpus you're connected to. Read the
 > outline, follow its always-included guidance, and read individual
 > on-demand documents when relevant to the task.
 
-You don't need to name the Collection in the prompt: the connection IS
-the Collection.
+You don't need to name the Corpus in the prompt: the connection IS
+the Corpus.
 
 ### Reference Corpus documents by path
 
@@ -194,7 +212,7 @@ agents do not look on local disk first:
 > treating them as missing local files.
 
 This prompt works when `docs/product-features.md` is in the bound
-Collection:
+Corpus:
 
 > You are a cold-outbound authoring agent. Write a personalized message
 > to the lead below. Refer to our product features in

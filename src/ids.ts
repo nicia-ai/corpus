@@ -1,5 +1,5 @@
 // Branded identifiers. Two strings are NOT interchangeable just because
-// both are `string`: a ProjectId is not a UserId, a CollectionSlug is not
+// both are `string`: a ProjectId is not a UserId, a CorpusSlug is not
 // a DocumentSlug. The brand is type-level only (zero runtime cost — the
 // constructors are identity functions).
 //
@@ -19,7 +19,7 @@ export type OrganizationId = Id<"OrganizationId">;
 export type ProjectId = Id<"ProjectId">;
 export type UserId = Id<"UserId">;
 export type DocumentSlug = Id<"DocumentSlug">;
-export type CollectionSlug = Id<"CollectionSlug">;
+export type CorpusSlug = Id<"CorpusSlug">;
 export type FolderSlug = Id<"FolderSlug">;
 export type ApiKeyId = Id<"ApiKeyId">;
 export type ConnectionId = Id<"ConnectionId">;
@@ -48,8 +48,7 @@ export const asConnectionId = (s: string): ConnectionId => s as ConnectionId;
 export const asMemberId = (s: string): MemberId => s as MemberId;
 export const asInvitationId = (s: string): InvitationId => s as InvitationId;
 export const asDocumentSlug = (s: string): DocumentSlug => s as DocumentSlug;
-export const asCollectionSlug = (s: string): CollectionSlug =>
-  s as CollectionSlug;
+export const asCorpusSlug = (s: string): CorpusSlug => s as CorpusSlug;
 export const asFolderSlug = (s: string): FolderSlug => s as FolderSlug;
 export const asCallerRef = (s: string): CallerRef => s as CallerRef;
 

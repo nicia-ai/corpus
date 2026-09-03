@@ -18,7 +18,7 @@ wedge (2026-06-07). Each item has enough context to pick up cold.
 
 ## Email notification on agent suggestion
 
-- **What:** Email a document's collection members when an agent files a
+- **What:** Email a document's corpus members when an agent files a
   suggestion, so an absent human learns without reopening the tab.
 - **Why:** The presence WebSocket only nudges _connected_ clients
   (`broadcastChanged`). The per-doc pending count covers in-app; email
@@ -37,7 +37,7 @@ wedge (2026-06-07). Each item has enough context to pick up cold.
 
 ## Zod-retrofit the existing MCP read tools
 
-- **What:** Give `read_document`, `read_collection`, `read_document_meta`,
+- **What:** Give `read_document`, `read_corpus`, `read_document_meta`,
   `verify_history` real Zod input schemas, replacing ad-hoc `strField`
   (`src/mcp/params.ts:14`) and the stub `inputSchema: { type: "object" }`
   (`src/mcp/tools.ts:93`).

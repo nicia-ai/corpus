@@ -1,13 +1,13 @@
-import { assembleCollection, type AssembledCollection } from "../corpus";
+import { assembleCorpus, type AssembledCorpus } from "../corpus";
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
-  type CollectionSlug,
+  type CorpusSlug,
   type DocumentSlug,
 } from "../ids";
 import {
   DEFAULT_COLLECTION_DELIVERY,
-  expandCollectionDocuments,
+  expandCorpusDocuments,
   type ExpandEntry,
   type FolderTreeNode,
 } from "../store/domain/collection-expand";
@@ -25,13 +25,13 @@ import {
 } from "../store/domain/verify";
 import type { CorpusStore } from "../store/handle";
 import type {
-  CollectionDocView,
-  CollectionMeta,
+  CorpusDocView,
+  CorpusMeta,
 } from "../store/repos/collection-graph";
 import { compact, estimateTokens, pluralize } from "../util";
 
 import type {
-  CollectionOutline,
+  CorpusOutline,
   DocumentHistoryEntry,
   DocumentHistoryMeta,
   DocumentSearchHit,
@@ -166,16 +166,16 @@ export async function listDocumentRefsProjection(
     }));
 }
 
-export function listCollectionsProjection(
+export function listCorporaProjection(
   u: ProjectUnit,
-): Promise<readonly CollectionMeta[]> {
+): Promise<readonly CorpusMeta[]> {
   return u.cols.list(DOC_LIST_LIMIT);
 }
 
 export async function usageSnapshotProjection(
   u: ProjectUnit,
 ): Promise<ProjectUsageSnapshot> {
-  const [docs, collections, versions, blobs] = await Promise.all([
+  const [docs, corpora, versions, blobs] = await Promise.all([
     u.docs.list(DOC_LIST_LIMIT),
     u.cols.list(DOC_LIST_LIMIT),
     u.versions.allDocumentVersions(),
@@ -183,7 +183,7 @@ export async function usageSnapshotProjection(
   ]);
   return {
     activeDocuments: docs.filter((d) => d.archivedAt === undefined).length,
-    collections: collections.length,
+    corpora: corpora.length,
     documentVersions: versions.length,
     storedMarkdownBytes: blobs.reduce(
       (sum, b) => sum + new TextEncoder().encode(b.bytes).byteLength,
@@ -192,9 +192,9 @@ export async function usageSnapshotProjection(
   };
 }
 
-export async function collectionMetaProjection(
+export async function corpusMetaProjection(
   u: ProjectUnit,
-  collectionSlug: CollectionSlug,
+  corpusSlug: CorpusSlug,
 ): Promise<
   | { found: false }
   | {
@@ -204,7 +204,7 @@ export async function collectionMetaProjection(
       alwaysIncludeBudgetTokens: number;
     }
 > {
-  const col = await u.cols.findCollection(collectionSlug);
+  const col = await u.cols.findCorpus(corpusSlug);
   if (col === undefined) return { found: false };
   return compact({
     found: true as const,
@@ -214,19 +214,19 @@ export async function collectionMetaProjection(
   });
 }
 
-export async function readCollectionProjection(
+export async function readCorpusProjection(
   u: ProjectUnit,
-  collectionSlug: CollectionSlug,
+  corpusSlug: CorpusSlug,
 ): Promise<
   | { found: false }
   | ({
       found: true;
       name: string;
       description?: string;
-    } & AssembledCollection)
+    } & AssembledCorpus)
 > {
-  const colNode = await u.cols.findCollection(collectionSlug);
-  const ordered = await resolvedViews(u, collectionSlug);
+  const colNode = await u.cols.findCorpus(corpusSlug);
+  const ordered = await resolvedViews(u, corpusSlug);
   if (colNode === undefined || ordered === undefined) {
     return { found: false };
   }
@@ -239,13 +239,13 @@ export async function readCollectionProjection(
     updatedAt: d.updatedAt,
     markdown: bytes.get(d.contentHash) ?? "",
   }));
-  const assembled: AssembledCollection =
+  const assembled: AssembledCorpus =
     documents.length === 0 && ordered.length > 0
       ? {
           documents: [],
-          corpus: `# Collection: ${collectionSlug}\n(no core guidance documents configured)\n`,
+          corpus: `# Corpus: ${corpusSlug}\n(no core guidance documents configured)\n`,
         }
-      : assembleCollection(collectionSlug, documents);
+      : assembleCorpus(corpusSlug, documents);
   const referenceCount = ordered.length - delivered.length;
   const corpus =
     referenceCount > 0
@@ -254,8 +254,8 @@ export async function readCollectionProjection(
           "",
           "---",
           referenceCount === 1
-            ? `1 reference document is available in collection://${collectionSlug}/outline. Read it with read_document when relevant.`
-            : `${pluralize(referenceCount, "reference document")} are available in collection://${collectionSlug}/outline. Read them with read_document when relevant.`,
+            ? `1 reference document is available in corpus://${corpusSlug}/outline. Read it with read_document when relevant.`
+            : `${pluralize(referenceCount, "reference document")} are available in corpus://${corpusSlug}/outline. Read them with read_document when relevant.`,
         ].join("\n")
       : assembled.corpus;
   return {
@@ -266,9 +266,9 @@ export async function readCollectionProjection(
   };
 }
 
-export async function collectionStructureProjection(
+export async function corpusStructureProjection(
   u: ProjectUnit,
-  collectionSlug: CollectionSlug,
+  corpusSlug: CorpusSlug,
 ): Promise<
   | { found: false }
   | {
@@ -295,9 +295,9 @@ export async function collectionStructureProjection(
       }>[];
     }
 > {
-  const colNode = await u.cols.findCollection(collectionSlug);
-  const entries = await u.cols.entries(collectionSlug);
-  const ordered = await resolvedViews(u, collectionSlug);
+  const colNode = await u.cols.findCorpus(corpusSlug);
+  const entries = await u.cols.entries(corpusSlug);
+  const ordered = await resolvedViews(u, corpusSlug);
   if (colNode === undefined || entries === undefined || ordered === undefined) {
     return { found: false };
   }
@@ -351,35 +351,33 @@ export async function collectionStructureProjection(
   });
 }
 
-export async function collectionMembersProjection(
+export async function corpusMembersProjection(
   u: ProjectUnit,
-  collectionSlug: CollectionSlug,
+  corpusSlug: CorpusSlug,
 ): Promise<readonly string[] | undefined> {
-  const views = await resolvedViews(u, collectionSlug);
+  const views = await resolvedViews(u, corpusSlug);
   return views?.map((v) => v.slug);
 }
 
-// One row per (collection, RESOLVED member document) — direct includes
+// One row per (corpus, RESOLVED member document) — direct includes
 // plus folder-expanded docs, deduped exactly as the agent-facing
 // expansion sees them (shares `resolvedViews`, so a list/card count can
-// never disagree with the collection detail or MCP). The single source
-// for every "how many documents" / "in how many collections" count.
+// never disagree with the corpus detail or MCP). The single source
+// for every "how many documents" / "in how many corpora" count.
 export async function resolvedMembersProjection(
   u: ProjectUnit,
-): Promise<
-  readonly Readonly<{ collectionSlug: string; documentSlug: string }>[]
-> {
-  const collections = await u.cols.list(DOC_LIST_LIMIT);
-  const perCollection = await Promise.all(
-    collections.map(async (c) => {
-      const views = await resolvedViews(u, asCollectionSlug(c.slug));
+): Promise<readonly Readonly<{ corpusSlug: string; documentSlug: string }>[]> {
+  const corpora = await u.cols.list(DOC_LIST_LIMIT);
+  const perCorpus = await Promise.all(
+    corpora.map(async (c) => {
+      const views = await resolvedViews(u, asCorpusSlug(c.slug));
       return (views ?? []).map((v) => ({
-        collectionSlug: c.slug,
+        corpusSlug: c.slug,
         documentSlug: v.slug,
       }));
     }),
   );
-  return perCollection.flat();
+  return perCorpus.flat();
 }
 
 export async function documentHistoryProjection(
@@ -491,26 +489,26 @@ export async function verifyHistoryProjection(
     ([s, versions]) => ({ slug: s, versions }),
   );
 
-  const collections =
+  const corpora =
     slug === undefined
       ? (await u.versions.latestCollectionVersions()).map((c) => ({
-          collectionSlug: c.collectionSlug,
-          collectionVersion: c.collectionVersion,
+          corpusSlug: c.collectionSlug,
+          corpusVersion: c.collectionVersion,
           members: c.members,
         }))
       : [];
 
   const blobs = await u.blobs.getMany(rows.map((r) => r.contentHash));
-  return verifyChain({ documents, collections, blobs });
+  return verifyChain({ documents, corpora, blobs });
 }
 
 export async function resolvedViews(
   u: ProjectUnit,
-  collectionSlug: CollectionSlug,
-): Promise<readonly CollectionDocView[] | undefined> {
-  const e = await u.cols.entries(collectionSlug);
+  corpusSlug: CorpusSlug,
+): Promise<readonly CorpusDocView[] | undefined> {
+  const e = await u.cols.entries(corpusSlug);
   if (e === undefined) return undefined;
-  if (e.folders.length === 0) return u.cols.ordered(collectionSlug);
+  if (e.folders.length === 0) return u.cols.ordered(corpusSlug);
 
   const tree = new Map<string, FolderTreeNode>();
   for (const sub of await Promise.all(
@@ -532,7 +530,7 @@ export async function resolvedViews(
       delivery: f.delivery,
     })),
   ];
-  const expanded = expandCollectionDocuments(entries, tree);
+  const expanded = expandCorpusDocuments(entries, tree);
   const nodes = await Promise.all(
     expanded.map((d) => u.docs.find(asDocumentSlug(d.slug))),
   );
@@ -593,17 +591,17 @@ export async function pathIndex(u: ProjectUnit): Promise<
   return { pathToSlug, slugToPath };
 }
 
-export async function collectionOutlineProjection(
+export async function corpusOutlineProjection(
   u: ProjectUnit,
-  collectionSlug: CollectionSlug,
+  corpusSlug: CorpusSlug,
   parsedLinksByHash: Map<string, readonly ParsedLink[]>,
-): Promise<CollectionOutline> {
-  const colNode = await u.cols.findCollection(collectionSlug);
-  const views = await resolvedViews(u, collectionSlug);
+): Promise<CorpusOutline> {
+  const colNode = await u.cols.findCorpus(corpusSlug);
+  const views = await resolvedViews(u, corpusSlug);
   if (colNode === undefined || views === undefined) return { found: false };
   const { pathToSlug, slugToPath } = await pathIndex(u);
   const allPaths = [...pathToSlug.keys()];
-  const inCollection = new Set(views.map((v) => v.slug));
+  const inCorpus = new Set(views.map((v) => v.slug));
   const documents: OutlineDoc[] = [];
   for (const v of views) {
     const path = slugToPath.get(v.slug) ?? v.slug;
@@ -624,7 +622,7 @@ export async function collectionOutlineProjection(
         kind: link.kind,
         resolvedPath: resolved ?? null,
         documentSlug,
-        inCollection: documentSlug !== null && inCollection.has(documentSlug),
+        inCorpus: documentSlug !== null && inCorpus.has(documentSlug),
       };
     });
     documents.push({
@@ -638,7 +636,7 @@ export async function collectionOutlineProjection(
   }
   return {
     found: true,
-    collection: collectionSlug,
+    corpus: corpusSlug,
     name: colNode.name,
     documents,
   };

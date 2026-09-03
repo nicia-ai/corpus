@@ -6,6 +6,7 @@ Install and configure the standalone CLI:
 npm install --global @nicia-ai/corpus-cli
 corpus setup
 corpus doctor
+corpus mcp add --client cursor
 ```
 
 Requires Node.js 22 or newer.

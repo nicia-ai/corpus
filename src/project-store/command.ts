@@ -1,4 +1,4 @@
-import type { CollectionSlug, DocumentSlug, FolderSlug } from "../ids";
+import type { CorpusSlug, DocumentSlug, FolderSlug } from "../ids";
 import type {
   CollectionChange,
   DocumentChange,
@@ -11,7 +11,7 @@ import type {
   CollectionMember,
   CollectionVersionSnapshot,
 } from "../store/domain/versions";
-import type { CollectionDocView } from "../store/repos/collection-graph";
+import type { CorpusDocView } from "../store/repos/collection-graph";
 
 import type { ProjectUnit } from "./unit";
 
@@ -28,21 +28,21 @@ export type ProjectCommandContext = Readonly<{
   u: ProjectUnit;
   now: string;
   hash: (bytes: string) => Promise<string>;
-  collection: Readonly<{
+  corpus: Readonly<{
     resolvedViews: (
       u: ProjectUnit,
-      collectionSlug: CollectionSlug,
-    ) => Promise<readonly CollectionDocView[] | undefined>;
+      corpusSlug: CorpusSlug,
+    ) => Promise<readonly CorpusDocView[] | undefined>;
     snapshot: (
       u: ProjectUnit,
-      collectionSlug: CollectionSlug,
+      corpusSlug: CorpusSlug,
       changedBy: string,
       now: string,
     ) => Promise<void>;
   }>;
 }>;
 
-export type CollectionEntrySnapshot = Readonly<{
+export type CorpusEntrySnapshot = Readonly<{
   documentSlug: DocumentSlug;
   docVersion: number;
   contentHash: string;
@@ -67,8 +67,8 @@ export function commandOutcome<T>(
   return { result, changes };
 }
 
-export function collectionMembers(
-  views: readonly CollectionEntrySnapshot[],
+export function corpusMembers(
+  views: readonly CorpusEntrySnapshot[],
 ): CollectionMember[] {
   return views.map((v) => ({
     documentSlug: v.documentSlug,
@@ -79,8 +79,8 @@ export function collectionMembers(
   }));
 }
 
-export function collectionSnapshotMembers(
-  views: readonly CollectionDocView[],
+export function corpusSnapshotMembers(
+  views: readonly CorpusDocView[],
 ): CollectionVersionSnapshot["members"] {
   return views.map((v) => ({
     documentSlug: v.slug,

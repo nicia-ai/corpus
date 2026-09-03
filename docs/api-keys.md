@@ -1,13 +1,13 @@
 ---
 title: API keys
-description: Long-lived bearer tokens for agents and scripts that can't run the OAuth flow — scoped to one Connection (Project + Collection), shown once.
+description: Long-lived bearer tokens for agents and scripts that can't run the OAuth flow — scoped to one Connection (Project + Corpus), shown once.
 sidebar:
   order: 6
 ---
 
 An API key authenticates an MCP client **as you, against a single
-Connection** — a (Project, Collection) pair that decides exactly which
-collection the agent will see. Use one when the client can't do the
+Connection** — a (Project, Corpus) pair that decides exactly which
+corpus the agent will see. Use one when the client can't do the
 OAuth sign-in flow — scripts, CI jobs, agents without a browser. For
 Claude Code and Claude Desktop, prefer [OAuth](./connect-your-agent.md).
 
@@ -16,11 +16,11 @@ read through an existing credential, but only owners can mint a new one.
 
 ## Creating a key
 
-API keys live on each Collection's **Connect** page, not on a top-level
+API keys live on each Corpus's **Connect** page, not on a top-level
 "API keys" screen.
 
-1. Open the Collection you want the agent to read.
-2. Click **Connect this collection** in the header.
+1. Open the Corpus you want the agent to read.
+2. Click **Connect this corpus** in the header.
 3. On the MCP setup page, scroll to **API keys** and click
    **+ API key**. Give it a **Name** that says where it's used
    (`ci-release-bot`, `laptop-cursor`).
@@ -48,7 +48,7 @@ The token starts with `cck_` so the MCP transport can tell it apart from
 an OAuth JWT before doing any database work.
 
 The same key also authenticates the [CLI](./cli.md), which can **edit**
-the bound collection's documents from a terminal or CI — list, pull, and
+the bound corpus's documents from a terminal or CI — list, pull, and
 push markdown without a browser.
 
 ## Revoking a key

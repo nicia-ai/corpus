@@ -1,4 +1,4 @@
-import type { CollectionSlug, DocumentSlug, FolderSlug } from "../../ids";
+import type { CorpusSlug, DocumentSlug, FolderSlug } from "../../ids";
 import {
   collectionDeliveryChanged,
   collectionCreated,
@@ -18,31 +18,31 @@ import type {
   DomainChange,
   ProjectCommandContext,
 } from "../command";
-import type { UpdateCollectionInput } from "../contracts";
+import type { UpdateCorpusInput } from "../contracts";
 
-export type CreateCollectionCommandInput = Readonly<{
-  slug: CollectionSlug;
+export type CreateCorpusCommandInput = Readonly<{
+  slug: CorpusSlug;
   name: string;
   description?: string;
   alwaysIncludeBudgetTokens?: number;
   changedBy: string;
 }>;
 
-export async function createCollectionCommand(
+export async function createCorpusCommand(
   ctx: ProjectCommandContext,
-  input: CreateCollectionCommandInput,
-): Promise<CommandOutcome<{ slug: CollectionSlug }>> {
-  if ((await ctx.u.cols.findCollection(input.slug)) !== undefined) {
+  input: CreateCorpusCommandInput,
+): Promise<CommandOutcome<{ slug: CorpusSlug }>> {
+  if ((await ctx.u.cols.findCorpus(input.slug)) !== undefined) {
     return { result: { slug: input.slug }, changes: [] };
   }
-  await ctx.u.cols.createCollection({
+  await ctx.u.cols.createCorpus({
     slug: input.slug,
     name: input.name,
     description: input.description,
     alwaysIncludeBudgetTokens:
       input.alwaysIncludeBudgetTokens ?? DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS,
   });
-  const colNode = await ctx.u.cols.findCollection(input.slug);
+  const colNode = await ctx.u.cols.findCorpus(input.slug);
   if (colNode !== undefined) {
     await ctx.u.versions.appendCollectionVersion(
       colNode.id,
@@ -56,7 +56,7 @@ export async function createCollectionCommand(
     );
   }
   const change = collectionCreated({
-    collectionSlug: input.slug,
+    corpusSlug: input.slug,
     name: input.name,
     changedBy: input.changedBy,
     changedAt: ctx.now,
@@ -67,7 +67,7 @@ export async function createCollectionCommand(
 export async function attachDocumentCommand(
   ctx: ProjectCommandContext,
   input: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     documentSlug: DocumentSlug;
     position: number;
     delivery: CollectionDelivery;
@@ -75,7 +75,7 @@ export async function attachDocumentCommand(
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
   const outcome = await ctx.u.cols.attach(
-    input.collectionSlug,
+    input.corpusSlug,
     input.documentSlug,
     input.position,
     input.delivery,
@@ -83,14 +83,9 @@ export async function attachDocumentCommand(
   if (!outcome.ok || outcome.change === "unchanged") {
     return { result: { ok: false }, changes: [] };
   }
-  await ctx.collection.snapshot(
-    ctx.u,
-    input.collectionSlug,
-    input.changedBy,
-    ctx.now,
-  );
+  await ctx.corpus.snapshot(ctx.u, input.corpusSlug, input.changedBy, ctx.now);
   const change = documentAttached({
-    collectionSlug: input.collectionSlug,
+    corpusSlug: input.corpusSlug,
     documentSlug: input.documentSlug,
     position: input.position,
     previousPosition:
@@ -101,23 +96,23 @@ export async function attachDocumentCommand(
   return { result: { ok: true }, changes: [change] };
 }
 
-// Attach many documents in one shot, appended after the collection's
+// Attach many documents in one shot, appended after the corpus's
 // current members in the given order, with a single snapshot. Documents
-// already in the collection (or archived/missing) are left untouched —
+// already in the corpus (or archived/missing) are left untouched —
 // idempotent re-upload, no reordering, no duplicate event. The repo's
 // `attachMany` does the membership work in one read pass; this layer
-// turns the result into change events and cuts one CollectionVersion.
-export async function attachDocumentsToCollectionCommand(
+// turns the result into change events and cuts one CorpusVersion.
+export async function attachDocumentsToCorpusCommand(
   ctx: ProjectCommandContext,
   input: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     documentSlugs: readonly DocumentSlug[];
     delivery: CollectionDelivery;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ attached: number }>> {
   const attached = await ctx.u.cols.attachMany(
-    input.collectionSlug,
+    input.corpusSlug,
     input.documentSlugs,
     input.delivery,
   );
@@ -125,7 +120,7 @@ export async function attachDocumentsToCollectionCommand(
 
   const changes: DomainChange[] = attached.map((a) =>
     documentAttached({
-      collectionSlug: input.collectionSlug,
+      corpusSlug: input.corpusSlug,
       documentSlug: a.slug,
       position: a.position,
       previousPosition: undefined,
@@ -133,23 +128,18 @@ export async function attachDocumentsToCollectionCommand(
       changedAt: ctx.now,
     }),
   );
-  await ctx.collection.snapshot(
-    ctx.u,
-    input.collectionSlug,
-    input.changedBy,
-    ctx.now,
-  );
+  await ctx.corpus.snapshot(ctx.u, input.corpusSlug, input.changedBy, ctx.now);
   return { result: { attached: attached.length }, changes };
 }
 
-export async function updateCollectionCommand(
+export async function updateCorpusCommand(
   ctx: ProjectCommandContext,
-  input: UpdateCollectionInput,
+  input: UpdateCorpusInput,
 ): Promise<
   CommandOutcome<Readonly<{ status: "missing" | "noop" | "changed" }>>
 > {
   const nextDescription = input.description ?? "";
-  const col = await ctx.u.cols.findCollection(input.slug);
+  const col = await ctx.u.cols.findCorpus(input.slug);
   if (col === undefined) {
     return { result: { status: "missing" }, changes: [] };
   }
@@ -162,13 +152,13 @@ export async function updateCollectionCommand(
   ) {
     return { result: { status: "noop" }, changes: [] };
   }
-  await ctx.u.cols.updateCollection(input.slug, {
+  await ctx.u.cols.updateCorpus(input.slug, {
     name: input.name,
     description: nextDescription,
     alwaysIncludeBudgetTokens: nextBudget,
   });
   const change = collectionUpdated({
-    collectionSlug: input.slug,
+    corpusSlug: input.slug,
     before: {
       name: col.name,
       description: col.description,
@@ -188,16 +178,16 @@ export async function updateCollectionCommand(
   };
 }
 
-async function collectionMutationCommand<T>(
+async function corpusMutationCommand<T>(
   ctx: ProjectCommandContext,
-  collectionSlug: CollectionSlug,
+  corpusSlug: CorpusSlug,
   changedBy: string,
   mutate: () => Promise<CollectionChange | undefined>,
   result: (change: CollectionChange | undefined) => T,
 ): Promise<CommandOutcome<T>> {
   const change = await mutate();
   if (change !== undefined) {
-    await ctx.collection.snapshot(ctx.u, collectionSlug, changedBy, ctx.now);
+    await ctx.corpus.snapshot(ctx.u, corpusSlug, changedBy, ctx.now);
   }
   return {
     result: result(change),
@@ -208,23 +198,23 @@ async function collectionMutationCommand<T>(
 export async function detachDocumentCommand(
   ctx: ProjectCommandContext,
   input: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     documentSlug: DocumentSlug;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
-  return collectionMutationCommand(
+  return corpusMutationCommand(
     ctx,
-    input.collectionSlug,
+    input.corpusSlug,
     input.changedBy,
     async () => {
       const position = await ctx.u.cols.detach(
-        input.collectionSlug,
+        input.corpusSlug,
         input.documentSlug,
       );
       if (position === undefined) return undefined;
       return documentDetached({
-        collectionSlug: input.collectionSlug,
+        corpusSlug: input.corpusSlug,
         documentSlug: input.documentSlug,
         position,
         changedBy: input.changedBy,
@@ -235,26 +225,26 @@ export async function detachDocumentCommand(
   );
 }
 
-export async function reorderCollectionDocumentsCommand(
+export async function reorderCorpusDocumentsCommand(
   ctx: ProjectCommandContext,
   input: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     orderedDocumentSlugs: readonly DocumentSlug[];
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
-  return collectionMutationCommand(
+  return corpusMutationCommand(
     ctx,
-    input.collectionSlug,
+    input.corpusSlug,
     input.changedBy,
     async () => {
       const ok = await ctx.u.cols.setOrder(
-        input.collectionSlug,
+        input.corpusSlug,
         input.orderedDocumentSlugs,
       );
       if (!ok) return undefined;
       return collectionReordered({
-        collectionSlug: input.collectionSlug,
+        corpusSlug: input.corpusSlug,
         order: input.orderedDocumentSlugs,
         changedBy: input.changedBy,
         changedAt: ctx.now,
@@ -267,25 +257,25 @@ export async function reorderCollectionDocumentsCommand(
 export async function setMemberDeliveryCommand(
   ctx: ProjectCommandContext,
   input: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     documentSlug: DocumentSlug;
     delivery: CollectionDelivery;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
-  return collectionMutationCommand(
+  return corpusMutationCommand(
     ctx,
-    input.collectionSlug,
+    input.corpusSlug,
     input.changedBy,
     async () => {
       const outcome = await ctx.u.cols.setDelivery(
-        input.collectionSlug,
+        input.corpusSlug,
         input.documentSlug,
         input.delivery,
       );
       if (!outcome?.changed) return undefined;
       return collectionDeliveryChanged({
-        collectionSlug: input.collectionSlug,
+        corpusSlug: input.corpusSlug,
         documentSlug: input.documentSlug,
         delivery: input.delivery,
         changedBy: input.changedBy,
@@ -299,25 +289,25 @@ export async function setMemberDeliveryCommand(
 export async function setFolderLinkDeliveryCommand(
   ctx: ProjectCommandContext,
   input: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     folderSlug: FolderSlug;
     delivery: CollectionDelivery;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
-  return collectionMutationCommand(
+  return corpusMutationCommand(
     ctx,
-    input.collectionSlug,
+    input.corpusSlug,
     input.changedBy,
     async () => {
       const outcome = await ctx.u.cols.setFolderDelivery(
-        input.collectionSlug,
+        input.corpusSlug,
         input.folderSlug,
         input.delivery,
       );
       if (!outcome?.changed) return undefined;
       return collectionDeliveryChanged({
-        collectionSlug: input.collectionSlug,
+        corpusSlug: input.corpusSlug,
         folderSlug: input.folderSlug,
         delivery: input.delivery,
         changedBy: input.changedBy,
@@ -328,30 +318,30 @@ export async function setFolderLinkDeliveryCommand(
   );
 }
 
-export async function attachFolderToCollectionCommand(
+export async function attachFolderToCorpusCommand(
   ctx: ProjectCommandContext,
   input: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     folderSlug: FolderSlug;
     position: number;
     delivery: CollectionDelivery;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
-  return collectionMutationCommand(
+  return corpusMutationCommand(
     ctx,
-    input.collectionSlug,
+    input.corpusSlug,
     input.changedBy,
     async () => {
       const outcome = await ctx.u.cols.attachFolder(
-        input.collectionSlug,
+        input.corpusSlug,
         input.folderSlug,
         input.position,
         input.delivery,
       );
       if (!outcome.ok || outcome.change === "unchanged") return undefined;
       return folderAttached({
-        collectionSlug: input.collectionSlug,
+        corpusSlug: input.corpusSlug,
         folderSlug: input.folderSlug,
         position: input.position,
         previousPosition:
@@ -364,26 +354,26 @@ export async function attachFolderToCollectionCommand(
   );
 }
 
-export async function detachFolderFromCollectionCommand(
+export async function detachFolderFromCorpusCommand(
   ctx: ProjectCommandContext,
   input: Readonly<{
-    collectionSlug: CollectionSlug;
+    corpusSlug: CorpusSlug;
     folderSlug: FolderSlug;
     changedBy: string;
   }>,
 ): Promise<CommandOutcome<{ ok: boolean }>> {
-  return collectionMutationCommand(
+  return corpusMutationCommand(
     ctx,
-    input.collectionSlug,
+    input.corpusSlug,
     input.changedBy,
     async () => {
       const position = await ctx.u.cols.detachFolder(
-        input.collectionSlug,
+        input.corpusSlug,
         input.folderSlug,
       );
       if (position === undefined) return undefined;
       return folderDetached({
-        collectionSlug: input.collectionSlug,
+        corpusSlug: input.corpusSlug,
         folderSlug: input.folderSlug,
         position,
         changedBy: input.changedBy,
@@ -395,7 +385,7 @@ export async function detachFolderFromCollectionCommand(
 }
 
 export type CollectionMemberChangeInput = Readonly<{
-  collectionSlug: CollectionSlug;
+  corpusSlug: CorpusSlug;
   documentSlug?: DocumentSlug;
   folderSlug?: FolderSlug;
   changedBy: string;

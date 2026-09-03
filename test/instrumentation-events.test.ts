@@ -14,7 +14,7 @@ import {
 // boundary contract of the durable event stream's payload.
 
 describe("instrumentation-events — schema version", () => {
-  it("is at 2 (bumped with the Context → Collection rebrand)", () => {
+  it("is at 2 (bumped with the Context → Corpus rebrand)", () => {
     expect(INSTRUMENTATION_EVENT_SCHEMA_VERSION).toBe(2);
   });
 });
@@ -47,27 +47,27 @@ describe("instrumentation-events — encode / decode round-trips", () => {
         docVersion: 4,
         changedBy: "u1",
       }),
-      events.collectionCreated({ collectionSlug: "ctx-A", changedBy: "u1" }),
-      events.collectionAttached({
-        collectionSlug: "ctx-A",
+      events.corpusCreated({ corpusSlug: "ctx-A", changedBy: "u1" }),
+      events.corpusAttached({
+        corpusSlug: "ctx-A",
         documentSlug: "doc-1",
         position: 0,
         changedBy: "u1",
       }),
-      events.collectionDetached({
-        collectionSlug: "ctx-A",
+      events.corpusDetached({
+        corpusSlug: "ctx-A",
         documentSlug: "doc-1",
         changedBy: "u1",
       }),
-      events.collectionReordered({ collectionSlug: "ctx-A", changedBy: "u1" }),
+      events.corpusReordered({ corpusSlug: "ctx-A", changedBy: "u1" }),
       events.readFirst({
         callerRef: "apikey:k1",
-        collectionSlug: "ctx-A",
+        corpusSlug: "ctx-A",
         versionCapturedAtRead: { "doc-1": 2 },
       }),
       events.readAfterEdit({
         callerRef: "apikey:k1",
-        collectionSlug: "ctx-A",
+        corpusSlug: "ctx-A",
         versionCapturedAtRead: { "doc-1": 3 },
       }),
       events.callerConnected({ callerRef: "oauth:u-2" }),
@@ -124,7 +124,7 @@ describe("instrumentation-events — encode / decode round-trips", () => {
 });
 
 describe("instrumentation-events — eventType for the indexed column", () => {
-  it("surfaces document.* and collection.* parent.kind", () => {
+  it("surfaces document.* and corpus.* parent.kind", () => {
     expect(
       eventType(
         events.documentUpdated({
@@ -138,8 +138,8 @@ describe("instrumentation-events — eventType for the indexed column", () => {
     ).toBe("document.updated");
     expect(
       eventType(
-        events.collectionAttached({
-          collectionSlug: "c",
+        events.corpusAttached({
+          corpusSlug: "c",
           documentSlug: "d",
           position: 0,
           changedBy: "u",
@@ -151,12 +151,12 @@ describe("instrumentation-events — eventType for the indexed column", () => {
   it("surfaces read events as `read.first` / `read.after-edit`", () => {
     const first = events.readFirst({
       callerRef: "apikey:k",
-      collectionSlug: "c",
+      corpusSlug: "c",
       versionCapturedAtRead: { d: 1 },
     });
     const afterEdit = events.readAfterEdit({
       callerRef: "apikey:k",
-      collectionSlug: "c",
+      corpusSlug: "c",
       versionCapturedAtRead: { d: 2 },
     });
     expect(eventType(first)).toBe("read.first");
@@ -206,24 +206,24 @@ describe("instrumentation-events — idempotency keys", () => {
     expect(idempotencyKey(first, 11)).toBe(idempotencyKey(first, 11));
   });
 
-  it("collection.updated disambiguates distinct metadata edits by localEventId", () => {
-    const a = events.collectionUpdated({
-      collectionSlug: "c-1",
+  it("corpus.updated disambiguates distinct metadata edits by localEventId", () => {
+    const a = events.corpusUpdated({
+      corpusSlug: "c-1",
       changedBy: "u",
     });
-    const b = events.collectionUpdated({
-      collectionSlug: "c-1",
+    const b = events.corpusUpdated({
+      corpusSlug: "c-1",
       changedBy: "u",
     });
     expect(idempotencyKey(a, 7)).toBe("collection.updated:c-1:e7");
     expect(idempotencyKey(a, 7)).not.toBe(idempotencyKey(b, 8));
   });
 
-  it("collection.attached keys on (type, collectionSlug, member) — member is doc:<slug> or folder:<slug>", () => {
+  it("corpus.attached keys on (type, corpusSlug, member) — member is doc:<slug> or folder:<slug>", () => {
     expect(
       idempotencyKey(
-        events.collectionAttached({
-          collectionSlug: "ctx-A",
+        events.corpusAttached({
+          corpusSlug: "ctx-A",
           documentSlug: "doc-1",
           position: 2,
           changedBy: "u",
@@ -232,8 +232,8 @@ describe("instrumentation-events — idempotency keys", () => {
     ).toBe("collection.attached:ctx-A:doc:doc-1");
     expect(
       idempotencyKey(
-        events.collectionAttached({
-          collectionSlug: "ctx-A",
+        events.corpusAttached({
+          corpusSlug: "ctx-A",
           folderSlug: "f-1",
           position: 2,
           changedBy: "u",
@@ -242,20 +242,20 @@ describe("instrumentation-events — idempotency keys", () => {
     ).toBe("collection.attached:ctx-A:folder:f-1");
   });
 
-  it("read.first keys on (caller, collection, fingerprint) — repeat reads at the same state collapse, different states do not (so a DO-restart re-emit at a moved state records the transition instead of colliding with the original)", () => {
+  it("read.first keys on (caller, corpus, fingerprint) — repeat reads at the same state collapse, different states do not (so a DO-restart re-emit at a moved state records the transition instead of colliding with the original)", () => {
     const a = events.readFirst({
       callerRef: "apikey:k1",
-      collectionSlug: "ctx-A",
+      corpusSlug: "ctx-A",
       versionCapturedAtRead: { d: 1 },
     });
     const b = events.readFirst({
       callerRef: "apikey:k1",
-      collectionSlug: "ctx-A",
+      corpusSlug: "ctx-A",
       versionCapturedAtRead: { d: 1 }, // same state → same key (still collapses on retry)
     });
     const c = events.readFirst({
       callerRef: "apikey:k1",
-      collectionSlug: "ctx-A",
+      corpusSlug: "ctx-A",
       versionCapturedAtRead: { d: 2 }, // state moved → distinct key (no silent drop)
     });
     expect(idempotencyKey(a)).toBe(idempotencyKey(b));
@@ -265,17 +265,17 @@ describe("instrumentation-events — idempotency keys", () => {
   it("read.after-edit fingerprints on the captured version-set so a new edit gives a new key", () => {
     const a = events.readAfterEdit({
       callerRef: "apikey:k1",
-      collectionSlug: "ctx-A",
+      corpusSlug: "ctx-A",
       versionCapturedAtRead: { "doc-1": 5, "doc-2": 3 },
     });
     const b = events.readAfterEdit({
       callerRef: "apikey:k1",
-      collectionSlug: "ctx-A",
+      corpusSlug: "ctx-A",
       versionCapturedAtRead: { "doc-2": 3, "doc-1": 5 }, // key order shuffled — same fingerprint
     });
     const c = events.readAfterEdit({
       callerRef: "apikey:k1",
-      collectionSlug: "ctx-A",
+      corpusSlug: "ctx-A",
       versionCapturedAtRead: { "doc-1": 6, "doc-2": 3 }, // edit moved doc-1 v5→v6
     });
     expect(idempotencyKey(a)).toBe(idempotencyKey(b));

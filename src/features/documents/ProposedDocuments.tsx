@@ -23,7 +23,7 @@ import {
 // review inline on their document; a create-proposal has no document page
 // yet, so it reviews here — the one place a curator already scans the
 // project's documents. Apply creates the document (and attaches it to the
-// proposing connection's Collection as reference); reject discards.
+// proposing connection's Corpus as reference); reject discards.
 
 const APPLY_FAILURE: Readonly<Record<string, string>> = {
   taken:
@@ -171,7 +171,7 @@ export function ProposedDocuments({
         </h2>
         <p className="text-sm text-slate-500">
           An agent proposed these new documents. Creating one adds it to the
-          project and to the collection the agent works from.
+          project and to the corpus the agent works from.
         </p>
       </div>
       <div className="space-y-3">

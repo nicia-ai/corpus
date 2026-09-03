@@ -59,8 +59,10 @@ export async function selectionKey(
 }
 
 // — Pending-connect intent (userId-keyed). Written by the
-// Collection-page "Connect this collection" action before any OAuth
-// flow exists; read by /connect/select to PRE-SELECT (never to bind).
+// Corpus-page "Connect this corpus" action before any OAuth
+// flow exists. Preferentially auto-bound at OAuth postLogin
+// (autoBindPendingConnect); /connect/select still pre-selects from it
+// when the happy path cannot bind (multi-corpus, expired, etc.).
 
 export async function writePendingConnect(
   db: ControlDb,
@@ -94,6 +96,32 @@ export async function readPendingConnect(
     )
     .limit(1);
   return row?.connectionId;
+}
+
+// Happy-path OAuth bind: the owner just clicked "Connect this corpus",
+// which wrote a userId-keyed pending intent. When that intent is still
+// fresh AND the caller still administers the Connection, stamp the
+// handshake-keyed selection so postLogin can skip `/connect/select`.
+// Returns the bound connectionId, or undefined when the picker is still
+// required (no pending, expired, or membership gone).
+export async function autoBindPendingConnect(
+  db: ControlDb,
+  args: Readonly<{
+    query: string;
+    userId: string;
+    // Caller verifies the pending Connection is still resolvable for
+    // this user (membership + project status). Kept as a callback so
+    // this module stays free of the resolution graph.
+    resolve: (connectionId: string) => Promise<boolean>;
+    nowMs?: number;
+  }>,
+): Promise<string | undefined> {
+  const nowMs = args.nowMs ?? Date.now();
+  const pending = await readPendingConnect(db, args.userId, nowMs);
+  if (pending === undefined) return undefined;
+  if (!(await args.resolve(pending))) return undefined;
+  await putSelection(db, args.query, args.userId, pending, nowMs);
+  return pending;
 }
 
 // — Selection row (sha256(handshakeId)+userId-keyed). The actual binding the

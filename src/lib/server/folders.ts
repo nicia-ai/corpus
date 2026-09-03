@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { entitlementsOf } from "@/control/entitlements";
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
   asFolderSlug,
   type FolderSlug,
@@ -49,7 +49,7 @@ const importLinkInput = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("none") }),
   z.object({
     mode: z.literal("existing"),
-    slug: slugInput.transform(asCollectionSlug),
+    slug: slugInput.transform(asCorpusSlug),
   }),
   z.object({ mode: z.literal("new"), name: z.string().trim().min(1) }),
 ]);
@@ -176,17 +176,17 @@ export const moveDocumentsToFolder = createServerFn({ method: "POST" })
     );
   });
 
-// Folder→collection links: include a whole folder (transitively) in a
-// collection. Shares the document `includes` position space. Delivery
+// Folder→corpus links: include a whole folder (transitively) in a
+// corpus. Shares the document `includes` position space. Delivery
 // defaults to the uniform domain default ("core") like every other
 // attach surface — a caller that wants a folder to be reference-only
 // (e.g. a bulk import that shouldn't flood read_collection) passes it
 // explicitly, so the default never diverges by entry point.
-export const attachFolderToCollection = createServerFn({ method: "POST" })
+export const attachFolderToCorpus = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
-      collectionSlug: slugInput,
+      corpusSlug: slugInput,
       folderSlug: slugInput,
       position: z.number().int().nonnegative(),
       delivery: z.enum(["core", "reference"]).default("core"),
@@ -194,8 +194,8 @@ export const attachFolderToCollection = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
-    return storeOf(c).attachFolderToCollection(
-      asCollectionSlug(data.collectionSlug),
+    return storeOf(c).attachFolderToCorpus(
+      asCorpusSlug(data.corpusSlug),
       asFolderSlug(data.folderSlug),
       data.position,
       changedBy(c),
@@ -209,7 +209,7 @@ export const setFolderLinkDelivery = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
-      collectionSlug: slugInput,
+      corpusSlug: slugInput,
       folderSlug: slugInput,
       delivery: z.enum(["core", "reference"]),
     }),
@@ -217,20 +217,20 @@ export const setFolderLinkDelivery = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
     return storeOf(c).setFolderLinkDelivery(
-      asCollectionSlug(data.collectionSlug),
+      asCorpusSlug(data.corpusSlug),
       asFolderSlug(data.folderSlug),
       data.delivery,
       changedBy(c),
     );
   });
 
-export const detachFolderFromCollection = createServerFn({ method: "POST" })
+export const detachFolderFromCorpus = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ collectionSlug: slugInput, folderSlug: slugInput }))
+  .validator(z.object({ corpusSlug: slugInput, folderSlug: slugInput }))
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
-    return storeOf(c).detachFolderFromCollection(
-      asCollectionSlug(data.collectionSlug),
+    return storeOf(c).detachFolderFromCorpus(
+      asCorpusSlug(data.corpusSlug),
       asFolderSlug(data.folderSlug),
       changedBy(c),
     );

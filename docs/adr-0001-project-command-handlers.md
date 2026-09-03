@@ -8,7 +8,7 @@ Accepted.
 
 `ProjectStore` is the aggregate boundary for one Project. It owns the only
 atomic write boundary because TypeGraph graph data and the Drizzle ledger share
-the Durable Object SQLite handle. Splitting document, collection, folder, or
+the Durable Object SQLite handle. Splitting document, corpus, folder, or
 bundle writes across Durable Objects would weaken that guarantee.
 
 The implementation had grown around private `*Body` methods that already acted

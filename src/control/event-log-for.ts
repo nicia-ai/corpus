@@ -11,7 +11,7 @@ import type { ProjectId } from "../ids";
 //
 // Two DOs per Project (data + event log) because the event stream is a
 // shipped auditability product feature, must be durable, and would
-// otherwise compete with documents/collections/blobs for the
+// otherwise compete with documents/corpora/blobs for the
 // ProjectStore DO's SQLite budget. The dedicated DO removes that
 // competition.
 export function eventLogFor(

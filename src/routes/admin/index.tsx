@@ -170,7 +170,7 @@ function AdminOverviewPage(): React.ReactElement {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {users.map((u) => (
+                {users.map((u: AdminUserRow) => (
                   <tr
                     key={u.id}
                     className={u.banned ? "bg-red-50/40" : undefined}

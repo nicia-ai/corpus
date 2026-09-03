@@ -3,8 +3,8 @@
 ## Product Context
 
 - **What this is:** Corpus — a Git-free canonical context store for teams. Non-engineers
-  write markdown documents, group them into ordered agent collections, and agents
-  consume those collections over MCP.
+  write markdown documents, group them into ordered agent corpora, and agents
+  consume those corpora over MCP.
 - **Who it's for:** Non-engineers on a team (ops, support, sales, marketing)
   who maintain the shared truth their agents read.
 - **Space/industry:** AI agent tooling / internal knowledge infrastructure.
@@ -93,7 +93,7 @@ exists to deliver.
 - **Accent (blue), reserved for two uses only — primary action + shared-linkage emphasis:**
   - accent `#2563eb` (blue-600)
   - accent hover `#1d4ed8` (blue-700)
-  - accent wash `#eff6ff` (blue-50) — the "In N collections" badge background
+  - accent wash `#eff6ff` (blue-50) — the "In N corpora" badge background
 - **Two-blue family (intentional, not drift):** the marketing site
   (corpus-site) uses `#3b82f6` (blue-500) as the primary surface
   accent with `#2563eb` (blue-600) as the hover / primary-dark — a
@@ -147,7 +147,7 @@ exists to deliver.
 - **Approach:** Grid-disciplined. The existing left sidebar shell (~240px) +
   the deterministic layered project graph. No editorial asymmetry.
 - **Grid:** sidebar + fluid main; the graph is 3 fixed columns
-  (Documents · Collections · MCP) computed as a pure function of data.
+  (Documents · Corpora · MCP) computed as a pure function of data.
 - **Max content width:** index/list pages fill the available main width
   (the house style — a primary action stays anchored to a full-width
   content panel, never flung to the far screen edge). Long-form prose
@@ -155,7 +155,7 @@ exists to deliver.
   measure (~max-w-5xl, ≈1024px) — a reading constraint, not a stylistic
   cap. The project graph always fills available main width.
 - **Border radius:** sm 4px (chips/badges) · md 6px (node cards, buttons,
-  inputs) · lg 8px (panels) · full 9999px (the "In N collections" pill only).
+  inputs) · lg 8px (panels) · full 9999px (the "In N corpora" pill only).
 - **Responsive:** < 720px the home defaults to the List tab; the graph, when
   opened, stacks vertically with connectors as left-rail brackets.
 

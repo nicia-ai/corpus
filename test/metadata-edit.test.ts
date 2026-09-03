@@ -4,9 +4,9 @@ import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const SOURCE = { organization: "o", project: "p" } as const;
 
-// Metadata edits (document rename, collection name/description) are
+// Metadata edits (document rename, corpus name/description) are
 // head-pointer-only: they must NOT touch the content-addressed version
-// chain or the immutable CollectionVersion membership snapshots.
+// chain or the immutable CorpusVersion membership snapshots.
 describe("renameDocument — title-only, no version-chain mutation", () => {
   it("changes the head title without bumping docVersion or the chain", async () => {
     const w = freshStore("rename");
@@ -104,7 +104,7 @@ describe("renameDocument — title-only, no version-chain mutation", () => {
   });
 });
 
-describe("updateCollection — name/description, no CollectionVersion cut", () => {
+describe("updateCorpus — name/description, no CorpusVersion cut", () => {
   it("edits name/description, leaves slug + membership snapshot intact", async () => {
     const w = freshStore("coledit");
     await w.saveDocument({
@@ -113,7 +113,7 @@ describe("updateCollection — name/description, no CollectionVersion cut", () =
       clientVersion: 0,
       changedBy: "u",
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "u",
@@ -126,7 +126,7 @@ describe("updateCollection — name/description, no CollectionVersion cut", () =
 
     expect(
       (
-        await w.updateCollection({
+        await w.updateCorpus({
           slug: colSlug("ops"),
           name: "Operations",
           description: "On-call runbooks",
@@ -135,15 +135,15 @@ describe("updateCollection — name/description, no CollectionVersion cut", () =
       ).ok,
     ).toBe(true);
 
-    const r = await w.readCollection(colSlug("ops"));
-    if (!r.found) throw new Error("collection vanished");
+    const r = await w.readCorpus(colSlug("ops"));
+    if (!r.found) throw new Error("corpus vanished");
     expect(r.name).toBe("Operations");
     expect(r.description).toBe("On-call runbooks");
     // Membership unchanged.
     expect(r.documents.map((d) => d.slug)).toEqual(["runbook"]);
 
     const b2 = await w.exportBundle(SOURCE);
-    // Slug is identity — still keyed "ops"; no new CollectionVersion.
+    // Slug is identity — still keyed "ops"; no new CorpusVersion.
     expect(b2.collections["ops"]?.name).toBe("Operations");
     expect(b2.collections["ops"]?.collectionVersion).toBe(v1);
 
@@ -156,25 +156,25 @@ describe("updateCollection — name/description, no CollectionVersion cut", () =
 
   it("clears the description when passed empty", async () => {
     const w = freshStore("coledit");
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("sales"),
       name: "Sales",
       description: "old",
       changedBy: "u",
     });
-    await w.updateCollection({
+    await w.updateCorpus({
       slug: colSlug("sales"),
       name: "Sales",
       changedBy: "u",
     });
-    const r = await w.readCollection(colSlug("sales"));
-    if (!r.found) throw new Error("collection vanished");
+    const r = await w.readCorpus(colSlug("sales"));
+    if (!r.found) throw new Error("corpus vanished");
     expect(r.description ?? "").toBe("");
   });
 
   it("an unchanged name+description is an idempotent no-op", async () => {
     const w = freshStore("coledit");
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("noop"),
       name: "NoOp",
       description: "desc",
@@ -183,7 +183,7 @@ describe("updateCollection — name/description, no CollectionVersion cut", () =
     const evtId = await w.lastEventId();
     expect(
       (
-        await w.updateCollection({
+        await w.updateCorpus({
           slug: colSlug("noop"),
           name: "NoOp",
           description: "desc",
@@ -194,11 +194,11 @@ describe("updateCollection — name/description, no CollectionVersion cut", () =
     expect(await w.lastEventId()).toBe(evtId);
   });
 
-  it("updating a missing collection is ok:false", async () => {
+  it("updating a missing corpus is ok:false", async () => {
     const w = freshStore("coledit");
     expect(
       (
-        await w.updateCollection({
+        await w.updateCorpus({
           slug: colSlug("ghost"),
           name: "X",
           changedBy: "u",

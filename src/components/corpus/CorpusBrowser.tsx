@@ -13,10 +13,10 @@ import { AddAction } from "./DeliveryControls";
 import { DocLine, docMeta, FolderLine } from "./DocLine";
 
 // One corpus browser — the single surface for putting things in a
-// collection. The same folder tree as the Documents page; from any row
+// corpus. The same folder tree as the Documents page; from any row
 // you add that one document, or add the whole folder (so future
 // documents in it join automatically). One verb everywhere ("Add" /
-// "Added"), no add-vs-link split. Things already in the collection stay
+// "Added"), no add-vs-link split. Things already in the corpus stay
 // visible but inert so the structure reads true. A search query
 // flattens the tree to matching folders + documents.
 export function CorpusBrowser({
@@ -123,7 +123,7 @@ export function CorpusBrowser({
         trailing={
           <AddAction
             added={memberSlugs.has(d.slug)}
-            label={`Add document ${d.title} to this collection`}
+            label={`Add document ${d.title} to this corpus`}
             pending={pending}
             onAdd={() => void run(() => addDocument(d.slug))}
           />
@@ -147,7 +147,7 @@ export function CorpusBrowser({
         trailing={
           <AddAction
             added={linkedSlugs.has(f.slug)}
-            label={`Add folder ${f.name} to this collection`}
+            label={`Add folder ${f.name} to this corpus`}
             pending={pending}
             onAdd={() => void run(() => addFolder(f.slug))}
           />
@@ -231,7 +231,7 @@ export function CorpusBrowser({
                   trailing={
                     <AddAction
                       added={linkedSlugs.has(f.slug)}
-                      label={`Add folder ${f.name} to this collection`}
+                      label={`Add folder ${f.name} to this corpus`}
                       pending={pending}
                       onAdd={() => void run(() => addFolder(f.slug))}
                     />

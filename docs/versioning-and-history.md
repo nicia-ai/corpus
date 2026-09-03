@@ -1,6 +1,6 @@
 ---
 title: Versioning & history
-description: Every document edit is a new version, conflicts are resolved not lost, and the change feed shows what moved — how Corpus keeps your canonical collection trustworthy.
+description: Every document edit is a new version, conflicts are resolved not lost, and the change feed shows what moved — how Corpus keeps your canonical corpus trustworthy.
 sidebar:
   order: 9
 ---
@@ -42,9 +42,9 @@ There is no lost write and no forced merge — you decide.
 
 ## The changes feed
 
-**Recent changes** shows the latest document and collection activity —
+**Recent changes** shows the latest document and corpus activity —
 creates, saves, attaches — with who and when. It's the quick answer to
-_"did the canonical collection move, and who moved it?"_ before you point
+_"did the canonical corpus move, and who moved it?"_ before you point
 an agent at it.
 
 ## Verifying the chain
@@ -52,22 +52,22 @@ an agent at it.
 Agents can call the `verify_history` tool to confirm a document's (or
 the whole project's) version chain is internally consistent — every
 content hash and parent link re-derives. Useful in a CI check before an
-agent relies on a collection for something consequential.
+agent relies on a corpus for something consequential.
 
 ## Retention
 
 A project can set a retention policy (how long old document versions,
 change events, and unreferenced content are kept). Defaults to keeping
 everything. Retention never removes a document's current version or any
-version still pinned by a collection, and never breaks `verify_history` —
+version still pinned by a corpus, and never breaks `verify_history` —
 pruned-but-safe gaps are treated as expected, not corruption.
 
 ## Getting your data out
 
 **Settings → Export** in the web UI produces a complete, portable,
 content-addressed JSON bundle of the project — every document, every
-version, every collection, and the membership snapshots. Export is an
+version, every corpus, and the membership snapshots. Export is an
 owner action, always available and never gated; bundle export is
 deliberately not on the agent MCP surface (agents only ever read the
-Collection their Connection binds them to). Your canonical collection is
+Corpus their Connection binds them to). Your canonical corpus is
 yours; you can always take it with you.

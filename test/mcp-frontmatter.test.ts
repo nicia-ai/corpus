@@ -26,12 +26,12 @@ function executor(): McpExecutor {
     suggestCreate: unused,
     proposalResult: unused,
     replyToProposal: unused,
-    listCollections: unused,
+    listCorpora: unused,
     listDocuments: unused,
-    readCollection: unused,
-    collectionMembers: unused,
+    readCorpus: unused,
+    corpusMembers: unused,
     verifyHistory: unused,
-    collectionOutline: unused,
+    corpusOutline: unused,
     getDocument: (slug) => {
       const markdown = docs[slug as unknown as string];
       return Promise.resolve(

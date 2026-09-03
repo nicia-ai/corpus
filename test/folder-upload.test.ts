@@ -205,8 +205,8 @@ describe("bulk folder upload — filename collision is folder-scoped", () => {
 // The link TARGET (the whole folder vs. the individual documents) is
 // derived by the DO from what the import actually created — never from a
 // client flag — so these assert behavior per upload shape. Uploads link
-// as reference-tier, so membership is read via collectionMembers (the
-// resolved set); readCollection.documents lists core-tier only.
+// as reference-tier, so membership is read via corpusMembers (the
+// resolved set); readCorpus.documents lists core-tier only.
 describe("bulk folder upload — importDocumentsAndLink (derived link target)", () => {
   it("a loose file at the root links the document, not a folder", async () => {
     const store = freshProject();
@@ -219,12 +219,12 @@ describe("bulk folder upload — importDocumentsAndLink (derived link target)", 
     expect(r.linkedTo).toBe("sales");
     // No wrapper folder synthesized for a single root-level file.
     expect(await store.listFolders()).toHaveLength(0);
-    expect(await store.collectionMembers(colSlug("sales"))).toEqual(["readme"]);
+    expect(await store.corpusMembers(colSlug("sales"))).toEqual(["readme"]);
   });
 
-  it("links the uploaded documents to an existing collection, in upload order", async () => {
+  it("links the uploaded documents to an existing corpus, in upload order", async () => {
     const store = freshProject();
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("team"),
       name: "Team",
       changedBy: by,
@@ -238,10 +238,7 @@ describe("bulk folder upload — importDocumentsAndLink (derived link target)", 
       changedBy: by,
     });
     expect(r.linkedTo).toBe("team");
-    expect(await store.collectionMembers(colSlug("team"))).toEqual([
-      "one",
-      "two",
-    ]);
+    expect(await store.corpusMembers(colSlug("team"))).toEqual(["one", "two"]);
   });
 
   it("a fresh wrapper folder is linked live — later additions join too", async () => {
@@ -254,13 +251,13 @@ describe("bulk folder upload — importDocumentsAndLink (derived link target)", 
     expect(r.linkedTo).toBe("docs");
 
     // A document added to the freshly-created folder later is in the
-    // collection automatically — the live-folder guarantee.
+    // corpus automatically — the live-folder guarantee.
     await store.importDocumentAtPath({
       path: "guide/extra.md",
       markdown: "e",
       changedBy: by,
     });
-    const members = await store.collectionMembers(colSlug("docs"));
+    const members = await store.corpusMembers(colSlug("docs"));
     expect([...(members ?? [])].sort()).toEqual(["guide-extra", "guide-intro"]);
   });
 
@@ -287,7 +284,7 @@ describe("bulk folder upload — importDocumentsAndLink (derived link target)", 
       markdown: "b",
       changedBy: by,
     });
-    const members = await store.collectionMembers(colSlug("proj"));
+    const members = await store.corpusMembers(colSlug("proj"));
     expect([...(members ?? [])].sort()).toEqual(["docs-proj-a", "docs-proj-b"]);
   });
 
@@ -305,23 +302,19 @@ describe("bulk folder upload — importDocumentsAndLink (derived link target)", 
     });
     expect(r.linkedTo).toBe("fresh");
     // The pre-existing sibling `docs/old.md` is NOT pulled in...
-    expect(await store.collectionMembers(colSlug("fresh"))).toEqual([
-      "docs-new",
-    ]);
+    expect(await store.corpusMembers(colSlug("fresh"))).toEqual(["docs-new"]);
     // ...and the link is NOT live: a later addition to `docs` does not join.
     await store.importDocumentAtPath({
       path: "docs/another.md",
       markdown: "x",
       changedBy: by,
     });
-    expect(await store.collectionMembers(colSlug("fresh"))).toEqual([
-      "docs-new",
-    ]);
+    expect(await store.corpusMembers(colSlug("fresh"))).toEqual(["docs-new"]);
   });
 
-  it("re-uploading the same documents to the same collection adds no duplicates", async () => {
+  it("re-uploading the same documents to the same corpus adds no duplicates", async () => {
     const store = freshProject();
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("team"),
       name: "Team",
       changedBy: by,
@@ -332,7 +325,7 @@ describe("bulk folder upload — importDocumentsAndLink (derived link target)", 
       link,
       changedBy: by,
     });
-    // Re-upload (new version) and re-link to the same collection.
+    // Re-upload (new version) and re-link to the same corpus.
     const again = await store.importDocumentsAndLink({
       entries: [{ path: "one.md", markdown: "1b" }],
       link,
@@ -340,7 +333,7 @@ describe("bulk folder upload — importDocumentsAndLink (derived link target)", 
     });
     expect(again.summary).toEqual({ created: 0, updated: 1, failed: [] });
     // attachMany's present-set dedup: the document stays a single member.
-    expect(await store.collectionMembers(colSlug("team"))).toEqual(["one"]);
+    expect(await store.corpusMembers(colSlug("team"))).toEqual(["one"]);
   });
 
   it("entries spanning more than one top folder link the documents", async () => {
@@ -357,7 +350,7 @@ describe("bulk folder upload — importDocumentsAndLink (derived link target)", 
     expect(r.linkedTo).toBe("mixed");
     // No single fresh wrapper covers both, so the documents are linked.
     expect(
-      [...((await store.collectionMembers(colSlug("mixed"))) ?? [])].sort(),
+      [...((await store.corpusMembers(colSlug("mixed"))) ?? [])].sort(),
     ).toEqual(["a-x", "b-y"]);
   });
 });

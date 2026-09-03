@@ -2,9 +2,9 @@ import type { Node } from "@nicia-ai/typegraph";
 
 import type { Folder } from "../../graph";
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
-  type CollectionSlug,
+  type CorpusSlug,
   type DocumentSlug,
   type FolderSlug,
 } from "../../ids";
@@ -35,7 +35,7 @@ export type CreateFolderResult = Readonly<
 
 // `changed: false` = a successful no-op (rename-to-same, move/place to
 // the current parent): nothing was written, so the path-map fan-out
-// must be suppressed (it would spam every folder-linking collection).
+// must be suppressed (it would spam every folder-linking corpus).
 export type RenameFolderResult = Readonly<
   | { ok: true; changed: boolean }
   | { ok: false; reason: "missing" | "segment-collision" }
@@ -52,10 +52,10 @@ export type DeleteFolderResult = Readonly<
       // Documents that were in the deleted subtree — the DO archives
       // each (folder delete is a cascade, never a re-home).
       documentSlugs: readonly DocumentSlug[];
-      // Collections whose `includes_folder` edge to this folder was
+      // Corpora whose `includes_folder` edge to this folder was
       // released — the DO must re-snapshot them so their latest
-      // CollectionVersion (and the bundle) no longer lists the gone tree.
-      unlinkedCollections: readonly CollectionSlug[];
+      // CorpusVersion (and the bundle) no longer lists the gone tree.
+      unlinkedCollections: readonly CorpusSlug[];
     }
   | { ok: false; reason: "missing" }
 >;
@@ -334,7 +334,7 @@ export class FolderRepo {
   // The doc's folder + every ancestor folder, as slugs (leaf → root).
   // Empty when the doc is at the root or doesn't exist. Used by
   // `archiveDocument` to fan a folder-tree-changed snapshot out to every
-  // collection whose `includes_folder` link surfaces this doc via folder
+  // corpus whose `includes_folder` link surfaces this doc via folder
   // expansion (a link to either the doc's folder OR any ancestor).
   async documentFolderAncestorSlugs(
     documentSlug: DocumentSlug,
@@ -634,7 +634,7 @@ export class FolderRepo {
     const node = await this.find(slug);
     if (node === undefined) return { ok: false, reason: "missing" };
     const documentSlugs: DocumentSlug[] = [];
-    const unlinked = new Set<CollectionSlug>();
+    const unlinked = new Set<CorpusSlug>();
     // Deepest-first: a folder node is hard-deleted only after its children
     // are gone, so it is never still connected by a `folder_child` edge.
     // Read every relationship before mutating. The loop only consumes each
@@ -644,12 +644,11 @@ export class FolderRepo {
       kind: "Folder" as const,
       id: folder.id,
     }));
-    const [parents, documentEdgeGroups, collectionEdgeGroups] =
-      await Promise.all([
-        this.parentEdgesOf(subtree),
-        this.g.edges.in_folder.bulkFindTo(folderRefs),
-        this.g.edges.includes_folder.bulkFindTo(folderRefs),
-      ]);
+    const [parents, documentEdgeGroups, corpusEdgeGroups] = await Promise.all([
+      this.parentEdgesOf(subtree),
+      this.g.edges.in_folder.bulkFindTo(folderRefs),
+      this.g.edges.includes_folder.bulkFindTo(folderRefs),
+    ]);
     const documentEdges = documentEdgeGroups.flat();
     const documents = await this.g.nodes.Document.getByIds(
       documentEdges.map((edge) => edge.fromId),
@@ -661,16 +660,16 @@ export class FolderRepo {
         documentSlugs.push(asDocumentSlug(document.slug));
       }
     }
-    const collectionEdges = collectionEdgeGroups.flat();
-    const collections = await this.g.nodes.Collection.getByIds([
-      ...new Set(collectionEdges.map((edge) => edge.fromId)),
+    const corpusEdges = corpusEdgeGroups.flat();
+    const corpora = await this.g.nodes.Collection.getByIds([
+      ...new Set(corpusEdges.map((edge) => edge.fromId)),
     ]);
-    for (const collection of collections) {
-      if (collection !== undefined) {
-        unlinked.add(asCollectionSlug(collection.slug));
+    for (const corpus of corpora) {
+      if (corpus !== undefined) {
+        unlinked.add(asCorpusSlug(corpus.slug));
       }
     }
-    for (const edge of collectionEdges) {
+    for (const edge of corpusEdges) {
       await this.g.edges.includes_folder.hardDelete(edge.id);
     }
     for (const f of subtree) {

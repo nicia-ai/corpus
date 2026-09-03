@@ -141,7 +141,7 @@ export type AdminProjectRow = Readonly<{
   organizationName: string;
   createdAt: number;
   documents: number;
-  collections: number;
+  corpora: number;
   versions: number;
   markdownBytes: number;
 }>;
@@ -185,7 +185,7 @@ export const adminListProjects = createServerFn({ method: "GET" }).handler(
           .usageSnapshot()
           .catch(() => ({
             activeDocuments: 0,
-            collections: 0,
+            corpora: 0,
             documentVersions: 0,
             storedMarkdownBytes: 0,
           }));
@@ -198,7 +198,7 @@ export const adminListProjects = createServerFn({ method: "GET" }).handler(
           organizationName: p.organizationName ?? "—",
           createdAt: p.createdAt.getTime(),
           documents: usage.activeDocuments,
-          collections: usage.collections,
+          corpora: usage.corpora,
           versions: usage.documentVersions,
           markdownBytes: usage.storedMarkdownBytes,
         };

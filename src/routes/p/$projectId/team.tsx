@@ -75,18 +75,20 @@ function Team() {
   const projectId = asProjectId(Route.useParams().projectId);
   const router = useRouter();
   const isOwner = data.role === "owner";
-  const ownerCount = data.members.filter((m) => m.role === "owner").length;
+  const ownerCount = data.members.filter(
+    (m: TeamMember) => m.role === "owner",
+  ).length;
 
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title={`${orgName} Team`}
-        subtitle="Everyone here shares this organization’s canonical collections."
+        subtitle="Everyone here shares this organization’s canonical corpora."
       />
 
       <h2 className="mb-2 text-base font-medium text-slate-700">Members</h2>
       <ul className={listSurface("mb-8 divide-y divide-slate-200")}>
-        {data.members.map((m) => (
+        {data.members.map((m: TeamMember) => (
           <MemberRow
             key={m.memberId}
             member={m}
@@ -115,11 +117,11 @@ function Team() {
           {data.invitations.length === 0 ? (
             <EmptyState>
               No pending invitations. Invite a teammate above to share this
-              org&rsquo;s collections.
+              org&rsquo;s corpora.
             </EmptyState>
           ) : (
             <ul className={listSurface("divide-y divide-slate-200")}>
-              {data.invitations.map((i) => (
+              {data.invitations.map((i: PendingInvite) => (
                 <InviteRow
                   key={i.invitationId}
                   invite={i}

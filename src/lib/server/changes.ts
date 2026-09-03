@@ -11,7 +11,7 @@ export type Change = Readonly<{
   id: number;
   eventType: string;
   documentSlug: string | null;
-  collectionSlug: string | null;
+  corpusSlug: string | null;
   changedAt: string;
   changedBy: string;
   changedByName?: string;
@@ -46,7 +46,7 @@ export const getChanges = createServerFn({ method: "GET" })
         compact({
           event: r.eventType,
           document: r.documentSlug ?? undefined,
-          collection: r.collectionSlug ?? undefined,
+          corpus: r.corpusSlug ?? undefined,
           by: names.get(r.changedBy) ?? r.changedBy,
           at: r.changedAt,
           before: parseBody(r.beforeJson),
@@ -59,7 +59,7 @@ export const getChanges = createServerFn({ method: "GET" })
         id: r.id,
         eventType: r.eventType,
         documentSlug: r.documentSlug,
-        collectionSlug: r.collectionSlug,
+        corpusSlug: r.corpusSlug,
         changedAt: r.changedAt,
         changedBy: r.changedBy,
         changedByName: names.get(r.changedBy),

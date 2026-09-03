@@ -3,7 +3,7 @@ import { sha256 } from "../../util";
 import { type CollectionMember, versionKey } from "./versions";
 
 // Zero-IO verifier: it is handed the already-loaded version lists, the
-// collection snapshots, and the blob bytes, and re-derives every invariant
+// corpus snapshots, and the blob bytes, and re-derives every invariant
 // the chain promises. No DB access here — the DO loads, this decides.
 
 export type DocumentVersionView = Readonly<{
@@ -17,15 +17,15 @@ export type DocumentChain = Readonly<{
   versions: readonly DocumentVersionView[];
 }>;
 
-export type CollectionVersionView = Readonly<{
-  collectionSlug: string;
-  collectionVersion: number;
+export type CorpusVersionView = Readonly<{
+  corpusSlug: string;
+  corpusVersion: number;
   members: readonly CollectionMember[];
 }>;
 
 export type VerifyInput = Readonly<{
   documents: readonly DocumentChain[];
-  collections: readonly CollectionVersionView[];
+  corpora: readonly CorpusVersionView[];
   // contentHash → stored bytes.
   blobs: ReadonlyMap<string, string>;
 }>;
@@ -42,9 +42,9 @@ export type BrokenAt = Readonly<
         | "genesis-not-null";
     }
   | {
-      kind: "collection";
-      collectionSlug: string;
-      collectionVersion: number;
+      kind: "corpus";
+      corpusSlug: string;
+      corpusVersion: number;
       documentSlug: string;
       docVersion: number;
       reason: "missing-version" | "content-hash-mismatch";
@@ -124,7 +124,7 @@ export async function verifyChain(input: VerifyInput): Promise<VerifyResult> {
     if (!r.ok) return r;
   }
 
-  // Every collection member must resolve to a DocumentVersion whose
+  // Every corpus member must resolve to a DocumentVersion whose
   // contentHash matches the pinned hash (reproducible-to-bytes corpus).
   const versionHash = new Map<string, string>();
   for (const doc of input.documents) {
@@ -132,14 +132,14 @@ export async function verifyChain(input: VerifyInput): Promise<VerifyResult> {
       versionHash.set(versionKey(doc.slug, v.docVersion), v.contentHash);
     }
   }
-  for (const col of input.collections) {
+  for (const col of input.corpora) {
     for (const m of col.members) {
       const hash = versionHash.get(versionKey(m.documentSlug, m.docVersion));
       if (hash === undefined) {
         return broken({
-          kind: "collection",
-          collectionSlug: col.collectionSlug,
-          collectionVersion: col.collectionVersion,
+          kind: "corpus",
+          corpusSlug: col.corpusSlug,
+          corpusVersion: col.corpusVersion,
           documentSlug: m.documentSlug,
           docVersion: m.docVersion,
           reason: "missing-version",
@@ -147,9 +147,9 @@ export async function verifyChain(input: VerifyInput): Promise<VerifyResult> {
       }
       if (hash !== m.contentHash) {
         return broken({
-          kind: "collection",
-          collectionSlug: col.collectionSlug,
-          collectionVersion: col.collectionVersion,
+          kind: "corpus",
+          corpusSlug: col.corpusSlug,
+          corpusVersion: col.corpusVersion,
           documentSlug: m.documentSlug,
           docVersion: m.docVersion,
           reason: "content-hash-mismatch",

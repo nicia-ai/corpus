@@ -4,10 +4,10 @@ import { z } from "zod";
 import { connectControlDb } from "@/control/db";
 import { eventLogFor } from "@/control/event-log-for";
 import { resolveUserNames } from "@/control/users";
-import { asCollectionSlug, asProjectId } from "@/ids";
+import { asCorpusSlug, asProjectId } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import {
-  buildCollectionActivity,
+  buildCorpusActivity,
   type ActivityAgentRow,
   type ActivityDTO,
   type ActivityStatus,
@@ -25,7 +25,7 @@ function eventLogOf(c: ServerRequestContext) {
 
 export type { ActivityAgentRow, ActivityDTO, ActivityStatus, RecentEventRow };
 
-export const getCollectionActivity = createServerFn({ method: "GET" })
+export const getCorpusActivity = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
@@ -37,8 +37,8 @@ export const getCollectionActivity = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }): Promise<ActivityDTO> => {
     const cx = srv(context);
-    return buildCollectionActivity({
-      slug: asCollectionSlug(data.slug),
+    return buildCorpusActivity({
+      slug: asCorpusSlug(data.slug),
       mcpUrl: `${cx.env.BETTER_AUTH_URL}/mcp`,
       store: storeOf(cx),
       log: eventLogOf(cx),

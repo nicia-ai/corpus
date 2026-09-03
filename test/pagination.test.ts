@@ -112,9 +112,9 @@ describe("retention reap with protection sets spanning pages", () => {
     expect(await store.verifyHistory()).toEqual({ ok: true });
   });
 
-  it("keeps pinned non-head versions when the pinning collections span pages", async () => {
+  it("keeps pinned non-head versions when the pinning corpora span pages", async () => {
     const store = freshStore("pg-reap");
-    const names = ["c1", "c2", "c3"]; // 3 CollectionVersions > page size 2
+    const names = ["c1", "c2", "c3"]; // 3 CorpusVersions > page size 2
     for (let i = 0; i < names.length; i += 1) {
       const d = docSlug(`d${String(i)}`);
       const c = colSlug(names[i] ?? "");
@@ -130,7 +130,7 @@ describe("retention reap with protection sets spanning pages", () => {
         clientVersion: 1,
         changedBy: "u",
       });
-      await store.createCollection({
+      await store.createCorpus({
         slug: c,
         name: names[i] ?? "",
         changedBy: "u",
@@ -144,7 +144,7 @@ describe("retention reap with protection sets spanning pages", () => {
       }); // head is now v3 — v2 is a pinned, non-head version
     }
     // v1 reaped, v2 pinned (survives), v3 head (survives) → one delete/doc.
-    // A truncated pinned set would drop the page-2 collection and wrongly
+    // A truncated pinned set would drop the page-2 corpus and wrongly
     // reap its doc's v2.
     const r = await store.reapExpired(
       { documentVersionDays: 1 },

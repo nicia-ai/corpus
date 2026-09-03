@@ -50,7 +50,7 @@ describe("DO ledger Drizzle migrator", () => {
       clientVersion: 1,
       changedBy: "u",
     });
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("c"),
       name: "C",
       changedBy: "u",

@@ -2,9 +2,9 @@ import { CopyButton } from "@/components/ui/CopyButton";
 import { Card } from "@/components/ui/Surface";
 
 // The setup snippet wires MCP up; this section wires the *agent* up — the
-// nudge it needs to actually reach for the collection. The prompt is
+// nudge it needs to actually reach for the corpus. The prompt is
 // templated against the bound Connection's server name (`corpus-<slug>`)
-// + the collection's name/description, so paste-and-go is honest: the
+// + the corpus's name/description, so paste-and-go is honest: the
 // agent gets a real trigger and a real description of what's in scope.
 export function buildAgentPrompt({
   serverName,

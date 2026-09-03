@@ -15,11 +15,11 @@ import type { ProjectId } from "@/ids";
 // path; the active project id is supplied from the URL at render. Home
 // is the project graph (one document feeding many agents); Share2
 // echoes the fan-out. Credentials (OAuth + API keys) live on the
-// per-Collection Connect setup panel — a key has no meaning outside a
-// Connection (Project + one Collection), so there is no project-wide
-// "API keys" or "MCP" nav slot. The Connect button on each Collection
+// per-Corpus Connect setup panel — a key has no meaning outside a
+// Connection (Project + one Corpus), so there is no project-wide
+// "API keys" or "MCP" nav slot. The Connect button on each Corpus
 // page is the entry point;
-// `/connectors/mcp/setup?collection=<slug>` is where it lands.
+// `/connectors/mcp/setup?corpus=<slug>` is where it lands.
 type NavEntry = Readonly<{
   to: string;
   label: string;
@@ -29,9 +29,9 @@ type NavEntry = Readonly<{
 
 const NAV: readonly NavEntry[] = [
   { to: "/p/$projectId", label: "Home", icon: House },
-  { to: "/p/$projectId/collections", label: "Collections", icon: Share2 },
+  { to: "/p/$projectId/corpora", label: "Corpora", icon: Share2 },
   { to: "/p/$projectId/documents", label: "Documents", icon: FileText },
-  { to: "/p/$projectId/changes", label: "Changes", icon: History },
+  { to: "/p/$projectId/activity", label: "Activity", icon: History },
   { to: "/p/$projectId/team", label: "Team", icon: Users },
   {
     to: "/p/$projectId/settings",

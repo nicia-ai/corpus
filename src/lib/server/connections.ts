@@ -20,9 +20,9 @@ import {
 import { ForbiddenError, UnauthorizedError, ValidationError } from "@/errors";
 import {
   asConnectionId,
-  asCollectionSlug,
+  asCorpusSlug,
   type ConnectionId,
-  type CollectionSlug,
+  type CorpusSlug,
   type OrganizationId,
   type ProjectId,
 } from "@/ids";
@@ -38,34 +38,34 @@ import { assertServerContext as srv } from "@/lib/server-context";
 const CONNECTION_ADMIN_MSG =
   "Only an organization owner can manage Connections";
 
-// Primary action behind "Connect this collection" on the Collection
+// Primary action behind "Connect this corpus" on the Corpus
 // page. Reuse-or-create the canonical Connection for (projectId,
-// collectionSlug) and write the userId-keyed pending-connect intent
-// (`/connect/select` pre-selects from it; the intent is a *picker
-// default*, never the binding mechanism — binding still requires the
-// explicit pick + the handshake-keyed selection row). One D1
-// write (or a no-op reuse), so the Connection is never a precondition
-// the user satisfies before connecting an agent.
-export type ConnectCollectionResult = Readonly<{
+// corpusSlug) and write the userId-keyed pending-connect intent.
+// On the day-1 happy path, OAuth postLogin auto-binds that intent
+// (see autoBindPendingConnect) and skips `/connect/select`. The picker
+// remains for multi-corpus / no-intent flows. One D1 write (or a no-op
+// reuse), so the Connection is never a precondition the user satisfies
+// before connecting an agent.
+export type ConnectCorpusResult = Readonly<{
   connectionId: ConnectionId;
-  collectionSlug: CollectionSlug;
+  corpusSlug: CorpusSlug;
 }>;
 
-export const connectThisCollection = createServerFn({ method: "POST" })
+export const connectThisCorpus = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ collectionSlug: z.string().trim().min(1) }))
-  .handler(async ({ data, context }): Promise<ConnectCollectionResult> => {
+  .validator(z.object({ corpusSlug: z.string().trim().min(1) }))
+  .handler(async ({ data, context }): Promise<ConnectCorpusResult> => {
     const c = srv(context);
     const ref = requireProjectOwner(c.project, CONNECTION_ADMIN_MSG);
     const db = connectControlDb(c.env.DB);
-    const collectionSlug = asCollectionSlug(data.collectionSlug);
+    const corpusSlug = asCorpusSlug(data.corpusSlug);
     const connectionId = await upsertCanonicalConnection(db, {
       organizationId: ref.organizationId,
       projectId: ref.projectId,
-      collectionSlug,
+      corpusSlug,
     });
     await writePendingConnect(db, ref.userId, connectionId);
-    return { connectionId, collectionSlug };
+    return { connectionId, corpusSlug };
   });
 
 // The `projectId` is taken from the request-scoped ProjectRef (the URL
@@ -125,7 +125,7 @@ export type PickerRow = Readonly<{
   organizationId: OrganizationId;
   projectId: ProjectId;
   projectName: string;
-  collectionSlug: CollectionSlug;
+  corpusSlug: CorpusSlug;
   name: string;
   isDefaultForCollection: boolean;
 }>;
@@ -143,7 +143,7 @@ export const listMyAdministeredConnections = createServerFn({ method: "GET" })
       organizationId: r.organizationId,
       projectId: r.projectId,
       projectName: r.projectName,
-      collectionSlug: r.collectionSlug,
+      corpusSlug: r.corpusSlug,
       name: r.name,
       isDefaultForCollection: r.isDefaultForCollection,
     }));
@@ -194,8 +194,8 @@ export const commitConnectionSelection = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// Look up the userId-keyed pending-connect intent (the Collection-page
-// "Connect this collection" hint). `/connect/select` calls this to
+// Look up the userId-keyed pending-connect intent (the Corpus-page
+// "Connect this corpus" hint). `/connect/select` calls this to
 // pre-select; the read is non-binding — binding still requires the
 // explicit pick + the handshake-keyed selection row.
 export const readPendingConnectFn = createServerFn({ method: "GET" })

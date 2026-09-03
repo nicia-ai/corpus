@@ -1,9 +1,9 @@
-// The single, pure folder→collection resolver. Given a collection's
+// The single, pure folder→corpus resolver. Given a corpus's
 // ordered mix of direct-document and folder includes (one shared
 // position space) plus the linked folders' subtree as plain data, it
 // produces the flat, deterministic, deduplicated document order an
 // agent receives. Zero-IO so it is unit-tested without a DO; every
-// consumer (readCollection, the CollectionVersion snapshot, MCP, bundle
+// consumer (readCorpus, the CorpusVersion snapshot, MCP, bundle
 // export) routes through it so the expansion rule can never drift
 // between surfaces.
 
@@ -11,7 +11,7 @@ export const COLLECTION_DELIVERY_VALUES = ["core", "reference"] as const;
 export type CollectionDelivery = (typeof COLLECTION_DELIVERY_VALUES)[number];
 export const DEFAULT_COLLECTION_DELIVERY: CollectionDelivery = "core";
 
-export function collectionDelivery(value: unknown): CollectionDelivery {
+export function corpusDelivery(value: unknown): CollectionDelivery {
   return value === "reference" ? "reference" : DEFAULT_COLLECTION_DELIVERY;
 }
 
@@ -67,14 +67,14 @@ function byPosition(a: ExpandEntry, b: ExpandEntry): number {
 // reached both directly and via a folder (or via two folders) appears
 // once, at its earliest position. Cycle-guarded defensively even though
 // the single-parent invariant forbids folder cycles.
-export function expandCollection(
+export function expandCorpus(
   entries: readonly ExpandEntry[],
   tree: FolderTree,
 ): readonly string[] {
-  return expandCollectionDocuments(entries, tree).map((d) => d.slug);
+  return expandCorpusDocuments(entries, tree).map((d) => d.slug);
 }
 
-export function expandCollectionDocuments(
+export function expandCorpusDocuments(
   entries: readonly ExpandEntry[],
   tree: FolderTree,
 ): readonly ExpandedDocument[] {
@@ -97,7 +97,7 @@ export function expandCollectionDocuments(
     if (index !== -1) out[index] = updated;
   };
   const emit = (slug: string, rawDelivery: unknown, direct: boolean): void => {
-    const delivery = collectionDelivery(rawDelivery);
+    const delivery = corpusDelivery(rawDelivery);
     const existing = bySlug.get(slug);
     // First occurrence fixes position; later occurrences only adjust the
     // delivery tier per the precedence rules above.

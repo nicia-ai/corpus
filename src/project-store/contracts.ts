@@ -1,4 +1,4 @@
-import type { CollectionSlug, DocumentSlug, FolderSlug } from "../ids";
+import type { CorpusSlug, DocumentSlug, FolderSlug } from "../ids";
 import type { CollectionDelivery } from "../store/domain/collection-expand";
 import type { LinkKind } from "../store/domain/links";
 
@@ -39,8 +39,8 @@ export type RenameFilenameResult = Readonly<
   { ok: true } | { ok: false; reason: "missing" | "segment-collision" }
 >;
 
-export type UpdateCollectionInput = Readonly<{
-  slug: CollectionSlug;
+export type UpdateCorpusInput = Readonly<{
+  slug: CorpusSlug;
   name: string;
   description?: string;
   // Absent = preserve the current value (a patch, unlike `description`
@@ -60,10 +60,10 @@ export type SaveResult = Readonly<
 >;
 
 // A scoped create either lands a new document or refuses because the slug
-// already exists outside the bound Collection — another scope's document,
+// already exists outside the bound Corpus — another scope's document,
 // which the credential may never write. The existence check is decided
 // inside the create transaction, so the refusal is atomic with the write.
-export type CreateInCollectionResult =
+export type CreateInCorpusResult =
   SaveResult | Readonly<{ ok: false; forbidden: true }>;
 
 export type DocumentSnapshot = Readonly<{
@@ -103,7 +103,7 @@ export type ReapResult = Readonly<{
 // in the server fn and are never produced here; widening this union
 // would create dead branches downstream.
 export type ImportResult = Readonly<
-  | { ok: true; documents: number; collections: number }
+  | { ok: true; documents: number; corpora: number }
   | { ok: false; reason: "root-hash-mismatch" }
 >;
 
@@ -111,13 +111,18 @@ export type SeedResult = Readonly<
   { seeded: true } | { seeded: false; reason: "not_empty" }
 >;
 
+export type EnsureDefaultCorpusResult = Readonly<{
+  slug: string;
+  created: boolean;
+}>;
+
 // Bulk folder upload, per-document outcome: a fresh path is `created`,
 // a re-uploaded path is a new version of the SAME document
 // (`created: false`) — idempotent on path, never a duplicate.
 // `folderSlug` is the document's immediate parent (null = project root);
 // `createdFolders` are the folder slugs this import minted to place it
 // (empty when every ancestor already existed). Together they let the DO
-// derive the collection-link target from ground truth.
+// derive the corpus-link target from ground truth.
 export type ImportDocResult = Readonly<
   | {
       ok: true;
@@ -136,26 +141,26 @@ export type ImportSummary = Readonly<{
   failed: readonly Readonly<{ path: string; reason: string }>[];
 }>;
 
-export type ImportCollectionLink = Readonly<
+export type ImportCorpusLink = Readonly<
   | { mode: "none" }
-  | { mode: "existing"; slug: CollectionSlug }
+  | { mode: "existing"; slug: CorpusSlug }
   | { mode: "new"; name: string }
 >;
 
 export type ImportAndLinkInput = Readonly<{
   entries: readonly Readonly<{ path: string; markdown: string }>[];
-  link: ImportCollectionLink;
+  link: ImportCorpusLink;
   changedBy: string;
 }>;
 
 export type ImportAndLinkResult = Readonly<{
   summary: ImportSummary;
-  linkedTo: CollectionSlug | undefined;
+  linkedTo: CorpusSlug | undefined;
 }>;
 
 export type ProjectUsageSnapshot = Readonly<{
   activeDocuments: number;
-  collections: number;
+  corpora: number;
   documentVersions: number;
   storedMarkdownBytes: number;
 }>;
@@ -175,14 +180,14 @@ export type DocumentSearchHit = Readonly<{
 // how the link was written (`path` = CommonMark relative destination,
 // `wiki` = Obsidian-style `[[target]]`). `documentSlug` is null when it
 // dangles (escapes the project, or nothing matches the target);
-// `inCollection` is true when that target is itself in this
-// collection's resolved expansion.
+// `inCorpus` is true when that target is itself in this
+// corpus's resolved expansion.
 export type OutlineLink = Readonly<{
   target: string;
   kind: LinkKind;
   resolvedPath: string | null;
   documentSlug: string | null;
-  inCollection: boolean;
+  inCorpus: boolean;
 }>;
 
 export type OutlineDoc = Readonly<{
@@ -197,11 +202,11 @@ export type OutlineDoc = Readonly<{
 // Tree-ordered with derived paths + resolved links — the whole
 // hierarchy + link graph in one cheap read. Bytes are never rewritten;
 // this is `parsed-links ⊕ current path map`, computed at projection time.
-export type CollectionOutline = Readonly<
+export type CorpusOutline = Readonly<
   | { found: false }
   | {
       found: true;
-      collection: string;
+      corpus: string;
       name: string;
       documents: readonly OutlineDoc[];
     }

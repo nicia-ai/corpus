@@ -46,7 +46,7 @@ function Invite() {
       <div>
         <PageHeader
           title="You’ve been invited"
-          subtitle="Join your team’s canonical collection."
+          subtitle="Join your team’s canonical corpus."
         />
         <p className="mb-4 text-base text-slate-600">
           Sign in (or create an account) with the email this invite was sent to.

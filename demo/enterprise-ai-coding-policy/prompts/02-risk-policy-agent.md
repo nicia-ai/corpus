@@ -12,7 +12,7 @@ First, read these local source notes:
 
 Then use the Corpus MCP tools to:
 
-1. List documents in the connected Collection.
+1. List documents in the connected Corpus.
 2. Find and read `Enterprise AI Coding Policy Brief`.
 3. Propose a focused edit with `suggest_edit`.
 

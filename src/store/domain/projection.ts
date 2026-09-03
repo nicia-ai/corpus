@@ -6,7 +6,7 @@ import {
 // The rebuildable projection over the durable event stream. Pure,
 // zero-IO, deterministic — folding the same prefix yields the same
 // state. The activity view's freshness derivation, the funnel signals,
-// and the per-(caller, collection) last-read all derive from this; no
+// and the per-(caller, corpus) last-read all derive from this; no
 // consumer reads the event_log table directly.
 //
 // **Invariant:** the projection is a fold-only view of appended events.
@@ -27,15 +27,15 @@ export type ProjectionInput = Readonly<{
   event: InstrumentationEvent;
 }>;
 
-// Per-(caller, collection) state — the activity view's freshness
+// Per-(caller, corpus) state — the activity view's freshness
 // derivation reads this. `Fresh` = the caller's most recent read
-// captured the collection's current versions; `Stale` = a later edit
+// captured the corpus's current versions; `Stale` = a later edit
 // has landed since (caller-current `versionCapturedAtRead` is older
-// than the collection's current versions). This projection records the
+// than the corpus's current versions). This projection records the
 // evidence; rendering the chip is the activity view's job.
-export type CallerCollectionState = Readonly<{
+export type CallerCorpusState = Readonly<{
   callerRef: string;
-  collectionSlug: string;
+  corpusSlug: string;
   lastReadAt: string;
   lastReadMonotonicId: number;
   versionCapturedAtRead: Readonly<Record<string, number>>;
@@ -46,7 +46,7 @@ export type CallerCollectionState = Readonly<{
 // activity view can show "first happened at" without re-deriving.
 // `undefined` = "has not happened yet in this project's stream."
 export type FunnelSignals = Readonly<{
-  // First MCP read by any caller against any collection (first agent
+  // First MCP read by any caller against any corpus (first agent
   // contact moment).
   firstMcpReadAt: string | undefined;
   // First read.after-edit event — the wedge-proof moment ("agent
@@ -74,26 +74,23 @@ export type FunnelSignals = Readonly<{
 // the activity-view server fn consumes.
 export type ProjectionState = Readonly<{
   funnel: FunnelSignals;
-  // Keyed by "<callerRef>|<collectionSlug>" so iteration order is stable
-  // and two callers reading the same collection never alias. The Map
+  // Keyed by "<callerRef>|<corpusSlug>" so iteration order is stable
+  // and two callers reading the same corpus never alias. The Map
   // preserves insertion order — useful for "recent activity" surfaces
   // — and is cheap to clone-on-write.
-  perCallerCollection: ReadonlyMap<string, CallerCollectionState>;
+  perCallerCorpus: ReadonlyMap<string, CallerCorpusState>;
   // Distinct CallerRefs that have appeared in the stream so far.
-  // Tracked independently of perCallerCollection because a caller can
-  // appear via caller.connected (no collection yet) before any read
-  // resolves a collection; using the map alone would double-count that
+  // Tracked independently of perCallerCorpus because a caller can
+  // appear via caller.connected (no corpus yet) before any read
+  // resolves a corpus; using the map alone would double-count that
   // caller's first subsequent read as "a new caller".
   seenCallers: ReadonlySet<string>;
 }>;
 
 const KEY_SEP = "|";
 
-export function callerCollectionKey(
-  callerRef: string,
-  collectionSlug: string,
-): string {
-  return `${callerRef}${KEY_SEP}${collectionSlug}`;
+export function callerCorpusKey(callerRef: string, corpusSlug: string): string {
+  return `${callerRef}${KEY_SEP}${corpusSlug}`;
 }
 
 const EMPTY_FUNNEL: FunnelSignals = {
@@ -107,7 +104,7 @@ const EMPTY_FUNNEL: FunnelSignals = {
 
 export const EMPTY_PROJECTION: ProjectionState = {
   funnel: EMPTY_FUNNEL,
-  perCallerCollection: new Map(),
+  perCallerCorpus: new Map(),
   seenCallers: new Set(),
 };
 
@@ -123,11 +120,11 @@ export function applyEvent(
   const { event, timestamp } = input;
   switch (event.type) {
     case "read": {
-      const key = callerCollectionKey(event.callerRef, event.collectionSlug);
-      const nextMap = new Map(state.perCallerCollection);
+      const key = callerCorpusKey(event.callerRef, event.corpusSlug);
+      const nextMap = new Map(state.perCallerCorpus);
       nextMap.set(key, {
         callerRef: event.callerRef,
-        collectionSlug: event.collectionSlug,
+        corpusSlug: event.corpusSlug,
         lastReadAt: timestamp,
         lastReadMonotonicId: input.monotonicId,
         versionCapturedAtRead: event.versionCapturedAtRead,
@@ -146,7 +143,7 @@ export function applyEvent(
               : state.funnel.firstReadAfterEditAt,
           ...bumpDistinctCallers(state.funnel, seen, timestamp),
         },
-        perCallerCollection: nextMap,
+        perCallerCorpus: nextMap,
         seenCallers: nextSeen,
       };
     }
@@ -160,7 +157,7 @@ export function applyEvent(
           ...state.funnel,
           ...bumpDistinctCallers(state.funnel, seen, timestamp),
         },
-        perCallerCollection: state.perCallerCollection,
+        perCallerCorpus: state.perCallerCorpus,
         seenCallers: nextSeen,
       };
     }
@@ -179,9 +176,9 @@ export function applyEvent(
         },
       };
     }
-    // Document and collection lifecycle events flow through the stream
+    // Document and corpus lifecycle events flow through the stream
     // but the projection does not derive funnel state from them
-    // directly — the activity view's per-collection "last edit" comes
+    // directly — the activity view's per-corpus "last edit" comes
     // from the DocumentVersion chain (existing source of truth), not
     // from these events. They are kept in the stream for the audit
     // log and future stream consumers.

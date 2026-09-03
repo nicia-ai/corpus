@@ -10,7 +10,7 @@
 //
 // Pure data, zero IO. Slugs and titles stay plain `string` (internal
 // data, not a trust boundary); seedExample lifts them to branded ids
-// via asDocumentSlug / asCollectionSlug at write time.
+// via asDocumentSlug / asCorpusSlug at write time.
 
 export type ExampleDoc = Readonly<{
   slug: string;
@@ -18,13 +18,13 @@ export type ExampleDoc = Readonly<{
   markdown: string;
 }>;
 
-export type ExampleCollection = Readonly<{
+export type ExampleCorpus = Readonly<{
   slug: string;
   name: string;
 }>;
 
 export type ExampleAttachment = Readonly<{
-  collectionSlug: string;
+  corpusSlug: string;
   documentSlug: string;
   position: number;
 }>;
@@ -32,7 +32,7 @@ export type ExampleAttachment = Readonly<{
 export type ExampleAgent = Readonly<{ slug: string; name: string }>;
 
 export type ExampleAgentLink = Readonly<{
-  collectionSlug: string;
+  corpusSlug: string;
   agentSlug: string;
 }>;
 
@@ -155,7 +155,7 @@ needed, no charge for skipped months.
 `;
 
 // Order matters at write time only for attachments (position is
-// explicit); document and collection arrays are written sequentially
+// explicit); document and corpus arrays are written sequentially
 // in the order below.
 export const EXAMPLE_DOCS: readonly ExampleDoc[] = [
   {
@@ -167,28 +167,28 @@ export const EXAMPLE_DOCS: readonly ExampleDoc[] = [
   { slug: "brand-voice", title: "Brand Voice", markdown: BRAND_VOICE_MD },
 ];
 
-export const EXAMPLE_COLLECTIONS: readonly ExampleCollection[] = [
+export const EXAMPLE_COLLECTIONS: readonly ExampleCorpus[] = [
   { slug: "support-agent", name: "Support" },
   { slug: "sales-agent", name: "Sales" },
 ];
 
-// Collection slugs keep the historical `-agent` suffix (identity:
+// Corpus slugs keep the historical `-agent` suffix (identity:
 // the seed + bundle key on it); only the display names dropped it.
 export const EXAMPLE_ATTACHMENTS: readonly ExampleAttachment[] = [
   {
-    collectionSlug: "support-agent",
+    corpusSlug: "support-agent",
     documentSlug: "refund-policy",
     position: 1,
   },
   {
-    collectionSlug: "sales-agent",
+    corpusSlug: "sales-agent",
     documentSlug: "refund-policy",
     position: 1,
   },
-  // product before brand-voice so an agent reading the collection
+  // product before brand-voice so an agent reading the corpus
   // meets product details before tone guidance.
-  { collectionSlug: "sales-agent", documentSlug: "product", position: 2 },
-  { collectionSlug: "sales-agent", documentSlug: "brand-voice", position: 3 },
+  { corpusSlug: "sales-agent", documentSlug: "product", position: 2 },
+  { corpusSlug: "sales-agent", documentSlug: "brand-voice", position: 3 },
 ];
 
 // The agent tier is illustrative — shown in the ghost-preview graph
@@ -200,7 +200,7 @@ export const EXAMPLE_AGENTS: readonly ExampleAgent[] = [
 ];
 
 export const EXAMPLE_AGENT_LINKS: readonly ExampleAgentLink[] = [
-  { collectionSlug: "support-agent", agentSlug: "customer-support-bot" },
-  { collectionSlug: "sales-agent", agentSlug: "cold-outbound-agent" },
-  { collectionSlug: "sales-agent", agentSlug: "sales-assistant" },
+  { corpusSlug: "support-agent", agentSlug: "customer-support-bot" },
+  { corpusSlug: "sales-agent", agentSlug: "cold-outbound-agent" },
+  { corpusSlug: "sales-agent", agentSlug: "sales-assistant" },
 ];

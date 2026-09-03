@@ -13,7 +13,7 @@ import {
   oauthConsent,
   oauthRefreshToken,
 } from "../src/control/schema/better-auth";
-import { asCollectionSlug, asConnectionId } from "../src/ids";
+import { asCorpusSlug, asConnectionId } from "../src/ids";
 
 import { createOrg, seedOAuthClient, signUp } from "./_helpers";
 
@@ -71,7 +71,7 @@ describe("Connection admin scoping — cross-tenant guard", () => {
     const bobConn = await createCanonicalConnection(db, {
       organizationId: orgB.organizationId,
       projectId: orgB.projectId,
-      collectionSlug: asCollectionSlug("bob-secrets"),
+      corpusSlug: asCorpusSlug("bob-secrets"),
       name: "Bob's Connection",
     });
 
@@ -100,7 +100,7 @@ describe("Connection admin scoping — cross-tenant guard", () => {
     const bobConn = await createCanonicalConnection(db, {
       organizationId: orgB.organizationId,
       projectId: orgB.projectId,
-      collectionSlug: asCollectionSlug("bob-vault"),
+      corpusSlug: asCorpusSlug("bob-vault"),
     });
     await seedRefreshToken(bob, bobConn);
 
@@ -166,7 +166,7 @@ describe("Connection admin scoping — cross-tenant guard", () => {
     const id = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("ok"),
+      corpusSlug: asCorpusSlug("ok"),
       name: "before",
     });
 

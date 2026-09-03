@@ -15,7 +15,7 @@ import {
   oauthConsent,
   oauthRefreshToken,
 } from "../src/control/schema/better-auth";
-import { asCollectionSlug } from "../src/ids";
+import { asCorpusSlug } from "../src/ids";
 
 import { createOrg, seedOAuthClient, signUp } from "./_helpers";
 
@@ -58,16 +58,16 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
     const userId = await signUp("c4cr");
     const db = connectControlDb(env.DB);
     const org = await createOrg(userId, "Org create");
-    const slug = asCollectionSlug("marketing");
+    const slug = asCorpusSlug("marketing");
     const first = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: slug,
+      corpusSlug: slug,
     });
     const second = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: slug,
+      corpusSlug: slug,
     });
     expect(second).toBe(first); // no duplicate row
     const all = await listProjectConnections(db, org.projectId);
@@ -79,13 +79,13 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
     const userId = await signUp("c4adv");
     const db = connectControlDb(env.DB);
     const org = await createOrg(userId, "Org adv");
-    const slug = asCollectionSlug("hr");
+    const slug = asCorpusSlug("hr");
     await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: slug,
+      corpusSlug: slug,
     });
-    // Advanced row, same (projectId, collectionSlug) but
+    // Advanced row, same (projectId, corpusSlug) but
     // isDefaultForCollection=false — the partial unique index does NOT
     // cover it.
     await db.insert(connection).values({
@@ -107,7 +107,7 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
     const id = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("marketing"),
+      corpusSlug: asCorpusSlug("marketing"),
     });
     await renameConnection(db, {
       connectionId: id,
@@ -128,7 +128,7 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
     const id = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("delme"),
+      corpusSlug: asCorpusSlug("delme"),
     });
     // Footprint: a refresh token + consent referencing the Connection,
     // plus an api_key on it.
@@ -198,12 +198,12 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
     const idA = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("a"),
+      corpusSlug: asCorpusSlug("a"),
     });
     const idB = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("b"),
+      corpusSlug: asCorpusSlug("b"),
     });
     await seedGrantFootprint(userId, idA);
     await seedGrantFootprint(userId, idB);
@@ -232,7 +232,7 @@ describe("C4 — Connection lifecycle (CRUD)", () => {
     const id = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("counted"),
+      corpusSlug: asCorpusSlug("counted"),
     });
     await db.insert(apiKey).values([
       {
@@ -267,9 +267,9 @@ describe("C4 — pending-connect intent (the picker hint, NOT the binding)", () 
     const id = await createCanonicalConnection(db, {
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: asCollectionSlug("marketing"),
+      corpusSlug: asCorpusSlug("marketing"),
     });
-    // The server-fn `connectThisCollection` calls writePendingConnect with
+    // The server-fn `connectThisCorpus` calls writePendingConnect with
     // Date.now(); the helper test/oauth-selection.test.ts already
     // covers TTL + replace. Here we just assert the integration shape:
     // after creating, the userId resolves back to the Connection.

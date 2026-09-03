@@ -8,8 +8,8 @@ import {
 } from "../src/components/project-graph/layout";
 
 // Single source of truth for the example shape (the empty-state graph):
-// refund-policy in BOTH collections, product + brand-voice in Sales
-// only, collections read by concrete agents.
+// refund-policy in BOTH corpora, product + brand-voice in Sales
+// only, corpora read by concrete agents.
 const SEED: GraphInput = EXAMPLE_GRAPH;
 
 describe("layout (pure, deterministic)", () => {
@@ -20,7 +20,7 @@ describe("layout (pure, deterministic)", () => {
   it("input order does not affect output (slug-sorted)", () => {
     const reordered: GraphInput = {
       documents: [...SEED.documents].reverse(),
-      collections: [...SEED.collections].reverse(),
+      corpora: [...SEED.corpora].reverse(),
       attachments: [...SEED.attachments].reverse(),
       agents: [...(SEED.agents ?? [])].reverse(),
       agentLinks: [...(SEED.agentLinks ?? [])].reverse(),
@@ -29,44 +29,44 @@ describe("layout (pure, deterministic)", () => {
   });
 
   it("empty project is flagged empty with no nodes", () => {
-    const l = layout({ documents: [], collections: [], attachments: [] });
+    const l = layout({ documents: [], corpora: [], attachments: [] });
     expect(l.empty).toBe(true);
     expect(l.nodes).toHaveLength(0);
     expect(l.edges).toHaveLength(0);
   });
 
-  it("the shared document is ONE node feeding both collections", () => {
+  it("the shared document is ONE node feeding both corpora", () => {
     const l = layout(SEED);
     const refund = l.nodes.find((n) => n.id === "document:refund-policy");
-    expect(refund?.collectionCount).toBe(2);
+    expect(refund?.corpusCount).toBe(2);
     const fromRefund = l.edges.filter(
       (e) => e.fromId === "document:refund-policy",
     );
     expect(fromRefund.map((e) => e.toId).sort()).toEqual([
-      "collection:sales-agent",
-      "collection:support-agent",
+      "corpus:sales-agent",
+      "corpus:support-agent",
     ]);
   });
 
   it("brand-voice feeds Sales only — present, not stranded", () => {
     const l = layout(SEED);
     const brand = l.nodes.find((n) => n.id === "document:brand-voice");
-    expect(brand?.collectionCount).toBe(1);
+    expect(brand?.corpusCount).toBe(1);
     const fromBrand = l.edges.filter(
       (e) => e.fromId === "document:brand-voice",
     );
-    expect(fromBrand.map((e) => e.toId)).toEqual(["collection:sales-agent"]);
+    expect(fromBrand.map((e) => e.toId)).toEqual(["corpus:sales-agent"]);
   });
 
   it("product feeds Sales only — present, not stranded", () => {
     const l = layout(SEED);
     const product = l.nodes.find((n) => n.id === "document:product");
-    expect(product?.collectionCount).toBe(1);
+    expect(product?.corpusCount).toBe(1);
     const fromProduct = l.edges.filter((e) => e.fromId === "document:product");
-    expect(fromProduct.map((e) => e.toId)).toEqual(["collection:sales-agent"]);
+    expect(fromProduct.map((e) => e.toId)).toEqual(["corpus:sales-agent"]);
   });
 
-  it("the example expands collections into concrete agent nodes", () => {
+  it("the example expands corpora into concrete agent nodes", () => {
     const l = layout(SEED);
     expect(
       l.nodes
@@ -83,39 +83,36 @@ describe("layout (pure, deterministic)", () => {
       .map((e) => `${e.fromId}>${e.toId}`)
       .sort();
     expect(toAgents).toEqual([
-      "collection:sales-agent>agent:cold-outbound-agent",
-      "collection:sales-agent>agent:sales-assistant",
-      "collection:support-agent>agent:customer-support-bot",
+      "corpus:sales-agent>agent:cold-outbound-agent",
+      "corpus:sales-agent>agent:sales-assistant",
+      "corpus:support-agent>agent:customer-support-bot",
     ]);
   });
 
   it("no agent nodes without agents input (no col-2 fallback)", () => {
     const l = layout({
       documents: [{ slug: "a", title: "A" }],
-      collections: [{ slug: "c", name: "C" }],
+      corpora: [{ slug: "c", name: "C" }],
       attachments: [],
     });
     expect(l.nodes.every((n) => n.kind !== "agent")).toBe(true);
-    expect(l.nodes.map((n) => n.kind).sort()).toEqual([
-      "collection",
-      "document",
-    ]);
+    expect(l.nodes.map((n) => n.kind).sort()).toEqual(["corpus", "document"]);
   });
 
-  it("doc → collection edges preserve attachment position", () => {
+  it("doc → corpus edges preserve attachment position", () => {
     const l = layout({
       documents: [
         { slug: "a", title: "A" },
         { slug: "b", title: "B" },
       ],
-      collections: [{ slug: "c", name: "C" }],
+      corpora: [{ slug: "c", name: "C" }],
       attachments: [
-        { collectionSlug: "c", documentSlug: "b", position: 2 },
-        { collectionSlug: "c", documentSlug: "a", position: 1 },
+        { corpusSlug: "c", documentSlug: "b", position: 2 },
+        { corpusSlug: "c", documentSlug: "a", position: 1 },
       ],
     });
     const edges = l.edges
-      .filter((e) => e.toId === "collection:c")
+      .filter((e) => e.toId === "corpus:c")
       .map((e) => ({ from: e.fromId, position: e.position }));
     expect(edges).toEqual([
       { from: "document:a", position: 1 },
@@ -123,16 +120,16 @@ describe("layout (pure, deterministic)", () => {
     ]);
   });
 
-  it("columns: documents 0, collections 1, agents 2", () => {
+  it("columns: documents 0, corpora 1, agents 2", () => {
     const l = layout(SEED);
     expect(l.nodes.find((n) => n.kind === "document")?.col).toBe(0);
-    expect(l.nodes.find((n) => n.kind === "collection")?.col).toBe(1);
+    expect(l.nodes.find((n) => n.kind === "corpus")?.col).toBe(1);
     expect(l.nodes.find((n) => n.kind === "agent")?.col).toBe(2);
   });
 });
 
 describe("linkageSentences (screen-reader source of truth)", () => {
-  it("states which collections each document feeds", () => {
+  it("states which corpora each document feeds", () => {
     const s = linkageSentences(SEED);
     expect(s).toEqual([
       {

@@ -2,7 +2,7 @@ import type { ProjectId } from "../ids";
 import type { ProjectStore } from "../project-store";
 
 // The single Project → ProjectStore mapping. This is the multi-tenant
-// boundary; every data-plane access must go through it. A Collection
+// boundary; every data-plane access must go through it. A Corpus
 // is an entity inside the DO, never a partition key — the whole graph
 // lives in one DO per Project. Extracted to its own module so both
 // `tenancy.ts` and `org-lifecycle.ts` can use it without an import

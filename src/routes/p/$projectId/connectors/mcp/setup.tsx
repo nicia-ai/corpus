@@ -4,34 +4,34 @@ import { z } from "zod";
 import { McpSetupPage } from "@/features/connectors/McpSetupPage";
 import { asProjectId } from "@/ids";
 import { listConnectionApiKeys } from "@/lib/server/api-keys";
-import { getCollectionMeta } from "@/lib/server/collections";
+import { getCorpusMeta } from "@/lib/server/corpora";
 import { getMcpUrl } from "@/lib/server/session";
 
 const layout = getRouteApi("/p/$projectId");
 
 export const Route = createFileRoute("/p/$projectId/connectors/mcp/setup")({
   component: SetupMcpRoute,
-  // `?collection=<slug>` lands here from the Collection page's "Connect
-  // this collection" action. When present, snippets use a per-Connection
-  // `corpus-<slug>` server name so two collections do not overwrite each
+  // `?corpus=<slug>` lands here from the Corpus page's "Connect
+  // this corpus" action. When present, snippets use a per-Connection
+  // `corpus-<slug>` server name so two corpora do not overwrite each
   // other in one client config.
-  validateSearch: z.object({ collection: z.string().optional() }),
-  loaderDeps: ({ search }) => ({ collection: search.collection }),
+  validateSearch: z.object({ corpus: z.string().optional() }),
+  loaderDeps: ({ search }) => ({ corpus: search.corpus }),
   loader: async ({ params, deps }) => {
     const [url, connection, col] = await Promise.all([
       getMcpUrl(),
-      deps.collection === undefined
+      deps.corpus === undefined
         ? Promise.resolve(undefined)
         : listConnectionApiKeys({
             data: {
               projectId: params.projectId,
-              collectionSlug: deps.collection,
+              corpusSlug: deps.corpus,
             },
           }),
-      deps.collection === undefined
+      deps.corpus === undefined
         ? Promise.resolve(undefined)
-        : getCollectionMeta({
-            data: { projectId: params.projectId, slug: deps.collection },
+        : getCorpusMeta({
+            data: { projectId: params.projectId, slug: deps.corpus },
           }),
     ]);
     return { url, connection, col };
@@ -40,14 +40,14 @@ export const Route = createFileRoute("/p/$projectId/connectors/mcp/setup")({
 
 function SetupMcpRoute(): React.ReactElement {
   const data = Route.useLoaderData();
-  const { collection } = Route.useSearch();
+  const { corpus } = Route.useSearch();
   const { current } = layout.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
   return (
     <McpSetupPage
       projectId={projectId}
       role={current.role}
-      collection={collection}
+      corpus={corpus}
       url={data.url}
       connection={data.connection}
       col={data.col}

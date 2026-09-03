@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
 // End-to-end: the real save path (content-addressed blob + DocumentVersion
-// chain) plus a CollectionVersion snapshot must verify intact, and a
+// chain) plus a CorpusVersion snapshot must verify intact, and a
 // node-unique collision must surface as a 409 — never a thrown 500.
 const project = () => freshStore("verify");
 
@@ -22,7 +22,7 @@ describe("verifyHistory (DO end-to-end)", () => {
       clientVersion: 1,
       changedBy: "u",
     });
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("c"),
       name: "C",
       changedBy: "u",

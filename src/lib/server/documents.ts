@@ -29,16 +29,16 @@ export type DocMeta = Readonly<{
   docVersion: number;
   size: number;
 }>;
-// Documents list row: DocMeta plus how many distinct agent collections
+// Documents list row: DocMeta plus how many distinct agent corpora
 // the document is attached to (the product's shared-linkage signal).
 export type DocListItem = Readonly<{
   slug: DocumentSlug;
   title: string;
   docVersion: number;
   size: number;
-  collectionCount: number;
+  corpusCount: number;
   // Open suggestions awaiting review (agent or human proposals) — the
-  // documents-list badge, the sibling of collectionCount.
+  // documents-list badge, the sibling of corpusCount.
   pendingSuggestions: number;
   filename: string;
   path: string;
@@ -105,7 +105,7 @@ export const getDocumentRefs = createServerFn({ method: "GET" })
   });
 
 // One round trip for the documents list: heads + the flat attachment
-// edge list, joined to a distinct-collection count per document.
+// edge list, joined to a distinct-corpus count per document.
 // Collapsed into a single server fn (not getDocuments + a counts call)
 // per the web-data-layer middleware-cost guidance.
 export const getDocumentList = createServerFn({ method: "GET" })
@@ -117,12 +117,12 @@ export const getDocumentList = createServerFn({ method: "GET" })
       store.listResolvedMembers(),
       store.openSuggestionCounts(),
     ]);
-    // Count the distinct collections each document resolves into —
+    // Count the distinct corpora each document resolves into —
     // including membership via a linked folder, not just direct edges.
     const contextsByDoc = new Map<string, Set<string>>();
     for (const m of members) {
       const set = contextsByDoc.get(m.documentSlug) ?? new Set<string>();
-      set.add(m.collectionSlug);
+      set.add(m.corpusSlug);
       contextsByDoc.set(m.documentSlug, set);
     }
     return docs.map((d) => ({
@@ -130,7 +130,7 @@ export const getDocumentList = createServerFn({ method: "GET" })
       title: d.title,
       docVersion: d.docVersion,
       size: d.size,
-      collectionCount: contextsByDoc.get(d.slug)?.size ?? 0,
+      corpusCount: contextsByDoc.get(d.slug)?.size ?? 0,
       pendingSuggestions: pendingCounts[d.slug] ?? 0,
       filename: d.filename,
       path: d.path,

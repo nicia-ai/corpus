@@ -46,7 +46,7 @@ describe("instrumentation — saves emit events into the per-Project event log",
     });
   });
 
-  it("createCollection + attachDocument fire collection.created and collection.attached", async () => {
+  it("createCorpus + attachDocument fire corpus.created and corpus.attached", async () => {
     const { store, log } = freshProject("col-emit");
     await store.saveDocument({
       slug: docSlug("runbook"),
@@ -54,7 +54,7 @@ describe("instrumentation — saves emit events into the per-Project event log",
       clientVersion: 0,
       changedBy: "u",
     });
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "u",
@@ -104,7 +104,7 @@ describe("instrumentation — saves emit events into the per-Project event log",
 });
 
 describe("instrumentation — MCP read events fire with coalescing", () => {
-  it("first readCollection emits a read.first event", async () => {
+  it("first readCorpus emits a read.first event", async () => {
     const { store, log } = freshProject("read-first");
     await store.saveDocument({
       slug: docSlug("d1"),
@@ -112,7 +112,7 @@ describe("instrumentation — MCP read events fire with coalescing", () => {
       clientVersion: 0,
       changedBy: "u",
     });
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("c"),
       name: "C",
       changedBy: "u",
@@ -181,7 +181,7 @@ describe("instrumentation — END-TO-END WEDGE: invited edit → agent read fres
   // "invited coworker edits a doc → operator's agent reads the
   // changed version" must produce a recordable, derivable signal
   // (the read.after-edit event + a corresponding update to the
-  // projection's CallerCollectionState with the new version-set).
+  // projection's CallerCorpusState with the new version-set).
   it("full chain: save v1 → first read → save v2 → second read → projection reflects after-edit", async () => {
     const { store, log } = freshProject("wedge");
     await store.saveDocument({
@@ -190,7 +190,7 @@ describe("instrumentation — END-TO-END WEDGE: invited edit → agent read fres
       clientVersion: 0,
       changedBy: "alice", // operator
     });
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "alice",
@@ -213,7 +213,7 @@ describe("instrumentation — END-TO-END WEDGE: invited edit → agent read fres
     await store.recordRead(agentCaller, "ops", { plan: 2 });
 
     // Fold the event log into a projection and assert the wedge:
-    // (1) the agent has a CallerCollectionState whose
+    // (1) the agent has a CallerCorpusState whose
     //     versionCapturedAtRead reflects v2 (the freshest version).
     // (2) the funnel's firstReadAfterEditAt latches — proving the
     //     "read after a teammate's edit" moment was observed.
@@ -221,8 +221,8 @@ describe("instrumentation — END-TO-END WEDGE: invited edit → agent read fres
     const inputs = envelopes.map(toProjectionInput);
     const state = foldEvents(inputs, EMPTY_PROJECTION);
 
-    const ccs = [...state.perCallerCollection.values()].find(
-      (s) => s.callerRef === "apikey:agent-cli" && s.collectionSlug === "ops",
+    const ccs = [...state.perCallerCorpus.values()].find(
+      (s) => s.callerRef === "apikey:agent-cli" && s.corpusSlug === "ops",
     );
     expect(ccs?.versionCapturedAtRead).toEqual({ plan: 2 });
     expect(state.funnel.firstReadAfterEditAt).toBeDefined();
@@ -241,7 +241,7 @@ describe("instrumentation — failure of the event-stream append never fails the
     // What this test pins is the contract: recordRead RESOLVES (never
     // throws / rejects) for any well-formed input, so the read path
     // does not propagate cross-DO failures. The cross-DO call IS
-    // happening (verifyable in the "first readCollection emits..." test);
+    // happening (verifyable in the "first readCorpus emits..." test);
     // here we just assert the callable contract.
     const { store } = freshProject("nofail");
     await expect(
@@ -262,7 +262,7 @@ describe("instrumentation — events are typed and round-trip the encode/decode 
       clientVersion: 0,
       changedBy: "u",
     });
-    await store.createCollection({
+    await store.createCorpus({
       slug: colSlug("x"),
       name: "X",
       changedBy: "u",

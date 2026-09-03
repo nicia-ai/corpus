@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { showToast } from "@/components/ui/Toast";
 import { DocumentUploader } from "@/features/documents/DocumentUploader";
 import { asProjectId } from "@/ids";
-import { getCollectionList } from "@/lib/server/collections";
+import { getCorpusList } from "@/lib/server/corpora";
 import { getDocumentList } from "@/lib/server/documents";
 import { getFolderList } from "@/lib/server/folders";
 import type { ImportSummary } from "@/project-store";
@@ -13,12 +13,12 @@ export const Route = createFileRoute("/p/$projectId/import")({
   component: Import,
   loader: async ({ params }) => {
     const { projectId } = params;
-    const [collections, folders, documents] = await Promise.all([
-      getCollectionList({ data: { projectId } }),
+    const [corpora, folders, documents] = await Promise.all([
+      getCorpusList({ data: { projectId } }),
       getFolderList({ data: { projectId } }),
       getDocumentList({ data: { projectId } }),
     ]);
-    return { collections, folders, documents };
+    return { corpora, folders, documents };
   },
 });
 
@@ -33,7 +33,7 @@ function importSummary(s: ImportSummary): string {
 }
 
 function Import() {
-  const { collections, folders, documents } = Route.useLoaderData();
+  const { corpora, folders, documents } = Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
   const navigate = useNavigate();
 
@@ -45,7 +45,7 @@ function Import() {
       />
       <DocumentUploader
         projectId={projectId}
-        collections={collections}
+        corpora={corpora}
         folders={folders}
         documents={documents}
         onComplete={(r) => {

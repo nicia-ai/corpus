@@ -17,7 +17,7 @@ export const authedUserId = (c: ServerRequestContext): UserId =>
   asUserId(c.authSession?.user.id ?? "");
 
 // The actor id stamped on change events / version nodes (the `changedBy`
-// field across documents/collections/folders/team writes). projectMiddleware
+// field across documents/corpora/folders/team writes). projectMiddleware
 // guarantees `c.project`; the "" fallback mirrors authedUserId's dead-but-
 // type-correct defensiveness. A plain string, not a branded UserId — it
 // crosses the DO RPC boundary as the change-event author.

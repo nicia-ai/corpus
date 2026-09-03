@@ -11,7 +11,7 @@ import { apiKey } from "../src/control/schema/app";
 import { storeFor } from "../src/control/store-for";
 import {
   asCallerRef,
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
   asProjectId,
   type ConnectionId,
@@ -21,7 +21,7 @@ import { scopedExecutor } from "../src/scoped-executor";
 
 import {
   createConnection,
-  createCollectionFor,
+  createCorpusFor,
   createOrg,
   signUp,
 } from "./_helpers";
@@ -36,7 +36,7 @@ const TEST_LOCATION = {
 
 function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
   return {
-    listCollections: () =>
+    listCorpora: () =>
       Promise.resolve([
         { slug: "marketing", name: "Marketing" },
         { slug: "hr", name: "HR" },
@@ -65,7 +65,7 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
           path: "hr/salaries.md",
         },
       ]),
-    collectionMembers: (slug) =>
+    corpusMembers: (slug) =>
       Promise.resolve(
         slug === "marketing"
           ? ["brand-voice"]
@@ -73,7 +73,7 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
             ? ["handbook", "salaries"]
             : undefined,
       ),
-    readCollection: (slug) =>
+    readCorpus: (slug) =>
       slug === "marketing"
         ? Promise.resolve({
             found: true as const,
@@ -107,11 +107,11 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
         messageId: proposalId,
         documentSlug: asDocumentSlug("brand-voice"),
       }),
-    collectionOutline: (slug) =>
+    corpusOutline: (slug) =>
       slug === "marketing"
         ? Promise.resolve({
             found: true as const,
-            collection: "marketing",
+            corpus: "marketing",
             name: "Marketing",
             documents: [
               {
@@ -127,7 +127,7 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
                     kind: "path",
                     resolvedPath: "brand-voice.md",
                     documentSlug: "brand-voice",
-                    inCollection: true,
+                    inCorpus: true,
                   },
                   // out-of-scope target → must collapse
                   {
@@ -135,7 +135,7 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
                     kind: "path",
                     resolvedPath: "hr/handbook.md",
                     documentSlug: "handbook",
-                    inCollection: false,
+                    inCorpus: false,
                   },
                 ],
               },
@@ -145,23 +145,23 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
   };
 }
 
-describe("scopedExecutor confines reads to the bound Collection", () => {
-  it("listCollections → only the bound Collection (sibling Collections hidden)", async () => {
+describe("scopedExecutor confines reads to the bound Corpus", () => {
+  it("listCorpora → only the bound Corpus (sibling Corpora hidden)", async () => {
     const exec = scopedExecutor(
       stubExec(),
-      asCollectionSlug("marketing"),
+      asCorpusSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
       TEST_LOCATION,
     );
-    const cols = await exec.listCollections();
+    const cols = await exec.listCorpora();
     expect(cols.map((c) => c.slug)).toEqual(["marketing"]);
   });
 
-  it("listDocuments → only the member set (sibling-Collection docs invisible)", async () => {
+  it("listDocuments → only the member set (sibling-Corpus docs invisible)", async () => {
     const exec = scopedExecutor(
       stubExec(),
-      asCollectionSlug("marketing"),
+      asCorpusSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
       TEST_LOCATION,
@@ -170,18 +170,18 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
     expect(docs.map((d) => d.slug)).toEqual(["brand-voice"]);
   });
 
-  it("readCollection / collectionOutline of a non-bound slug → found:false", async () => {
+  it("readCorpus / corpusOutline of a non-bound slug → found:false", async () => {
     const exec = scopedExecutor(
       stubExec(),
-      asCollectionSlug("marketing"),
+      asCorpusSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
       TEST_LOCATION,
     );
-    expect(await exec.readCollection(asCollectionSlug("hr"))).toEqual({
+    expect(await exec.readCorpus(asCorpusSlug("hr"))).toEqual({
       found: false,
     });
-    expect(await exec.collectionOutline(asCollectionSlug("hr"))).toEqual({
+    expect(await exec.corpusOutline(asCorpusSlug("hr"))).toEqual({
       found: false,
     });
   });
@@ -189,7 +189,7 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
   it("getDocument → non-member returns undefined (not 'forbidden' — indistinguishable from unknown)", async () => {
     const exec = scopedExecutor(
       stubExec(),
-      asCollectionSlug("marketing"),
+      asCorpusSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
       TEST_LOCATION,
@@ -202,41 +202,39 @@ describe("scopedExecutor confines reads to the bound Collection", () => {
   it("out-of-scope link target collapses to null (no slug leak)", async () => {
     const exec = scopedExecutor(
       stubExec(),
-      asCollectionSlug("marketing"),
+      asCorpusSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
       TEST_LOCATION,
     );
-    const o = await exec.collectionOutline(asCollectionSlug("marketing"));
+    const o = await exec.corpusOutline(asCorpusSlug("marketing"));
     expect(o.found).toBe(true);
     if (!o.found) return;
     const links = o.documents[0]?.links ?? [];
     const inScope = links.find((l) => l.documentSlug === "brand-voice");
-    expect(inScope?.inCollection).toBe(true);
+    expect(inScope?.inCorpus).toBe(true);
     const outOfScope = links.find((l) => l.target === "../hr/handbook.md");
     expect(outOfScope).toEqual({
       target: "../hr/handbook.md",
       kind: "path",
       resolvedPath: null,
       documentSlug: null,
-      inCollection: false,
+      inCorpus: false,
     });
   });
 
-  it("scopedExecutor.collectionMembers serves only the bound slug", async () => {
+  it("scopedExecutor.corpusMembers serves only the bound slug", async () => {
     const exec = scopedExecutor(
       stubExec(),
-      asCollectionSlug("marketing"),
+      asCorpusSlug("marketing"),
       ["brand-voice"],
       asCallerRef("apikey:test"),
       TEST_LOCATION,
     );
-    expect(await exec.collectionMembers(asCollectionSlug("marketing"))).toEqual(
-      ["brand-voice"],
-    );
-    expect(
-      await exec.collectionMembers(asCollectionSlug("hr")),
-    ).toBeUndefined();
+    expect(await exec.corpusMembers(asCorpusSlug("marketing"))).toEqual([
+      "brand-voice",
+    ]);
+    expect(await exec.corpusMembers(asCorpusSlug("hr"))).toBeUndefined();
   });
 });
 
@@ -304,7 +302,7 @@ function writeStub(calls: string[]): ReturnType<typeof stubExec> {
 const pinnedExec = (calls: string[]) =>
   scopedExecutor(
     writeStub(calls),
-    asCollectionSlug("marketing"),
+    asCorpusSlug("marketing"),
     ["brand-voice"],
     PINNED,
     TEST_LOCATION,
@@ -383,13 +381,13 @@ describe("scopedExecutor pins caller identity on every write", () => {
   it("suggestCreate: a caller-supplied originCollectionSlug is overwritten", async () => {
     const calls: string[] = [];
     // Scope pinning, not identity pinning: an applied create-proposal must
-    // attach to the bound Collection, so whatever the agent asks for here is
+    // attach to the bound Corpus, so whatever the agent asks for here is
     // discarded. Without this, an agent could seed a document into a
-    // Collection its credential cannot even read.
+    // Corpus its credential cannot even read.
     await pinnedExec(calls).suggestCreate(PINNED, {
       slug: asDocumentSlug("new-doc"),
       proposedMarkdown: "# New",
-      originCollectionSlug: asCollectionSlug("hr"),
+      originCollectionSlug: asCorpusSlug("hr"),
     });
     expect(calls).toEqual([`suggestCreate:${PINNED}:marketing`]);
   });
@@ -466,13 +464,13 @@ describe("export_bundle absent from the MCP surface", () => {
   });
 });
 
-// — respondMcp preflight: a missing bound Collection is a transport
-//   403, not a JSON-RPC 200 not-found that could read as "empty Collection."
+// — respondMcp preflight: a missing bound Corpus is a transport
+//   403, not a JSON-RPC 200 not-found that could read as "empty Corpus."
 
-describe("respondMcp bound-Collection preflight", () => {
-  it("stale/bogus bound collectionSlug → HTTP 403", async () => {
-    // Mint a key whose Connection points at a collectionSlug that was
-    // NEVER created in the DO — the reachable case for v4 (Collection
+describe("respondMcp bound-Corpus preflight", () => {
+  it("stale/bogus bound corpusSlug → HTTP 403", async () => {
+    // Mint a key whose Connection points at a corpusSlug that was
+    // NEVER created in the DO — the reachable case for v4 (Corpus
     // delete is unreachable today; see Locked decisions).
     const ownerUserId = await signUp("preflight");
     const db = connectControlDb(env.DB);
@@ -480,9 +478,9 @@ describe("respondMcp bound-Collection preflight", () => {
     const conn = await createConnection({
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: "never-created",
+      corpusSlug: "never-created",
     });
-    // Deliberately do NOT call createCollectionFor.
+    // Deliberately do NOT call createCorpusFor.
     const token = generateApiKeyToken();
     await db.insert(apiKey).values({
       userId: ownerUserId,
@@ -528,28 +526,28 @@ describe("north-star: bound credential confinement (server side)", () => {
         changedBy: "seed",
       });
     }
-    await createCollectionFor(org.projectId, asCollectionSlug("marketing"));
-    await createCollectionFor(org.projectId, asCollectionSlug("hr"));
+    await createCorpusFor(org.projectId, asCorpusSlug("marketing"));
+    await createCorpusFor(org.projectId, asCorpusSlug("hr"));
     await store.attachDocument(
-      asCollectionSlug("marketing"),
+      asCorpusSlug("marketing"),
       asDocumentSlug("brand-voice"),
       1,
       "seed",
     );
     await store.attachDocument(
-      asCollectionSlug("marketing"),
+      asCorpusSlug("marketing"),
       asDocumentSlug("messaging"),
       2,
       "seed",
     );
     await store.attachDocument(
-      asCollectionSlug("hr"),
+      asCorpusSlug("hr"),
       asDocumentSlug("employee-handbook"),
       1,
       "seed",
     );
     await store.attachDocument(
-      asCollectionSlug("hr"),
+      asCorpusSlug("hr"),
       asDocumentSlug("salaries"),
       2,
       "seed",
@@ -559,13 +557,13 @@ describe("north-star: bound credential confinement (server side)", () => {
     const marketingConn = await createConnection({
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: "marketing",
+      corpusSlug: "marketing",
       isDefaultForCollection: true,
     });
     const hrConn = await createConnection({
       organizationId: org.organizationId,
       projectId: org.projectId,
-      collectionSlug: "hr",
+      corpusSlug: "hr",
       isDefaultForCollection: true,
     });
     const mktToken = await insertKey(
@@ -622,7 +620,7 @@ async function mintBoundKey(name: string) {
     organizationId: org.organizationId,
     projectId: org.projectId,
   });
-  await createCollectionFor(org.projectId, conn.collectionSlug);
+  await createCorpusFor(org.projectId, conn.corpusSlug);
   const token = generateApiKeyToken();
   await db.insert(apiKey).values({
     userId: ownerUserId,

@@ -11,8 +11,8 @@ import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const ws = () => freshStore("col");
 
-describe("collection assembly (data plane)", () => {
-  it("assembles a collection in position order with provenance + size", async () => {
+describe("corpus assembly (data plane)", () => {
+  it("assembles a corpus in position order with provenance + size", async () => {
     const w = ws();
     for (const s of ["alpha", "bravo", "charlie"]) {
       await w.saveDocument({
@@ -22,7 +22,7 @@ describe("collection assembly (data plane)", () => {
         changedBy: "u",
       });
     }
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("support"),
       name: "Support Agent",
       changedBy: "u",
@@ -32,7 +32,7 @@ describe("collection assembly (data plane)", () => {
     await w.attachDocument(colSlug("support"), docSlug("alpha"), 1, "u");
     await w.attachDocument(colSlug("support"), docSlug("charlie"), 3, "u");
 
-    const r = await w.readCollection(colSlug("support"));
+    const r = await w.readCorpus(colSlug("support"));
     expect(r.found).toBe(true);
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug)).toEqual([
@@ -48,30 +48,30 @@ describe("collection assembly (data plane)", () => {
     expect(ia).toBeGreaterThan(-1);
     expect(ia).toBeLessThan(ib);
     expect(ib).toBeLessThan(ic);
-    expect(r.corpus).toContain("# Collection: support");
+    expect(r.corpus).toContain("# Corpus: support");
   });
 
-  it("unknown collection → found:false; empty collection → sentinel", async () => {
+  it("unknown corpus → found:false; empty corpus → sentinel", async () => {
     const w = ws();
-    expect(await w.readCollection(colSlug("nope"))).toEqual({ found: false });
-    await w.createCollection({
+    expect(await w.readCorpus(colSlug("nope"))).toEqual({ found: false });
+    await w.createCorpus({
       slug: colSlug("empty"),
       name: "Empty",
       changedBy: "u",
     });
-    const r = await w.readCollection(colSlug("empty"));
+    const r = await w.readCorpus(colSlug("empty"));
     expect(r.found).toBe(true);
     if (r.found) {
       expect(r.documents).toEqual([]);
-      expect(r.corpus).toContain("(no documents in this collection)");
+      expect(r.corpus).toContain("(no documents in this corpus)");
     }
   });
 });
 
-describe("collection mutations append to the change-event ledger (P1)", () => {
-  it("createCollection writes a collection.created event", async () => {
+describe("corpus mutations append to the change-event ledger (P1)", () => {
+  it("createCorpus writes a corpus.created event", async () => {
     const w = ws();
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("alerts"),
       name: "Alerts",
       changedBy: "alice",
@@ -84,15 +84,15 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
     });
   });
 
-  it("idempotent createCollection emits no second event", async () => {
+  it("idempotent createCorpus emits no second event", async () => {
     const w = ws();
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("dup"),
       name: "Dup",
       changedBy: "u",
     });
     const afterFirst = await w.lastEventId();
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("dup"),
       name: "Dup",
       changedBy: "u",
@@ -100,7 +100,7 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
     expect(await w.lastEventId()).toBe(afterFirst);
   });
 
-  it("attach emits collection.attached, re-position emits collection.reordered", async () => {
+  it("attach emits corpus.attached, re-position emits corpus.reordered", async () => {
     const w = ws();
     await w.saveDocument({
       slug: docSlug("runbook"),
@@ -108,7 +108,7 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
       clientVersion: 0,
       changedBy: "u",
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "u",
@@ -124,13 +124,13 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
       changedBy: "bob",
     });
 
-    // Same (collection, document) edge again → reorder, not a second attach.
+    // Same (corpus, document) edge again → reorder, not a second attach.
     await w.attachDocument(colSlug("ops"), docSlug("runbook"), 5, "bob");
     const [reordered] = await w.recentChanges(1);
     expect(reordered?.eventType).toBe("collection.reordered");
   });
 
-  it("detach removes the document and emits collection.detached", async () => {
+  it("detach removes the document and emits corpus.detached", async () => {
     const w = ws();
     for (const s of ["a", "b"]) {
       await w.saveDocument({
@@ -140,7 +140,7 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
         changedBy: "u",
       });
     }
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "u",
@@ -157,14 +157,14 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
       documentSlug: "a",
       changedBy: "bob",
     });
-    const r = await w.readCollection(colSlug("ops"));
-    if (!r.found) throw new Error("collection vanished");
+    const r = await w.readCorpus(colSlug("ops"));
+    if (!r.found) throw new Error("corpus vanished");
     expect(r.documents.map((d) => d.slug)).toEqual(["b"]);
   });
 
   it("detach of an unattached document is a no-op", async () => {
     const w = ws();
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "u",
@@ -176,7 +176,7 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
     expect(await w.lastEventId()).toBe(before);
   });
 
-  it("reorder sets a new order and emits collection.reordered", async () => {
+  it("reorder sets a new order and emits corpus.reordered", async () => {
     const w = ws();
     for (const s of ["a", "b", "c"]) {
       await w.saveDocument({
@@ -185,7 +185,7 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
         clientVersion: 0,
         changedBy: "u",
       });
-      await w.createCollection({
+      await w.createCorpus({
         slug: colSlug("ops"),
         name: "Ops",
         changedBy: "u",
@@ -200,7 +200,7 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
 
     expect(
       (
-        await w.reorderCollectionDocuments(
+        await w.reorderCorpusDocuments(
           colSlug("ops"),
           [docSlug("c"), docSlug("a"), docSlug("b")],
           "bob",
@@ -209,12 +209,12 @@ describe("collection mutations append to the change-event ledger (P1)", () => {
     ).toBe(true);
     const [evt] = await w.recentChanges(1);
     expect(evt?.eventType).toBe("collection.reordered");
-    const r = await w.readCollection(colSlug("ops"));
-    if (!r.found) throw new Error("collection vanished");
+    const r = await w.readCorpus(colSlug("ops"));
+    if (!r.found) throw new Error("corpus vanished");
     expect(r.documents.map((d) => d.slug)).toEqual(["c", "a", "b"]);
   });
 
-  it("attach to a missing collection emits nothing", async () => {
+  it("attach to a missing corpus emits nothing", async () => {
     const w = ws();
     expect(
       (await w.attachDocument(colSlug("ghost"), docSlug("nope"), 0, "u")).ok,
@@ -236,12 +236,12 @@ describe("MCP JSON-RPC dispatcher", () => {
     proposalResult: () => Promise.resolve({ found: false as const }),
     replyToProposal: () =>
       Promise.resolve({ ok: false as const, reason: "missing" as const }),
-    listCollections: async () => [{ slug: "c1", name: "C1" }],
+    listCorpora: async () => [{ slug: "c1", name: "C1" }],
     listDocuments: async () => [
       { slug: "d1", title: "D1", docVersion: 1, size: 3, path: "docs/d1.md" },
       { slug: "d2", title: "D2", docVersion: 1, size: 5, path: "docs/d2.md" },
     ],
-    readCollection: async (s) => {
+    readCorpus: async (s) => {
       if (s === "c1")
         return {
           found: true,
@@ -256,7 +256,7 @@ describe("MCP JSON-RPC dispatcher", () => {
         };
       return { found: false };
     },
-    collectionMembers: async (s) =>
+    corpusMembers: async (s) =>
       s === "c1" || s === "big" ? ["d1"] : undefined,
     getDocument: async (s) => {
       if (s === "d1")
@@ -266,11 +266,11 @@ describe("MCP JSON-RPC dispatcher", () => {
       return undefined;
     },
     verifyHistory: async () => ({ ok: true }),
-    collectionOutline: async (s) =>
+    corpusOutline: async (s) =>
       s === "c1"
         ? {
             found: true,
-            collection: "c1",
+            corpus: "c1",
             name: "C1",
             documents: [
               {
@@ -367,13 +367,13 @@ describe("MCP JSON-RPC dispatcher", () => {
     expect(r.result?.content[0]?.text).toBe("CORPUS");
   });
 
-  it("read_collection defaults to the bound collection", async () => {
+  it("read_collection defaults to the bound corpus", async () => {
     const r = await callTool("read_collection", {});
     expect(r.result?.content[0]?.text).toBe("CORPUS");
   });
 
   it("read_collection always assembles and ships the full corpus (no MCP-side budget enforcement)", async () => {
-    // The per-collection alwaysIncludeBudgetTokens is authoring-side
+    // The per-corpus alwaysIncludeBudgetTokens is authoring-side
     // guidance only; MCP never substitutes a directive — owners get the
     // assembled corpus they configured, oversized or not.
     const r = await callTool("read_collection", { collectionSlug: "big" });
@@ -394,7 +394,7 @@ describe("MCP JSON-RPC dispatcher", () => {
       clientVersion: 0,
       changedBy: "u",
     });
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("sales"),
       name: "Sales",
       changedBy: "u",
@@ -408,13 +408,13 @@ describe("MCP JSON-RPC dispatcher", () => {
       "reference",
     );
 
-    const r = await w.readCollection(colSlug("sales"));
+    const r = await w.readCorpus(colSlug("sales"));
     expect(r.found).toBe(true);
     if (!r.found) return;
     expect(r.documents.map((d) => d.slug)).toEqual(["brand"]);
     expect(r.corpus).toContain("reference document");
 
-    const outline = await w.collectionOutline(colSlug("sales"));
+    const outline = await w.corpusOutline(colSlug("sales"));
     expect(outline.found).toBe(true);
     if (!outline.found) return;
     expect(outline.documents.map((d) => [d.slug, d.delivery])).toEqual([
@@ -423,8 +423,8 @@ describe("MCP JSON-RPC dispatcher", () => {
     ]);
   });
 
-  // C3: list_documents/read_document take no collectionSlug arg — the
-  // bound Collection is the scope and the scopedExecutor wrapper does
+  // C3: list_documents/read_document take no corpusSlug arg — the
+  // bound Corpus is the scope and the scopedExecutor wrapper does
   // the filtering. handleMcp simply delegates to the executor, so its
   // job here is to pass through the executor's data unchanged.
   it("list_documents delegates to the executor unchanged", async () => {
@@ -458,33 +458,33 @@ describe("MCP JSON-RPC dispatcher", () => {
   });
 });
 
-// The per-collection authoring-side threshold (the BudgetMeter in the
+// The per-corpus authoring-side threshold (the BudgetMeter in the
 // edit pane compares the assembled `delivery=core` set against it). The
-// Zod bound lives on the Collection node schema (`src/graph.ts`); the
-// server-fn input validator (`src/lib/server/collections.ts`) and the
+// Zod bound lives on the Corpus node schema (`src/graph.ts`); the
+// server-fn input validator (`src/lib/server/corpora.ts`) and the
 // bundle schema (`src/store/domain/bundle.ts`) declare the same
 // `.nonnegative().max(MAX_ALWAYS_INCLUDE_BUDGET_TOKENS)` cap, so the
 // DO never sees an out-of-range value through any normal entry point.
 // These tests pin the audit-trail / round-trip behaviour the bound
 // supports.
 describe("alwaysIncludeBudgetTokens — audit trail + round-trip", () => {
-  it("createCollection without a budget seeds the default value", async () => {
+  it("createCorpus without a budget seeds the default value", async () => {
     const w = freshStore("budget");
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("default"),
       name: "Default",
       changedBy: "u",
     });
-    const det = await w.collectionStructure(colSlug("default"));
-    if (!det.found) throw new Error("collection vanished");
+    const det = await w.corpusStructure(colSlug("default"));
+    if (!det.found) throw new Error("corpus vanished");
     expect(det.alwaysIncludeBudgetTokens).toBe(
       DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS,
     );
   });
 
-  it("updateCollection with a new budget persists it and emits before/after on the event", async () => {
+  it("updateCorpus with a new budget persists it and emits before/after on the event", async () => {
     const w = freshStore("budget");
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("growable"),
       name: "Growable",
       changedBy: "u",
@@ -492,7 +492,7 @@ describe("alwaysIncludeBudgetTokens — audit trail + round-trip", () => {
 
     expect(
       (
-        await w.updateCollection({
+        await w.updateCorpus({
           slug: colSlug("growable"),
           name: "Growable",
           alwaysIncludeBudgetTokens: 32_000,
@@ -501,8 +501,8 @@ describe("alwaysIncludeBudgetTokens — audit trail + round-trip", () => {
       ).ok,
     ).toBe(true);
 
-    const det = await w.collectionStructure(colSlug("growable"));
-    if (!det.found) throw new Error("collection vanished");
+    const det = await w.corpusStructure(colSlug("growable"));
+    if (!det.found) throw new Error("corpus vanished");
     expect(det.alwaysIncludeBudgetTokens).toBe(32_000);
 
     const [latest] = await w.recentChanges(1);
@@ -519,27 +519,27 @@ describe("alwaysIncludeBudgetTokens — audit trail + round-trip", () => {
     expect(after.alwaysIncludeBudgetTokens).toBe(32_000);
   });
 
-  it("updateCollection without an explicit budget preserves the existing one", async () => {
+  it("updateCorpus without an explicit budget preserves the existing one", async () => {
     const w = freshStore("budget");
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("preserve"),
       name: "Preserve",
       alwaysIncludeBudgetTokens: 50_000,
       changedBy: "u",
     });
-    await w.updateCollection({
+    await w.updateCorpus({
       slug: colSlug("preserve"),
       name: "Preserved",
       changedBy: "u",
     });
-    const det = await w.collectionStructure(colSlug("preserve"));
-    if (!det.found) throw new Error("collection vanished");
+    const det = await w.corpusStructure(colSlug("preserve"));
+    if (!det.found) throw new Error("corpus vanished");
     expect(det.alwaysIncludeBudgetTokens).toBe(50_000);
   });
 
   it("at-the-cap value round-trips through the bundle unchanged", async () => {
     const w = freshStore("budget");
-    await w.createCollection({
+    await w.createCorpus({
       slug: colSlug("max"),
       name: "Max",
       alwaysIncludeBudgetTokens: MAX_ALWAYS_INCLUDE_BUDGET_TOKENS,

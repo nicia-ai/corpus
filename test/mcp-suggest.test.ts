@@ -15,10 +15,10 @@ import { colSlug, docSlug, freshStore } from "./_helpers";
 
 // suggest_edit is the first MCP write tool. These tests drive it the way
 // respondMcp does in production (api.ts): a scopedExecutor bound to one
-// Collection, with that Collection's members + a per-request callerRef,
+// Corpus, with that Corpus's members + a per-request callerRef,
 // fed JSON-RPC tools/call envelopes through handleMcp. The load-bearing
 // assertion is the membership gate — an agent cannot write a suggestion
-// against a document outside its bound Collection.
+// against a document outside its bound Corpus.
 
 const DOC_A = "alpha one\n\nbeta two";
 const DOC_B = "gamma one\n\ndelta two";
@@ -33,7 +33,7 @@ type RpcResponse = Readonly<{
   error?: { code: number; message: string; data?: { currentVersion?: number } };
 }>;
 
-// Store with two Collections (A→doc-a, B→doc-b); the returned executor is
+// Store with two Corpora (A→doc-a, B→doc-b); the returned executor is
 // bound to A only. B exists solely as the cross-tenant target.
 async function setup(): Promise<{
   store: ReturnType<typeof freshStore>;
@@ -46,7 +46,7 @@ async function setup(): Promise<{
     clientVersion: 0,
     changedBy: "alice",
   });
-  await store.createCollection({
+  await store.createCorpus({
     slug: colSlug("col-a"),
     name: "A",
     changedBy: "alice",
@@ -59,14 +59,14 @@ async function setup(): Promise<{
     clientVersion: 0,
     changedBy: "bob",
   });
-  await store.createCollection({
+  await store.createCorpus({
     slug: colSlug("col-b"),
     name: "B",
     changedBy: "bob",
   });
   await store.attachDocument(colSlug("col-b"), docSlug("doc-b"), 1, "bob");
 
-  const members = (await store.collectionMembers(colSlug("col-a"))) ?? [];
+  const members = (await store.corpusMembers(colSlug("col-a"))) ?? [];
   const exec = scopedExecutor(
     store,
     colSlug("col-a"),
@@ -110,7 +110,7 @@ function expectedReviewUrl(proposalId: number, slug?: string): string {
 }
 
 describe("suggest_edit MCP tool (DO + D1 integration)", () => {
-  it("agent proposes an edit in its bound Collection → suggestion stored, authored by the callerRef", async () => {
+  it("agent proposes an edit in its bound Corpus → suggestion stored, authored by the callerRef", async () => {
     const { store, exec } = await setup();
     const res = await call(exec, {
       slug: "doc-a",
@@ -187,7 +187,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     const other = scopedExecutor(
       store,
       colSlug("col-a"),
-      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      (await store.corpusMembers(colSlug("col-a"))) ?? [],
       asCallerRef("apikey:agent-b"),
       TEST_LOCATION,
     );
@@ -205,7 +205,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
 
   it("keeps proposals private between OAuth Connections owned by the same user", async () => {
     const { store } = await setup();
-    const members = (await store.collectionMembers(colSlug("col-a"))) ?? [];
+    const members = (await store.corpusMembers(colSlug("col-a"))) ?? [];
     const userId = asUserId("same-user");
     const first = scopedExecutor(
       store,
@@ -287,7 +287,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     expect(
       await store.addSuggestionMessage({
         suggestionId: proposalId,
-        body: "Please narrow this to the collection's terminology.",
+        body: "Please narrow this to the corpus's terminology.",
         createdBy: "human-user-id-should-not-leak",
         channel: "web",
       }),
@@ -298,7 +298,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     );
     expect(reviewed.messages).toEqual([
       expect.objectContaining({
-        body: "Please narrow this to the collection's terminology.",
+        body: "Please narrow this to the corpus's terminology.",
         role: "reviewer",
         channel: "web",
       }),
@@ -328,7 +328,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     const other = scopedExecutor(
       store,
       colSlug("col-a"),
-      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      (await store.corpusMembers(colSlug("col-a"))) ?? [],
       asCallerRef("apikey:agent-b"),
       TEST_LOCATION,
     );
@@ -397,7 +397,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     await store.rejectSuggestion({
       suggestionId: rejectedId,
       rejectedBy: "alice",
-      reviewerNote: "Not aligned with the collection.",
+      reviewerNote: "Not aligned with the corpus.",
     });
     const staleHunk = (await store.listSuggestions(docSlug("doc-a")))
       .find((suggestion) => suggestion.id === staleId)
@@ -421,7 +421,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
       ),
     ).toMatchObject({
       outcome: "rejected",
-      reviewerNote: "Not aligned with the collection.",
+      reviewerNote: "Not aligned with the corpus.",
     });
     expect(
       resultJson(
@@ -485,7 +485,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     const other = scopedExecutor(
       store,
       colSlug("col-a"),
-      (await store.collectionMembers(colSlug("col-a"))) ?? [],
+      (await store.corpusMembers(colSlug("col-a"))) ?? [],
       asCallerRef("apikey:agent-b"),
       TEST_LOCATION,
     );
@@ -538,7 +538,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     expect(Date.now() - startedAt).toBeLessThan(2500);
   });
 
-  it("CRITICAL: an agent bound to Collection A cannot suggest against a doc in Collection B", async () => {
+  it("CRITICAL: an agent bound to Corpus A cannot suggest against a doc in Corpus B", async () => {
     const { store, exec } = await setup();
     const res = await call(exec, {
       slug: "doc-b",
@@ -662,7 +662,7 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     expect(proposals[0]?.path).toBe("wiki/answer-x.md");
   });
 
-  it("CRITICAL: baseDocVersion 0 against a slug that exists OUTSIDE the bound Collection writes nothing", async () => {
+  it("CRITICAL: baseDocVersion 0 against a slug that exists OUTSIDE the bound Corpus writes nothing", async () => {
     const { store, exec } = await setup();
     const res = await call(exec, {
       slug: "doc-b",

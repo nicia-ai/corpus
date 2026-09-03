@@ -20,5 +20,11 @@
     "declaration": true,
     "sourceMap": false
   },
-  "include": ["config.ts", "core.ts", "corpus.ts"]
+  "include": [
+    "config.ts",
+    "config-path.ts",
+    "core.ts",
+    "corpus.ts",
+    "mcp-add.ts"
+  ]
 }

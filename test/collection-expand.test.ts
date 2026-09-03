@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  expandCollection,
-  expandCollectionDocuments,
+  expandCorpus,
+  expandCorpusDocuments,
   type ExpandEntry,
   type FolderTree,
 } from "../src/store/domain/collection-expand";
@@ -40,14 +40,14 @@ const tree: FolderTree = new Map([
   ],
 ]);
 
-describe("expandCollection (the single folder→collection resolver)", () => {
+describe("expandCorpus (the single folder→corpus resolver)", () => {
   it("merges direct + folder entries by the shared position space", () => {
     const entries: ExpandEntry[] = [
       { type: "document", slug: "top", position: 1 },
       { type: "folder", slug: "guide", position: 2 },
       { type: "document", slug: "bottom", position: 3 },
     ];
-    expect(expandCollection(entries, tree)).toEqual([
+    expect(expandCorpus(entries, tree)).toEqual([
       "top",
       // folder: own docs by filename, then child folders by position
       "guide-alpha",
@@ -62,7 +62,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
     const entries: ExpandEntry[] = [
       { type: "folder", slug: "guide", position: 1 },
     ];
-    expect(expandCollection(entries, tree)).toEqual([
+    expect(expandCorpus(entries, tree)).toEqual([
       "guide-alpha",
       "guide-zeta",
       "intro-readme",
@@ -75,7 +75,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
       { type: "document", slug: "api-auth", position: 1 },
       { type: "folder", slug: "guide", position: 2 },
     ];
-    const out = expandCollection(entries, tree);
+    const out = expandCorpus(entries, tree);
     expect(out.filter((s) => s === "api-auth")).toEqual(["api-auth"]);
     expect(out[0]).toBe("api-auth");
   });
@@ -85,7 +85,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
       { type: "folder", slug: "ghost", position: 1 },
       { type: "document", slug: "only", position: 2 },
     ];
-    expect(expandCollection(entries, tree)).toEqual(["only"]);
+    expect(expandCorpus(entries, tree)).toEqual(["only"]);
   });
 
   it("is deterministic and order-insensitive in the input array", () => {
@@ -97,7 +97,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
       { type: "document", slug: "top", position: 1 },
       { type: "folder", slug: "guide", position: 2 },
     ];
-    expect(expandCollection(a, tree)).toEqual(expandCollection(b, tree));
+    expect(expandCorpus(a, tree)).toEqual(expandCorpus(b, tree));
   });
 
   it("is cycle-guarded (a corrupted self-parent folder terminates)", () => {
@@ -112,7 +112,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
       ],
     ]);
     expect(
-      expandCollection([{ type: "folder", slug: "loop", position: 1 }], cyclic),
+      expandCorpus([{ type: "folder", slug: "loop", position: 1 }], cyclic),
     ).toEqual(["d"]);
   });
 
@@ -121,7 +121,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
       { type: "document", slug: "b", position: 2 },
       { type: "document", slug: "a", position: 1 },
     ];
-    expect(expandCollection(entries, new Map())).toEqual(["a", "b"]);
+    expect(expandCorpus(entries, new Map())).toEqual(["a", "b"]);
   });
 
   it("a direct membership's delivery is authoritative over a folder's", () => {
@@ -138,7 +138,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
       },
     ];
     expect(
-      expandCollectionDocuments(directReference, tree).find(
+      expandCorpusDocuments(directReference, tree).find(
         (d) => d.slug === "api-auth",
       ),
     ).toEqual({ slug: "api-auth", delivery: "reference" });
@@ -150,7 +150,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
       { type: "folder", slug: "guide", position: 2, delivery: "reference" },
     ];
     expect(
-      expandCollectionDocuments(directCore, tree).find(
+      expandCorpusDocuments(directCore, tree).find(
         (d) => d.slug === "api-auth",
       ),
     ).toEqual({ slug: "api-auth", delivery: "core" });
@@ -169,9 +169,7 @@ describe("expandCollection (the single folder→collection resolver)", () => {
       { type: "folder", slug: "guide", position: 2, delivery: "core" },
     ];
     expect(
-      expandCollectionDocuments(entries, tree).find(
-        (d) => d.slug === "api-auth",
-      ),
+      expandCorpusDocuments(entries, tree).find((d) => d.slug === "api-auth"),
     ).toEqual({ slug: "api-auth", delivery: "core" });
   });
 });

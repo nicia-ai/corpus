@@ -1,6 +1,6 @@
 import { estimateTokens } from "./util";
 
-export type CollectionDocument = Readonly<{
+export type CorpusDocument = Readonly<{
   slug: string;
   title: string;
   docVersion: number;
@@ -8,27 +8,27 @@ export type CollectionDocument = Readonly<{
   markdown: string;
 }>;
 
-export type CollectionManifestEntry = Readonly<{
+export type CorpusManifestEntry = Readonly<{
   slug: string;
   docVersion: number;
   updatedAt: string;
   size: number;
 }>;
 
-export type AssembledCollection = Readonly<{
+export type AssembledCorpus = Readonly<{
   corpus: string;
-  documents: readonly CollectionManifestEntry[];
+  documents: readonly CorpusManifestEntry[];
 }>;
 
-// Position-ordered markdown corpus for an agent collection plus a
+// Position-ordered markdown corpus for an agent corpus plus a
 // provenance manifest. Pure: the caller resolves the graph and supplies
 // docs already in attach order — this only renders, so it is
 // unit-testable without a DO.
-export function assembleCollection(
-  collectionSlug: string,
-  ordered: readonly CollectionDocument[],
-): AssembledCollection {
-  const manifest: CollectionManifestEntry[] = ordered.map((d) => ({
+export function assembleCorpus(
+  corpusSlug: string,
+  ordered: readonly CorpusDocument[],
+): AssembledCorpus {
+  const manifest: CorpusManifestEntry[] = ordered.map((d) => ({
     slug: d.slug,
     docVersion: d.docVersion,
     updatedAt: d.updatedAt,
@@ -38,12 +38,12 @@ export function assembleCollection(
   if (ordered.length === 0) {
     return {
       documents: [],
-      corpus: `# Collection: ${collectionSlug}\n(no documents in this collection)\n`,
+      corpus: `# Corpus: ${corpusSlug}\n(no documents in this corpus)\n`,
     };
   }
 
   const header = [
-    `# Collection: ${collectionSlug}`,
+    `# Corpus: ${corpusSlug}`,
     `Generated: ${new Date().toISOString()}`,
     "Documents:",
     ...manifest.map(

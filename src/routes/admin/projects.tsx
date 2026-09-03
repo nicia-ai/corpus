@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { RelativeTime } from "@/components/ui/DateTime";
 import { EmptyState, listSurface } from "@/components/ui/Surface";
-import { adminListProjects } from "@/lib/server/admin";
+import { adminListProjects, type AdminProjectRow } from "@/lib/server/admin";
 
 export const Route = createFileRoute("/admin/projects")({
   component: AdminProjectsPage,
@@ -36,16 +36,14 @@ function AdminProjectsPage(): React.ReactElement {
                 <th className="px-4 py-2 font-medium">Organization</th>
                 <th className="px-4 py-2 font-medium">Status</th>
                 <th className="px-4 py-2 text-right font-medium">Docs</th>
-                <th className="px-4 py-2 text-right font-medium">
-                  Collections
-                </th>
+                <th className="px-4 py-2 text-right font-medium">Corpora</th>
                 <th className="px-4 py-2 text-right font-medium">Versions</th>
                 <th className="px-4 py-2 text-right font-medium">Storage</th>
                 <th className="px-4 py-2 font-medium">Created</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {projects.map((p) => (
+              {projects.map((p: AdminProjectRow) => (
                 <tr key={p.id}>
                   <td className="px-4 py-2">
                     <div className="font-medium text-slate-900">{p.name}</div>
@@ -56,7 +54,7 @@ function AdminProjectsPage(): React.ReactElement {
                   </td>
                   <td className="px-4 py-2 text-slate-600">{p.status}</td>
                   <td className={num}>{p.documents}</td>
-                  <td className={num}>{p.collections}</td>
+                  <td className={num}>{p.corpora}</td>
                   <td className={num}>{p.versions}</td>
                   <td className={num}>{fmtBytes(p.markdownBytes)}</td>
                   <td className="px-4 py-2 text-slate-600">

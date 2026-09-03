@@ -1,12 +1,12 @@
 ---
 title: Documents
-description: Writing and editing the markdown documents that make up your canonical collection — slugs, frontmatter, the version ledger, and conflict resolution.
+description: Writing and editing the markdown documents that make up your canonical corpus — slugs, frontmatter, the version ledger, and conflict resolution.
 sidebar:
   order: 3
 ---
 
 A **document** is one markdown file. It is the atom of your canonical
-collection: written once, versioned forever, shared across as many collections
+corpus: written once, versioned forever, shared across as many corpora
 as you like.
 
 ## Creating a document
@@ -90,11 +90,11 @@ rule applies within a folder.
 
 ## What an agent sees
 
-When an agent reads a document (directly, or as part of a collection) it
+When an agent reads a document (directly, or as part of a corpus) it
 gets the **exact markdown** you wrote, at the current version. Write for
-the agent: clear headings, explicit rules, no implicit collection. See
+the agent: clear headings, explicit rules, no implicit corpus. See
 [Recipes](./recipes.md) for patterns.
 
 Documents are **read-only over MCP**. Agents consume them; only people
 (in the web UI) change them. That asymmetry is deliberate — your
-canonical collection can't be silently rewritten by an agent.
+canonical corpus can't be silently rewritten by an agent.

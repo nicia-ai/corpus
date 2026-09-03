@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { connectControlDb } from "../src/control/db";
 import {
+  autoBindPendingConnect,
   handshakeId,
   PENDING_CONNECT_TTL_MS,
   putSelection,
@@ -148,5 +149,41 @@ describe("C2 — oauth connection-selection seam", () => {
     await writePendingConnect(db, userId, a);
     await writePendingConnect(db, userId, b);
     expect(await readPendingConnect(db, userId)).toBe(b);
+  });
+
+  it("autoBindPendingConnect stamps selection when resolve accepts", async () => {
+    const db = connectControlDb(env.DB);
+    const { userId, connectionId } = await conn("auto");
+    const q = authQuery("auto-cc", "auto-state");
+    await writePendingConnect(db, userId, connectionId);
+    const bound = await autoBindPendingConnect(db, {
+      query: q,
+      userId,
+      resolve: async (id) => id === connectionId,
+    });
+    expect(bound).toBe(connectionId);
+    expect(await readSelection(db, q, userId)).toBe(connectionId);
+  });
+
+  it("autoBindPendingConnect skips when resolve rejects or pending missing", async () => {
+    const db = connectControlDb(env.DB);
+    const { userId, connectionId } = await conn("auto-no");
+    const q = authQuery("auto-no-cc", "auto-no-state");
+    expect(
+      await autoBindPendingConnect(db, {
+        query: q,
+        userId,
+        resolve: async () => true,
+      }),
+    ).toBeUndefined();
+    await writePendingConnect(db, userId, connectionId);
+    expect(
+      await autoBindPendingConnect(db, {
+        query: q,
+        userId,
+        resolve: async () => false,
+      }),
+    ).toBeUndefined();
+    expect(await readSelection(db, q, userId)).toBeUndefined();
   });
 });

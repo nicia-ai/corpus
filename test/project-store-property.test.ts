@@ -107,7 +107,7 @@ async function seed(store: ReturnType<typeof freshStore>): Promise<void> {
       changedBy: "prop",
     });
   }
-  await store.createCollection({
+  await store.createCorpus({
     slug: COLLECTION,
     name: "Team",
     changedBy: "prop",
@@ -131,7 +131,7 @@ async function applyOp(
     case "attach-folder": {
       const slug = await folderSlug(store, op.folder);
       if (slug !== undefined) {
-        await store.attachFolderToCollection(
+        await store.attachFolderToCorpus(
           COLLECTION,
           slug,
           op.position,
@@ -176,7 +176,7 @@ async function applyOp(
     }
     case "reorder": {
       const order = DOCS.map((d) => docSlug(d.slug));
-      await store.reorderCollectionDocuments(
+      await store.reorderCorpusDocuments(
         COLLECTION,
         op.reverse ? [...order].reverse() : order,
         "prop",
@@ -201,9 +201,9 @@ describe("ProjectStore command invariants (property)", () => {
           const activeSlugs = new Set(
             (await store.listDocuments()).map((d) => d.slug),
           );
-          const collection = await store.readCollection(COLLECTION);
-          if (collection.found) {
-            for (const d of collection.documents) {
+          const corpus = await store.readCorpus(COLLECTION);
+          if (corpus.found) {
+            for (const d of corpus.documents) {
               expect(activeSlugs.has(d.slug)).toBe(true);
               await expect(
                 store.getDocument(docSlug(d.slug)),

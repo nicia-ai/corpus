@@ -2,7 +2,7 @@
 // page and the dashboard's recent-activity list so the two render the
 // stored vocabulary identically.
 
-// Event names are the internal dotted vocabulary (`collection.attached`);
+// Event names are the internal dotted vocabulary (`corpus.attached`);
 // render them as words without changing the stored value.
 export function humanize(eventType: string): string {
   const words = eventType
@@ -23,13 +23,13 @@ export function actor(name: string | undefined, raw: string): string {
 }
 
 // What the event acted on: a document event names its document, a
-// collection event its collection. One rule so the feed never shows a
+// corpus event its corpus. One rule so the feed never shows a
 // bare "—" when the ledger actually recorded a subject.
 export function subject(
   c: Readonly<{
     documentSlug: string | null;
-    collectionSlug?: string | null;
+    corpusSlug?: string | null;
   }>,
 ): string | undefined {
-  return c.documentSlug ?? c.collectionSlug ?? undefined;
+  return c.documentSlug ?? c.corpusSlug ?? undefined;
 }

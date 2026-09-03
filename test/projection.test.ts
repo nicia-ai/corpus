@@ -6,7 +6,7 @@ import {
   type InstrumentationEvent,
 } from "../src/store/domain/instrumentation-events";
 import {
-  callerCollectionKey,
+  callerCorpusKey,
   EMPTY_PROJECTION,
   foldEvents,
   type ProjectionInput,
@@ -30,43 +30,43 @@ describe("projection — empty stream", () => {
     const out = foldEvents([]);
     expect(out).toEqual(EMPTY_PROJECTION);
     expect(out.funnel.distinctCallerCount).toBe(0);
-    expect(out.perCallerCollection.size).toBe(0);
+    expect(out.perCallerCorpus.size).toBe(0);
   });
 });
 
-describe("projection — read events drive per-(caller,collection) state", () => {
-  it("records last-read timestamp + version-captured for each (caller, collection)", () => {
+describe("projection — read events drive per-(caller,corpus) state", () => {
+  it("records last-read timestamp + version-captured for each (caller, corpus)", () => {
     const out = foldEvents([
       input(
         1,
         "2026-05-19T10:00:00Z",
         events.readFirst({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { "doc-1": 2 },
         }),
       ),
     ]);
-    const state = out.perCallerCollection.get(
-      callerCollectionKey("apikey:k1", "ctx-A"),
+    const state = out.perCallerCorpus.get(
+      callerCorpusKey("apikey:k1", "ctx-A"),
     );
     expect(state).toMatchObject({
       callerRef: "apikey:k1",
-      collectionSlug: "ctx-A",
+      corpusSlug: "ctx-A",
       lastReadAt: "2026-05-19T10:00:00Z",
       lastReadMonotonicId: 1,
       versionCapturedAtRead: { "doc-1": 2 },
     });
   });
 
-  it("overwrites with the latest read for the same (caller, collection)", () => {
+  it("overwrites with the latest read for the same (caller, corpus)", () => {
     const out = foldEvents([
       input(
         1,
         "2026-05-19T10:00:00Z",
         events.readFirst({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { "doc-1": 2 },
         }),
       ),
@@ -75,26 +75,26 @@ describe("projection — read events drive per-(caller,collection) state", () =>
         "2026-05-19T11:00:00Z",
         events.readAfterEdit({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { "doc-1": 3 },
         }),
       ),
     ]);
-    const state = out.perCallerCollection.get(
-      callerCollectionKey("apikey:k1", "ctx-A"),
+    const state = out.perCallerCorpus.get(
+      callerCorpusKey("apikey:k1", "ctx-A"),
     );
     expect(state?.lastReadMonotonicId).toBe(2);
     expect(state?.versionCapturedAtRead).toEqual({ "doc-1": 3 });
   });
 
-  it("keeps separate state for different callers reading the same collection", () => {
+  it("keeps separate state for different callers reading the same corpus", () => {
     const out = foldEvents([
       input(
         1,
         "2026-05-19T10:00:00Z",
         events.readFirst({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { d: 1 },
         }),
       ),
@@ -103,17 +103,17 @@ describe("projection — read events drive per-(caller,collection) state", () =>
         "2026-05-19T10:05:00Z",
         events.readFirst({
           callerRef: "oauth:user-2",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { d: 1 },
         }),
       ),
     ]);
-    expect(out.perCallerCollection.size).toBe(2);
+    expect(out.perCallerCorpus.size).toBe(2);
     expect(
-      out.perCallerCollection.get(callerCollectionKey("apikey:k1", "ctx-A")),
+      out.perCallerCorpus.get(callerCorpusKey("apikey:k1", "ctx-A")),
     ).toBeDefined();
     expect(
-      out.perCallerCollection.get(callerCollectionKey("oauth:user-2", "ctx-A")),
+      out.perCallerCorpus.get(callerCorpusKey("oauth:user-2", "ctx-A")),
     ).toBeDefined();
   });
 });
@@ -126,7 +126,7 @@ describe("projection — funnel signals", () => {
         "2026-05-19T10:00:00Z",
         events.readFirst({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { d: 1 },
         }),
       ),
@@ -135,7 +135,7 @@ describe("projection — funnel signals", () => {
         "2026-05-19T11:00:00Z",
         events.readFirst({
           callerRef: "oauth:user-2",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { d: 1 },
         }),
       ),
@@ -150,7 +150,7 @@ describe("projection — funnel signals", () => {
         "2026-05-19T10:00:00Z",
         events.readFirst({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { d: 1 },
         }),
       ),
@@ -164,7 +164,7 @@ describe("projection — funnel signals", () => {
           "2026-05-19T11:00:00Z",
           events.readAfterEdit({
             callerRef: "apikey:k1",
-            collectionSlug: "ctx-A",
+            corpusSlug: "ctx-A",
             versionCapturedAtRead: { d: 2 },
           }),
         ),
@@ -181,7 +181,7 @@ describe("projection — funnel signals", () => {
           "2026-05-19T12:00:00Z",
           events.readAfterEdit({
             callerRef: "apikey:k1",
-            collectionSlug: "ctx-A",
+            corpusSlug: "ctx-A",
             versionCapturedAtRead: { d: 3 },
           }),
         ),
@@ -204,7 +204,7 @@ describe("projection — funnel signals", () => {
         "2026-05-19T10:05:00Z",
         events.readFirst({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { d: 1 },
         }),
       ),
@@ -268,7 +268,7 @@ describe("projection — funnel signals", () => {
   });
 });
 
-describe("projection — document/collection lifecycle events are no-ops at fold level", () => {
+describe("projection — document/corpus lifecycle events are no-ops at fold level", () => {
   it("save events flow through the stream but the projection does not derive funnel state from them", () => {
     const out = foldEvents([
       input(
@@ -285,8 +285,8 @@ describe("projection — document/collection lifecycle events are no-ops at fold
       input(
         2,
         "2026-05-19T10:01:00Z",
-        events.collectionAttached({
-          collectionSlug: "ctx-A",
+        events.corpusAttached({
+          corpusSlug: "ctx-A",
           documentSlug: "doc-1",
           position: 0,
           changedBy: "user-1",
@@ -315,7 +315,7 @@ describe("projection — REBUILDABILITY invariant (the load-bearing one)", () =>
         "2026-05-19T10:01:00Z",
         events.readFirst({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { d: 1 },
         }),
       ),
@@ -329,7 +329,7 @@ describe("projection — REBUILDABILITY invariant (the load-bearing one)", () =>
         "2026-05-19T10:10:00Z",
         events.readAfterEdit({
           callerRef: "apikey:k1",
-          collectionSlug: "ctx-A",
+          corpusSlug: "ctx-A",
           versionCapturedAtRead: { d: 2 },
         }),
       ),
@@ -356,7 +356,7 @@ describe("projection — toProjectionInput decodes EventLogStore envelopes", () 
   it("round-trips a typed event through the encode/decode boundary into a ProjectionInput", () => {
     const event = events.readFirst({
       callerRef: "apikey:k1",
-      collectionSlug: "ctx-A",
+      corpusSlug: "ctx-A",
       versionCapturedAtRead: { d: 7 },
     });
     const envelope = {

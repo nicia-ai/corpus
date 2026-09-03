@@ -1,9 +1,9 @@
 import { Check, Plus, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import type { ColMemberRow } from "@/lib/server/collections";
+import type { CorpusMemberRow } from "@/lib/server/corpora";
 
-export type Delivery = ColMemberRow["delivery"];
+export type Delivery = CorpusMemberRow["delivery"];
 
 // Single "Add" affordance — adding always lands the row in the default
 // on-demand tier ("reference"); the owner promotes it to always-loaded
@@ -88,7 +88,7 @@ export function DeliveryToggle({
 }
 
 // Hover-revealed inline destructive — used for "remove document from
-// collection" and "unlink folder from collection". The fade-in is the
+// corpus" and "unlink folder from corpus". The fade-in is the
 // only state; the actual confirm-and-revert behavior is the parent's job.
 export function RemoveAction({
   label,

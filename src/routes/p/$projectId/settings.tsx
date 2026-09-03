@@ -142,7 +142,7 @@ function ProjectSettings() {
           <h2 className="mb-1 text-xl font-semibold">Export project</h2>
           <p className="mb-4 text-base text-slate-500">
             Download a deterministic, content-addressed bundle of every
-            document, collection, folder, and the full version history.
+            document, corpus, folder, and the full version history.
             Re-importable into any Corpus instance.
           </p>
           {exportProject.error && (

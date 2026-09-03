@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { cardClass, EmptyState, listSurface } from "@/components/ui/Surface";
 import { textLinkClass } from "@/components/ui/text-link";
-import type { CollectionSlug, ProjectId } from "@/ids";
+import type { CorpusSlug, ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
 import type {
   ActivityAgentRow,
@@ -20,14 +20,14 @@ import type {
 } from "@/lib/server/activity";
 import { recordPromptAnswer } from "@/lib/server/activity-prompt";
 
-export function CollectionActivityPage({
+export function CorpusActivityPage({
   data,
   projectId,
   slug,
 }: Readonly<{
   data: ActivityDTO;
   projectId: ProjectId;
-  slug: CollectionSlug;
+  slug: CorpusSlug;
 }>): React.JSX.Element {
   const router = useRouter();
   const subtitle =
@@ -43,7 +43,7 @@ export function CollectionActivityPage({
   return (
     <div className="pb-12">
       <BackLink
-        to="/p/$projectId/collections/$slug"
+        to="/p/$projectId/corpora/$slug"
         projectId={projectId}
         slug={slug}
         label={data.contextName}
@@ -55,7 +55,7 @@ export function CollectionActivityPage({
 
       {data.promptVisible && (
         <PostActivationPromptCard
-          collectionSlug={slug}
+          corpusSlug={slug}
           projectId={projectId}
           onAnswered={() => router.invalidate()}
         />
@@ -101,11 +101,11 @@ const PROMPT_BETS: readonly Readonly<{
 ];
 
 function PostActivationPromptCard({
-  collectionSlug,
+  corpusSlug,
   projectId,
   onAnswered,
 }: Readonly<{
-  collectionSlug: CollectionSlug;
+  corpusSlug: CorpusSlug;
   projectId: ProjectId;
   onAnswered: () => void;
 }>): React.JSX.Element | null {
@@ -121,7 +121,7 @@ function PostActivationPromptCard({
     setSubmitting(true);
     try {
       await recordPromptAnswer({
-        data: { bet: selected, collectionSlug, projectId },
+        data: { bet: selected, corpusSlug, projectId },
       });
       onAnswered();
     } finally {

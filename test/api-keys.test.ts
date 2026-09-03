@@ -12,7 +12,7 @@ import { apiKey } from "../src/control/schema/app";
 
 import {
   createConnection,
-  createCollectionFor,
+  createCorpusFor,
   createOrg,
   signUp,
 } from "./_helpers";
@@ -20,7 +20,7 @@ import {
 // Mint a usable MCP API key bound to a fresh user's Connection (v4: a
 // key hangs off a Connection, not a Project), crossing the same trust
 // boundary the createApiKey server fn does (generate → hash → store
-// hash only). Also creates the bound Collection in the per-Project DO
+// hash only). Also creates the bound Corpus in the per-Project DO
 // so the respondMcp preflight finds it.
 async function mintKey(name = "ci") {
   const ownerUserId = await signUp("ak");
@@ -30,7 +30,7 @@ async function mintKey(name = "ci") {
     organizationId: ref.organizationId,
     projectId: ref.projectId,
   });
-  await createCollectionFor(ref.projectId, conn.collectionSlug);
+  await createCorpusFor(ref.projectId, conn.corpusSlug);
   const token = generateApiKeyToken();
   await db.insert(apiKey).values({
     userId: ownerUserId,

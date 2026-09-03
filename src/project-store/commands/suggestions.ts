@@ -16,11 +16,11 @@ import type {
 } from "../../db";
 import { ConflictError } from "../../errors";
 import {
-  asCollectionSlug,
+  asCorpusSlug,
   asDocumentSlug,
   asFolderSlug,
   type CallerChannel,
-  type CollectionSlug,
+  type CorpusSlug,
   type DocumentSlug,
 } from "../../ids";
 import { resolveTitle } from "../../store/domain/frontmatter";
@@ -37,7 +37,7 @@ import {
   type ProjectCommandContext,
 } from "../command";
 
-import { attachDocumentsToCollectionCommand } from "./collections";
+import { attachDocumentsToCorpusCommand } from "./corpora";
 import { saveDocumentCommand } from "./documents";
 
 export type { SuggestionStatus } from "../../db";
@@ -209,9 +209,9 @@ export type CreateDocProposalInput = Readonly<{
   proposedMarkdown: string;
   createdBy: string;
   channel?: CallerChannel;
-  // The proposing connection's bound Collection — where an applied
+  // The proposing connection's bound Corpus — where an applied
   // proposal's document is attached (as `reference`, never core).
-  originCollectionSlug?: CollectionSlug;
+  originCollectionSlug?: CorpusSlug;
 }>;
 
 export type CreateDocProposalResult = Readonly<
@@ -227,13 +227,13 @@ export type CreateDocProposalResult = Readonly<
 
 // The MCP-facing subset of a create-proposal: identity + body only. The DO
 // method injects createdBy/channel; the scoped executor pins
-// `originCollectionSlug` to the caller's bound Collection (never caller data —
+// `originCollectionSlug` to the caller's bound Corpus (never caller data —
 // optional here only so the port and the DO method share one shape).
 export type SuggestCreateInput = Readonly<{
   slug?: DocumentSlug;
   path?: string;
   proposedMarkdown: string;
-  originCollectionSlug?: CollectionSlug;
+  originCollectionSlug?: CorpusSlug;
 }>;
 
 export async function createDocProposalCommand(
@@ -399,7 +399,7 @@ export type ApplyCreateProposalResult = Readonly<
 // creation follow importDocumentAtPathCommand's semantics (missing
 // folders are created, matching what the REST/CLI import does for the
 // same path), the save carries `appliedFrom` provenance, and the created
-// document is attached to the proposing connection's bound Collection as
+// document is attached to the proposing connection's bound Corpus as
 // `reference` — never the always-include tier, which stays a curator
 // decision.
 export async function applyCreateProposalCommand(
@@ -470,13 +470,13 @@ export async function applyCreateProposalCommand(
     }
   }
   if (s.originCollectionSlug !== null) {
-    // The proposing connection's Collection may have been deleted since; a
-    // vanished collection makes the attach a no-op (attachMany returns
+    // The proposing connection's Corpus may have been deleted since; a
+    // vanished corpus makes the attach a no-op (attachMany returns
     // nothing), so the document is still created — only the attach is
-    // skipped. attachDocumentsToCollectionCommand computes the end position
+    // skipped. attachDocumentsToCorpusCommand computes the end position
     // itself, so we don't project the members just to count them.
-    const attached = await attachDocumentsToCollectionCommand(ctx, {
-      collectionSlug: asCollectionSlug(s.originCollectionSlug),
+    const attached = await attachDocumentsToCorpusCommand(ctx, {
+      corpusSlug: asCorpusSlug(s.originCollectionSlug),
       documentSlugs: [slug],
       delivery: "reference",
       changedBy: input.appliedBy,

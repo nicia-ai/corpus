@@ -1,4 +1,4 @@
-// Browser-side upload collection: file/dir pick, dropped folders, or a
+// Browser-side upload corpus: file/dir pick, dropped folders, or a
 // `.zip` → flat `{ path, text }[]` (the `importDocuments` shape), with
 // non-text partitioned into a `skipped` list. No server import — kept
 // client-only so all File/zip work stays in the event handler.

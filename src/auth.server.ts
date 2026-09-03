@@ -13,7 +13,11 @@ import { resolveConnection } from "./control/connection-resolution";
 import { connectControlDb } from "./control/db";
 import { entitlementsOf, QuotaExceededError } from "./control/entitlements";
 import { resolveServerEnv, type ServerEnv } from "./control/env.server";
-import { connectionClaimKey, readSelection } from "./control/oauth-selection";
+import {
+  autoBindPendingConnect,
+  connectionClaimKey,
+  readSelection,
+} from "./control/oauth-selection";
 import {
   bumpOrgProjectsEpoch,
   materializeDefaultProject,
@@ -246,12 +250,22 @@ function create(env: Env, runtime: ServerEnv) {
             shouldRedirect: async ({ user }) => {
               const state = await getOAuthProviderState();
               if (state?.query === undefined) return false;
-              const picked = await readSelection(
-                connectControlDb(env.DB),
-                state.query,
-                user.id,
-              );
-              return picked === undefined;
+              const db = connectControlDb(env.DB);
+              const picked = await readSelection(db, state.query, user.id);
+              if (picked !== undefined) return false;
+              // Day-1 happy path: owner clicked "Connect this corpus"
+              // moments ago → bind that Connection and skip the picker.
+              // Multi-corpus / no-intent flows still land on /connect/select.
+              const auto = await autoBindPendingConnect(db, {
+                query: state.query,
+                userId: user.id,
+                resolve: async (connectionId) =>
+                  (await resolveConnection(db, {
+                    userId: user.id,
+                    connectionId,
+                  })) !== undefined,
+              });
+              return auto === undefined;
             },
             // Read (never delete — fires more than once per flow) the
             // picked Connection. Undefined ⇒ no reference ⇒ no claim ⇒

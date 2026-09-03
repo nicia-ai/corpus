@@ -1,9 +1,4 @@
-import type {
-  CallerRef,
-  CollectionSlug,
-  DocumentSlug,
-  ProjectId,
-} from "../ids";
+import type { CallerRef, CorpusSlug, DocumentSlug, ProjectId } from "../ids";
 import type {
   AddSuggestionMessageResult,
   CreateDocProposalResult,
@@ -21,7 +16,7 @@ export type McpExecutor = Readonly<{
   callerRef: CallerRef;
   baseUrl: string;
   projectId: ProjectId;
-  listCollections: () => Promise<
+  listCorpora: () => Promise<
     readonly {
       slug: string;
       name: string;
@@ -38,7 +33,7 @@ export type McpExecutor = Readonly<{
       delivery?: CollectionDelivery;
     }[]
   >;
-  readCollection: (slug: CollectionSlug) => Promise<
+  readCorpus: (slug: CorpusSlug) => Promise<
     | { found: false }
     | {
         found: true;
@@ -50,9 +45,7 @@ export type McpExecutor = Readonly<{
         }[];
       }
   >;
-  collectionMembers: (
-    slug: CollectionSlug,
-  ) => Promise<readonly string[] | undefined>;
+  corpusMembers: (slug: CorpusSlug) => Promise<readonly string[] | undefined>;
   getDocument: (
     slug: DocumentSlug,
   ) => Promise<
@@ -60,11 +53,11 @@ export type McpExecutor = Readonly<{
     | undefined
   >;
   verifyHistory: (slug?: DocumentSlug) => Promise<VerifyResult>;
-  collectionOutline: (slug: CollectionSlug) => Promise<
+  corpusOutline: (slug: CorpusSlug) => Promise<
     | { found: false }
     | {
         found: true;
-        collection: string;
+        corpus: string;
         name: string;
         documents: readonly {
           slug: string;
@@ -77,19 +70,19 @@ export type McpExecutor = Readonly<{
             kind: "path" | "wiki";
             resolvedPath: string | null;
             documentSlug: string | null;
-            inCollection: boolean;
+            inCorpus: boolean;
           }[];
         }[];
       }
   >;
   recordRead: (
     callerRef: CallerRef,
-    collectionSlug: string,
+    corpusSlug: string,
     versionCapturedAtRead: Readonly<Record<string, number>>,
   ) => Promise<void>;
   // Proposal writes — the only writes on the port, and both are proposals
   // pending human review, never applied by the agent. suggestEdit proposes a
-  // full replacement body for one document in the bound Collection (diffed
+  // full replacement body for one document in the bound Corpus (diffed
   // into per-hunk suggestions); `baseDocVersion` is the version the agent
   // read — a mismatch with head yields the `conflict` result so the agent
   // re-reads rather than proposing blind. `callerRef` is the enforced
@@ -103,8 +96,8 @@ export type McpExecutor = Readonly<{
   // suggestCreate proposes a NEW document (slug or Corpus path that resolves
   // to nothing + baseDocVersion 0 at the tool layer). A human apply creates
   // the document and attaches it to the proposing connection's bound
-  // Collection as `reference`. `originCollectionSlug` is NOT caller data:
-  // the scoped executor overwrites it with its bound Collection — it is
+  // Corpus as `reference`. `originCollectionSlug` is NOT caller data:
+  // the scoped executor overwrites it with its bound Corpus — it is
   // optional here only so the port and the DO method share one shape.
   suggestCreate: (
     callerRef: CallerRef,
