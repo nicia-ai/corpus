@@ -92,9 +92,11 @@ rule applies within a folder.
 
 When an agent reads a document (directly, or as part of a corpus) it
 gets the **exact markdown** you wrote, at the current version. Write for
-the agent: clear headings, explicit rules, no implicit corpus. See
+the agent: clear headings, explicit rules, no implicit context. See
 [Recipes](./recipes.md) for patterns.
 
-Documents are **read-only over MCP**. Agents consume them; only people
-(in the web UI) change them. That asymmetry is deliberate — your
-canonical corpus can't be silently rewritten by an agent.
+Documents are **read-only over MCP**: an agent can never write one
+directly. It can file a proposal with `suggest_edit`, which a person
+accepts or rejects, hunk by hunk, in the web UI. That asymmetry is
+deliberate — your canonical documents can't be silently rewritten by an
+agent.

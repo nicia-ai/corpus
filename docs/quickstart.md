@@ -89,7 +89,7 @@ else.
 
 Ask your agent to use it. For example, in Claude Code:
 
-> Work from the corpus corpus you're connected to. Read its
+> Work from the corpus you're connected to. Read its
 > always-included guidance, browse the outline, and pull on-demand
 > documents when relevant.
 

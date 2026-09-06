@@ -190,7 +190,7 @@ truth.
 Connecting only makes the tools available. Instruct the agent to use
 them — in a prompt, or in the agent's own rules file:
 
-> Work from the corpus corpus you're connected to. Read the
+> Work from the corpus you're connected to. Read the
 > outline, follow its always-included guidance, and read individual
 > on-demand documents when relevant to the task.
 

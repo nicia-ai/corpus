@@ -22,10 +22,12 @@ path](./connect-your-agent.md#reference-corpus-documents-by-path).
 
 ## Can an agent change my documents?
 
-No. The MCP surface is **read-only** — there is no write tool. Documents
-and corpora change only through the web UI, by people. That asymmetry
-is the point: your canonical corpus can't be silently rewritten by an
-agent.
+Not on its own. The MCP surface has no direct write tool. An agent can
+file a **proposal** with `suggest_edit` — an edit to a document, or a
+whole new one — and a person accepts or rejects it, hunk by hunk, in the
+web UI. Nothing an agent files becomes canonical until a human applies
+it. That asymmetry is the point: your canonical documents can't be
+silently rewritten by an agent.
 
 ## Is there search / RAG over my documents?
 

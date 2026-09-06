@@ -1,6 +1,6 @@
 ---
 title: Versioning & history
-description: Every document edit is a new version, conflicts are resolved not lost, and the change feed shows what moved — how Corpus keeps your canonical corpus trustworthy.
+description: Every document edit is a new version, conflicts are resolved not lost, and the change feed shows what moved — how Corpus keeps your canonical documents trustworthy.
 sidebar:
   order: 9
 ---
@@ -69,5 +69,5 @@ content-addressed JSON bundle of the project — every document, every
 version, every corpus, and the membership snapshots. Export is an
 owner action, always available and never gated; bundle export is
 deliberately not on the agent MCP surface (agents only ever read the
-Corpus their Connection binds them to). Your canonical corpus is
-yours; you can always take it with you.
+Corpus their Connection binds them to). Your canonical documents are
+yours; you can always take them with you.
