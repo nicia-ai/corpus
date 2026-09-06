@@ -138,12 +138,56 @@ function contentAttributes(
   return EditorView.contentAttributes.of(attrs);
 }
 
+// Toggle designTheme's `.cm-link-armed` for exactly as long as the
+// follow-link modifier (Cmd/Ctrl) is held, so the link-hover pointer cursor
+// itself signals which click mode is live — mirroring Obsidian/Typora's
+// hold-to-follow affordance. Window-level (not the editor's own DOM) because
+// the modifier can go down or up while the mouse isn't over the editor at
+// all. Keydown/keyup alone would miss a modifier released while the window
+// is unfocused (e.g. Cmd+Tab away), so blur also disarms. Returns the
+// teardown for the mount effect's cleanup.
+function armLinkHoverCursor(cm: EditorView): () => void {
+  const setArmed = (armed: boolean): void => {
+    cm.dom.classList.toggle("cm-link-armed", armed);
+  };
+  const onKeyChange = (event: KeyboardEvent): void => {
+    if (event.key === "Meta" || event.key === "Control") {
+      setArmed(event.type === "keydown");
+    }
+  };
+  const onBlur = (): void => setArmed(false);
+  window.addEventListener("keydown", onKeyChange);
+  window.addEventListener("keyup", onKeyChange);
+  window.addEventListener("blur", onBlur);
+  return () => {
+    window.removeEventListener("keydown", onKeyChange);
+    window.removeEventListener("keyup", onKeyChange);
+    window.removeEventListener("blur", onBlur);
+  };
+}
+
 // Restrained highlight: single blue accent on links only (consistent with
 // the rendered view), everything else weight/shade in the slate ramp. Heading
 // SIZES ride the heading-text token (not the line) so the live-preview marker
 // reveal never reflows; the sizes are the shared --doc-h*-size tokens
 // (styles.css @theme) so the editor and the rendered `.md` surface stay in sync.
-const mdHighlight = HighlightStyle.define([
+// Exported for test/md-highlight.test.ts: the array-order-as-precedence
+// contract (see the t.quote comment below) has no other way to be pinned
+// short of inspecting the actual generated stylesheet.
+export const mdHighlight = HighlightStyle.define([
+  // t.quote goes FIRST, not last: HighlightStyle gives later array entries
+  // higher CSS precedence when a node carries multiple tag-classes (its own
+  // tag plus ones inherited from an ancestor — see HighlightStyle.define's
+  // own doc comment). "Blockquote/..." tags every descendant as quote
+  // (Inherit mode, like t.list above), so anything more specific nested
+  // inside a blockquote — a heading, a link, inline code — needs to appear
+  // LATER than this rule to keep its own color instead of being muted to
+  // quote gray. Putting quote first, before every other color rule below,
+  // makes that automatic instead of requiring each future rule to remember
+  // to out-rank it. (This one previously sat last, sharing a line with
+  // t.processingInstruction, which silently broke "single blue accent on
+  // links only" for any link written inside a blockquote.)
+  { tag: t.quote, color: "#64748b" },
   {
     tag: t.heading1,
     fontSize: "var(--doc-h1-size)",
@@ -175,7 +219,16 @@ const mdHighlight = HighlightStyle.define([
   { tag: t.link, color: "#2563eb" },
   { tag: t.url, color: "#64748b" },
   { tag: t.monospace, fontFamily: "var(--font-mono)", color: "#0f172a" },
-  { tag: [t.processingInstruction, t.list, t.quote], color: "#64748b" },
+  // t.list is deliberately excluded here: @lezer/markdown tags
+  // "OrderedList/... BulletList/..." in Inherit mode, so it applies to every
+  // descendant token, not just the marker — including a list item's own
+  // paragraph text (any leaf with no more specific tag). Muting it here grayed
+  // ordinary list body text against the primary-ink main text. The bullet
+  // glyph and the ordered-list "1." marker are already grayed independently
+  // (t.processingInstruction on ListMark; the bullet widget carries its own
+  // .cm-md-bullet color), so list content itself stays primary ink like any
+  // other paragraph.
+  { tag: t.processingInstruction, color: "#64748b" },
   { tag: t.contentSeparator, color: "#94a3b8" },
 ]);
 
@@ -283,11 +336,25 @@ const designTheme = EditorView.theme({
   },
 
   ".cm-md-bullet": { color: "#64748b" },
+  // Link hover affordance: a plain click edits the link (places the caret
+  // in its text; see the mousedown handler below), so the pointer cursor
+  // that signals "this follows" only appears while the modifier that
+  // actually follows it is held — `cm-link-armed` is toggled by the window
+  // keydown/keyup listeners in the mount effect, mirroring how Obsidian/
+  // Typora hint the same hold-to-follow gesture. The title tooltip (see
+  // live-preview.ts's linkTitle) names the gesture too, for anyone who
+  // never hovers long enough to notice the cursor change. Read-only surfaces
+  // (history, review) have no edit mode to disambiguate — a plain click
+  // already follows there — so the mount effect just adds `cm-link-armed`
+  // permanently instead of ever toggling it, reusing this one rule for both
+  // "always armed" (read-only) and "armed while held" (editing).
   ".cm-md-link": {
     color: "#2563eb",
     textDecoration: "underline",
     textUnderlineOffset: "2px",
+    cursor: "text",
   },
+  "&.cm-link-armed .cm-md-link:hover": { cursor: "pointer" },
   ".cm-md-code": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.875em",
@@ -802,7 +869,13 @@ export function MarkdownEditor({
     // Seed the host's initial "Add metadata" affordance state (and re-seed on
     // each remount — the editor is version-keyed).
     if (editing) reportFrontmatter(state);
+    // Read-only surfaces stay permanently "armed" (see designTheme's
+    // `.cm-md-link` comment) since a plain click already follows there;
+    // only the editing surface needs the modifier tracked live.
+    if (!editing) cm.dom.classList.add("cm-link-armed");
+    const disarmLinkHover = editing ? armLinkHoverCursor(cm) : undefined;
     return () => {
+      disarmLinkHover?.();
       cm.destroy();
     };
     // Construct once; value/slug syncing is handled by the effects below.
