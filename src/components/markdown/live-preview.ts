@@ -15,6 +15,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 
+import { modKeyLabel } from "@/lib/platform";
 import { scanWikilinks, splitWikiTarget } from "@/store/domain/links";
 
 import { frontmatter, imageReplace, tableReplace } from "./block-widgets";
@@ -283,6 +284,19 @@ function decorateInlineMarks(
     if (mark.to > mark.from) decos.push(hide(mark.from, mark.to));
 }
 
+// A plain click on a rendered link places the caret to edit it (see
+// MarkdownEditor's mousedown handler); only a modifier-click follows it. The
+// native title tooltip is the only affordance surfacing that distinction
+// (see also the `cm-link-armed` hover cursor in MarkdownEditor's designTheme),
+// so it always names the gesture, not just the destination. Read-only
+// surfaces (history, review) have no edit mode to disambiguate — a plain
+// click already follows there, so the tooltip skips the hint.
+function linkTitle(destination: string, state: EditorState): string {
+  return state.readOnly
+    ? destination
+    : `${destination} — ${modKeyLabel()}-click to open`;
+}
+
 function decorateLink(
   decos: CmRange<Decoration>[],
   state: EditorState,
@@ -297,7 +311,10 @@ function decorateLink(
   decos.push(
     Decoration.mark({
       class: "cm-md-link",
-      attributes: { title: parts.href, "data-href": parts.href },
+      attributes: {
+        title: linkTitle(parts.href, state),
+        "data-href": parts.href,
+      },
     }).range(parts.labelFrom, parts.labelTo),
   );
 }
@@ -508,7 +525,10 @@ function decorateWikilinks(
     decos.push(
       Decoration.mark({
         class: "cm-md-link",
-        attributes: { title: `[[${m.inner}]]`, "data-href": slug },
+        attributes: {
+          title: linkTitle(`[[${m.inner}]]`, state),
+          "data-href": slug,
+        },
       }).range(labelFrom, labelTo),
     );
     decos.push(hide(labelTo, mTo));
