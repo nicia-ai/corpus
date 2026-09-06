@@ -1,13 +1,13 @@
 ---
 title: Your team
-description: Invite teammates into your organization so everyone shares one canonical corpus — roles, the invite-link flow, and managing members.
+description: Invite teammates into your organization so everyone works from the same canonical documents — roles, the invite-link flow, and managing members.
 sidebar:
   order: 8
 ---
 
-Everyone in your organization shares its canonical corpus. Inviting
-your team is how non-engineers contribute the knowledge and engineers
-keep agents pointed at it.
+Everyone in your organization works from the same canonical documents.
+Inviting your team is how non-engineers contribute the knowledge and
+engineers keep agents pointed at it.
 
 ## Roles
 

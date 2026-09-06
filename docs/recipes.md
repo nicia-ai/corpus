@@ -6,7 +6,7 @@ sidebar:
 ---
 
 Corpus is simple on purpose. The leverage is in _how_ you structure
-corpus. These are patterns that work in practice.
+your corpora. These are patterns that work in practice.
 
 ## Design corpora around an audience, not a topic
 
@@ -48,7 +48,7 @@ and the agent sees the outline of all of them.
   validate input with Zod at the boundary") beat prose.
 - State the rule _and_ the rationale — agents follow rules they
   understand better than bare edicts.
-- Avoid implicit corpus ("as discussed last sprint"). The agent has
+- Avoid implicit context ("as discussed last sprint"). The agent has
   only what's in the corpus.
 - Link related documents by relative path; the editor flags broken links and
   agents can traverse the resolved link graph via the corpus outline.
@@ -66,7 +66,7 @@ Don't rely on remembering to say "read the corpus." Put it in the
 agent's standing instructions:
 
 - **Claude Code** — add a line to `CLAUDE.md`: _"At the start of any
-  task, work from the corpus corpus you're connected to: read its
+  task, work from the corpus you're connected to: read its
   always-included guidance, browse its outline, and read
   `docs/error-handling.md` when the task touches errors."_
 - **Cursor / others** — the equivalent rules file.

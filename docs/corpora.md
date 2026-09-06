@@ -5,8 +5,8 @@ sidebar:
   order: 4
 ---
 
-A **corpus** is an ordered set of documents assembled into one markdown
-corpus. It is the unit an agent reads. Point every agent that should
+A **corpus** is an ordered set of documents assembled into one body of
+markdown. It is the unit an agent reads. Point every agent that should
 share a body of knowledge at the same corpus and they all see the same
 source of truth.
 
