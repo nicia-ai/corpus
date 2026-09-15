@@ -66,8 +66,16 @@ export class VersionRepo {
     );
   }
 
-  async versionCount(slug: DocumentSlug): Promise<number> {
-    return (await this.findDocumentVersions(slug)).length;
+  versionCount(slug: DocumentSlug): Promise<number> {
+    return this.g
+      .query()
+      .from("DocumentVersion", "v")
+      .whereNode("v", (v) => v.slug.eq(slug))
+      .count();
+  }
+
+  totalCount(): Promise<number> {
+    return this.g.query().from("DocumentVersion", "v").count();
   }
 
   async documentVersions(
@@ -160,21 +168,16 @@ export class VersionRepo {
     );
   }
 
-  private async findCollectionVersions(
-    collectionSlug: CorpusSlug,
-  ): Promise<CollectionVersionNode[]> {
-    return findAll((w) =>
-      this.g.nodes.CollectionVersion.find({
-        where: (c) => c.collectionSlug.eq(collectionSlug),
-        ...w,
-      }),
-    );
-  }
-
   // Highest collectionVersion for a corpus, or 0 if none yet.
   async latestCollectionVersion(collectionSlug: CorpusSlug): Promise<number> {
-    const nodes = await this.findCollectionVersions(collectionSlug);
-    return nodes.reduce((max, n) => Math.max(max, n.collectionVersion), 0);
+    const latest = await this.g
+      .query()
+      .from("CollectionVersion", "v")
+      .whereNode("v", (v) => v.collectionSlug.eq(collectionSlug))
+      .orderBy("v", "collectionVersion", "desc")
+      .select((ctx) => ctx.v.collectionVersion)
+      .first();
+    return latest ?? 0;
   }
 
   // The current membership snapshot per corpus (bundle export, verifier).

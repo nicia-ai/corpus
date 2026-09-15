@@ -18,9 +18,15 @@ import {
 import type { GraphHandle } from "../handle";
 
 import type { DocumentNode } from "./document-repo";
-import { findAll } from "./paginate";
 
 export type FolderNode = Node<typeof Folder>;
+
+export type DocumentPathRow = Readonly<{
+  slug: string;
+  filename: string;
+  folderSlug: string | null;
+  ancestorNames: readonly string[];
+}>;
 
 export type FolderView = Readonly<{
   slug: string;
@@ -136,22 +142,6 @@ export class FolderRepo {
     );
   }
 
-  // `docFolderEdge` for a SET of documents (`bulkFindFrom`, the `from`
-  // mirror of `parentEdgesOf`). Keyed by document id; an absent key is a
-  // document with no home folder, i.e. one sitting at the root.
-  private async docFolderEdgesOf(docs: readonly DocumentNode[]) {
-    const grouped = await this.g.edges.in_folder.bulkFindFrom(
-      docs.map((d) => ({ kind: "Document" as const, id: d.id })),
-      { limitPerInput: 1 },
-    );
-    return new Map(
-      docs.flatMap((d, i) => {
-        const edge = grouped[i]?.[0];
-        return edge === undefined ? [] : [[d.id, edge] as const];
-      }),
-    );
-  }
-
   private async parentSlugOf(node: FolderNode): Promise<string | null> {
     const edge = await this.parentEdge(node);
     if (edge === undefined) return null;
@@ -196,49 +186,51 @@ export class FolderRepo {
   private async childFolders(
     parentSlug: string | null,
   ): Promise<readonly Readonly<{ node: FolderNode; position: number }>[]> {
-    // Roots are "folders with no parent edge", so that case must scan the
-    // whole set; a named parent is an indexed point lookup, no scan.
     if (parentSlug === null) {
-      const folders = await findAll((w) => this.g.nodes.Folder.find(w));
-      const parents = await this.parentEdgesOf(folders);
-      return folders
-        .filter((f) => !parents.has(f.id))
-        .map((node) => ({ node, position: 0 }));
+      const rows = await this.g
+        .query()
+        .from("Folder", "f")
+        .optionalTraverse("folder_child", "e", { direction: "in" })
+        .to("Folder", "parent")
+        .select((ctx) => ({ node: ctx.f, parent: ctx.parent }))
+        .execute();
+      return rows
+        .filter((row) => row.parent === undefined)
+        .map((row) => ({ node: row.node, position: 0 }));
     }
-    const parent = await this.nodeBySlug(parentSlug);
-    if (parent === undefined) return [];
-    const edges = await this.g.edges.folder_child.findFrom({
-      kind: "Folder",
-      id: parent.id,
-    });
-    const children = await this.g.nodes.Folder.getByIds(
-      edges.map((edge) => edge.toId),
-    );
-    return edges.flatMap((edge, i) => {
-      const child = children[i];
-      return child === undefined
-        ? []
-        : [{ node: child, position: edge.position }];
-    });
+    return this.g
+      .query()
+      .from("Folder", "f")
+      .whereNode("f", (f) => f.slug.eq(parentSlug))
+      .traverse("folder_child", "e")
+      .to("Folder", "child")
+      .select((ctx) => ({ node: ctx.child, position: ctx.e.position }))
+      .execute();
   }
 
   private async documentsIn(
     parentSlug: string | null,
   ): Promise<readonly DocumentNode[]> {
     if (parentSlug === null) {
-      const docs = await findAll((w) => this.g.nodes.Document.find(w));
-      const homes = await this.docFolderEdgesOf(docs);
-      return docs.filter((d) => !homes.has(d.id));
+      const rows = await this.g
+        .query()
+        .from("Document", "d")
+        .optionalTraverse("in_folder", "e")
+        .to("Folder", "folder")
+        .select((ctx) => ({ doc: ctx.d, folder: ctx.folder }))
+        .execute();
+      return rows
+        .filter((row) => row.folder === undefined)
+        .map((row) => row.doc);
     }
-    const folder = await this.nodeBySlug(parentSlug);
-    if (folder === undefined) return [];
-    const edges = await this.g.edges.in_folder.findTo({
-      kind: "Folder",
-      id: folder.id,
-    });
-    return (
-      await this.g.nodes.Document.getByIds(edges.map((edge) => edge.fromId))
-    ).filter((doc) => doc !== undefined);
+    return this.g
+      .query()
+      .from("Folder", "f")
+      .whereNode("f", (f) => f.slug.eq(parentSlug))
+      .traverse("in_folder", "e", { direction: "in" })
+      .to("Document", "d")
+      .select((ctx) => ctx.d)
+      .execute();
   }
 
   // The cross-type sibling namespace shape (the folder/document
@@ -281,39 +273,38 @@ export class FolderRepo {
 
   // child slug → parent slug | null, for cycle detection on move.
   private async parentMap(): Promise<Map<string, string | null>> {
-    const folders = await findAll((w) => this.g.nodes.Folder.find(w));
-    const byId = new Map(folders.map((f) => [f.id, f]));
-    const parents = await this.parentEdgesOf(folders);
-    return new Map(
-      folders.map((f) => {
-        const edge = parents.get(f.id);
-        const parent = edge === undefined ? undefined : byId.get(edge.fromId);
-        return [f.slug, parent?.slug ?? null];
-      }),
-    );
+    const rows = await this.g
+      .query()
+      .from("Folder", "f")
+      .optionalTraverse("folder_child", "e", { direction: "in" })
+      .to("Folder", "parent")
+      .select((ctx) => ({
+        slug: ctx.f.slug,
+        parentSlug: ctx.parent?.slug,
+      }))
+      .execute();
+    return new Map(rows.map((row) => [row.slug, row.parentSlug ?? null]));
   }
 
   // — Derived reads ——————————————————————————————————————————
-
-  private async parentOf(node: FolderNode): Promise<FolderNode | undefined> {
-    const edge = await this.parentEdge(node);
-    if (edge === undefined) return undefined;
-    return this.g.nodes.Folder.getById(edge.fromId);
-  }
 
   // A folder and its ancestors, leaf → root, cycle-guarded. The single
   // upward walk; `ancestorNames` is a projection of it (the only caller
   // outside this class).
   private async ancestorChain(node: FolderNode): Promise<FolderNode[]> {
-    const chain: FolderNode[] = [node];
-    const seen = new Set<string>([node.slug]);
-    let parent = await this.parentOf(node);
-    while (parent !== undefined && !seen.has(parent.slug)) {
-      chain.push(parent);
-      seen.add(parent.slug);
-      parent = await this.parentOf(parent);
-    }
-    return chain;
+    const rows = await this.g
+      .query()
+      .from("Folder", "f")
+      .whereNode("f", (f) => f.id.eq(node.id))
+      .traverse("folder_child", "e", { direction: "in" })
+      .recursive({ maxHops: 100, depth: "depth" })
+      .to("Folder", "ancestor")
+      .select((ctx) => ({ ancestor: ctx.ancestor, depth: ctx.depth }))
+      .execute();
+    return [
+      node,
+      ...[...rows].sort((a, b) => a.depth - b.depth).map((row) => row.ancestor),
+    ];
   }
 
   // Ancestor folder names, root → leaf (for path derivation).
@@ -344,6 +335,59 @@ export class FolderRepo {
     return (await this.ancestorChain(folder)).map((n) => n.slug);
   }
 
+  async liveDocumentPaths(): Promise<readonly DocumentPathRow[]> {
+    const rows = await this.g
+      .query()
+      .from("Document", "d")
+      .whereNode("d", (d) => d.archivedAt.isNull())
+      .optionalTraverse("in_folder", "home")
+      .to("Folder", "folder")
+      .optionalTraverse("folder_child", "up", {
+        direction: "in",
+        from: "folder",
+      })
+      .recursive({ minHops: 0, maxHops: 100, depth: "depth" })
+      .to("Folder", "ancestor")
+      .select((ctx) => ({
+        slug: ctx.d.slug,
+        filename: ctx.d.filename,
+        folderSlug: ctx.folder?.slug,
+        ancestorName: ctx.ancestor?.name,
+        depth: ctx.depth,
+      }))
+      .execute();
+    const bySlug = new Map<
+      string,
+      {
+        filename: string;
+        folderSlug: string | null;
+        ancestors: { name: string; depth: number }[];
+      }
+    >();
+    for (const row of rows) {
+      let entry = bySlug.get(row.slug);
+      if (entry === undefined) {
+        entry = {
+          filename: row.filename,
+          folderSlug: row.folderSlug ?? null,
+          ancestors: [],
+        };
+        bySlug.set(row.slug, entry);
+      }
+      if (row.ancestorName !== undefined && row.depth !== undefined) {
+        entry.ancestors.push({ name: row.ancestorName, depth: row.depth });
+      }
+    }
+    return [...bySlug.entries()].map(([slug, entry]) => ({
+      slug,
+      filename: entry.filename,
+      folderSlug: entry.folderSlug,
+      ancestorNames: [...entry.ancestors]
+        .sort((a, b) => b.depth - a.depth)
+        .map((ancestor) => ancestor.name),
+    }));
+  }
+
   // Whether `filename` is free for `documentSlug` under its CURRENT
   // home folder — the same cross-type (folder|document) segment rule
   // `placeDocument` enforces, but for a filename rename (the document
@@ -371,23 +415,63 @@ export class FolderRepo {
   // resolver (zero-IO there). Cycle-guarded by the visited set.
   async subtree(rootSlug: string): Promise<Map<string, FolderTreeNode>> {
     const map = new Map<string, FolderTreeNode>();
-    const visit = async (slug: string): Promise<void> => {
-      if (map.has(slug)) return;
-      const [children, docs] = await Promise.all([
-        this.childFolders(slug),
-        this.documentsIn(slug),
-      ]);
-      map.set(slug, {
-        slug,
-        childFolders: children.map((c) => ({
-          slug: c.node.slug,
-          position: c.position,
-        })),
-        documents: docs.map((d) => ({ slug: d.slug, filename: d.filename })),
+    const rows = await this.g
+      .query()
+      .from("Folder", "root")
+      .whereNode("root", (root) => root.slug.eq(rootSlug))
+      .optionalTraverse("folder_child", "e")
+      .recursive({ minHops: 0, maxHops: 100 })
+      .to("Folder", "folder")
+      .select((ctx) => ctx.folder)
+      .execute();
+    const folders = [
+      ...new Map(
+        rows.flatMap((folder) =>
+          folder === undefined ? [] : [[folder.id, folder] as const],
+        ),
+      ).values(),
+    ];
+    if (folders.length === 0) {
+      map.set(rootSlug, { slug: rootSlug, childFolders: [], documents: [] });
+      return map;
+    }
+    const folderRefs = folders.map((folder) => ({
+      kind: "Folder" as const,
+      id: folder.id,
+    }));
+    const byId = new Map(folders.map((folder) => [folder.id, folder]));
+    const [childGroups, documentGroups] = await Promise.all([
+      this.g.edges.folder_child.bulkFindFrom(folderRefs),
+      this.g.edges.in_folder.bulkFindTo(folderRefs),
+    ]);
+    const documentEdges = documentGroups.flat();
+    const documents = await this.g.nodes.Document.getByIds(
+      documentEdges.map((edge) => edge.fromId),
+    );
+    const documentsByFolder = new Map<
+      string,
+      { slug: string; filename: string }[]
+    >();
+    for (const [i, edge] of documentEdges.entries()) {
+      const document = documents[i];
+      const folder = byId.get(edge.toId);
+      if (document === undefined || folder === undefined) continue;
+      const list = documentsByFolder.get(folder.slug) ?? [];
+      list.push({ slug: document.slug, filename: document.filename });
+      documentsByFolder.set(folder.slug, list);
+    }
+    for (const [i, folder] of folders.entries()) {
+      map.set(folder.slug, {
+        slug: folder.slug,
+        childFolders: (childGroups[i] ?? []).flatMap((edge) => {
+          const child = byId.get(edge.toId);
+          return child === undefined
+            ? []
+            : [{ slug: child.slug, position: edge.position }];
+        }),
+        documents: documentsByFolder.get(folder.slug) ?? [],
       });
-      for (const c of children) await visit(c.node.slug);
-    };
-    await visit(rootSlug);
+    }
     return map;
   }
 
@@ -488,7 +572,13 @@ export class FolderRepo {
     }
 
     const taken = new Set(
-      (await findAll((w) => this.g.nodes.Folder.find(w))).map((f) => f.slug),
+      (
+        await this.g
+          .query()
+          .from("Folder", "f")
+          .project((e) => ({ slug: e.f.slug }))
+          .execute()
+      ).map((row) => row.slug),
     );
     const created: string[] = [];
     for (const seg of remaining) {
@@ -510,19 +600,19 @@ export class FolderRepo {
   // Whole tree as flat views (parent + position), for UI render and
   // bundle export. Caller builds the nesting.
   async listAll(): Promise<readonly FolderView[]> {
-    const folders = await findAll((w) => this.g.nodes.Folder.find(w));
-    const byId = new Map(folders.map((f) => [f.id, f]));
-    const parents = await this.parentEdgesOf(folders);
-    return folders.map((f) => {
-      const edge = parents.get(f.id);
-      const parent = edge === undefined ? undefined : byId.get(edge.fromId);
-      return {
-        slug: f.slug,
-        name: f.name,
-        parentSlug: parent?.slug ?? null,
-        position: edge?.position ?? 0,
-      };
-    });
+    const rows = await this.g
+      .query()
+      .from("Folder", "f")
+      .optionalTraverse("folder_child", "e", { direction: "in" })
+      .to("Folder", "parent")
+      .select((ctx) => ({
+        slug: ctx.f.slug,
+        name: ctx.f.name,
+        parentSlug: ctx.parent?.slug ?? null,
+        position: ctx.e?.position ?? 0,
+      }))
+      .execute();
+    return rows;
   }
 
   // — Mutations (single-parent + sibling namespace enforced) ————
@@ -686,26 +776,27 @@ export class FolderRepo {
   // Loads the folder set once and walks in memory — calling `childFolders`
   // per node would re-scan the whole folder table at every step.
   private async subtreeFolders(root: FolderNode): Promise<FolderNode[]> {
-    const all = await findAll((w) => this.g.nodes.Folder.find(w));
-    const byId = new Map(all.map((f) => [f.id, f]));
-    const parents = await this.parentEdgesOf(all);
-    const childrenOf = new Map<string, FolderNode[]>();
-    for (const f of all) {
-      const edge = parents.get(f.id);
-      const parentSlug =
-        edge === undefined ? undefined : byId.get(edge.fromId)?.slug;
-      if (parentSlug === undefined) continue;
-      const list = childrenOf.get(parentSlug) ?? [];
-      list.push(f);
-      childrenOf.set(parentSlug, list);
+    const rows = await this.g
+      .query()
+      .from("Folder", "root")
+      .whereNode("root", (folder) => folder.id.eq(root.id))
+      .optionalTraverse("folder_child", "e")
+      .recursive({ minHops: 0, maxHops: 100, depth: "depth" })
+      .to("Folder", "folder")
+      .select((ctx) => ({ folder: ctx.folder, depth: ctx.depth }))
+      .execute();
+    const unique = new Map<string, { folder: FolderNode; depth: number }>();
+    for (const row of rows) {
+      if (row.folder === undefined) continue;
+      unique.set(row.folder.id, {
+        folder: row.folder,
+        depth: row.depth ?? 0,
+      });
     }
-    const out: FolderNode[] = [];
-    const visit = (n: FolderNode): void => {
-      for (const c of childrenOf.get(n.slug) ?? []) visit(c);
-      out.push(n);
-    };
-    visit(root);
-    return out;
+    if (!unique.has(root.id)) unique.set(root.id, { folder: root, depth: 0 });
+    return [...unique.values()]
+      .sort((a, b) => b.depth - a.depth)
+      .map((row) => row.folder);
   }
 
   // Place (or re-place) a document in a folder (null = root). Replaces

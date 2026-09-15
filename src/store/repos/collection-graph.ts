@@ -138,6 +138,10 @@ export class CorpusGraph {
     return this.toMetas(await this.g.nodes.Collection.find({ limit }));
   }
 
+  count(): Promise<number> {
+    return this.g.query().from("Collection", "c").count();
+  }
+
   // Every corpus, paginated (bundle export); `list(limit)` is the bounded
   // UI variant.
   async listAll(): Promise<readonly CorpusMeta[]> {
@@ -358,41 +362,40 @@ export class CorpusGraph {
   async ordered(
     corpusSlug: CorpusSlug,
   ): Promise<readonly CorpusDocView[] | undefined> {
-    const col = await this.findCorpus(corpusSlug);
-    if (col === undefined) return undefined;
-    const edges = await this.g.edges.includes.findFrom({
-      kind: "Collection",
-      id: col.id,
-    });
-    // Hydrated in one chunked read (see `entries`), not a `getById` per
-    // member — this feeds every corpus assembly and CorpusVersion.
-    const heads = await this.g.nodes.Document.getByIds(
-      edges.map((e) => e.toId),
-    );
-    return edges
-      .flatMap((e, i) => {
-        const d = heads[i];
-        return d === undefined
-          ? []
-          : [
-              {
-                d,
-                position: e.position,
-                delivery: corpusDelivery(e.delivery),
-              },
-            ];
-      })
-      .sort(
-        (a, b) => a.position - b.position || a.d.slug.localeCompare(b.d.slug),
-      )
-      .map((x) => ({
-        slug: x.d.slug,
-        title: x.d.title,
-        docVersion: x.d.docVersion,
-        contentHash: x.d.contentHash,
-        updatedAt: x.d.updatedAt,
-        position: x.position,
-        delivery: x.delivery,
+    const [cols, rows] = await this.g.batchOnce(() => [
+      this.g
+        .query()
+        .from("Collection", "c")
+        .whereNode("c", (c) => c.slug.eq(corpusSlug))
+        .select((ctx) => ctx.c.id)
+        .limit(1),
+      this.g
+        .query()
+        .from("Collection", "c")
+        .whereNode("c", (c) => c.slug.eq(corpusSlug))
+        .traverse("includes", "e")
+        .to("Document", "d")
+        .project((e) => ({
+          slug: e.d.slug,
+          title: e.d.title,
+          docVersion: e.d.docVersion,
+          contentHash: e.d.contentHash,
+          updatedAt: e.d.updatedAt,
+          position: e.e.position,
+          delivery: e.e.delivery,
+        })),
+    ]);
+    if (cols[0] === undefined) return undefined;
+    return [...rows]
+      .sort((a, b) => a.position - b.position || a.slug.localeCompare(b.slug))
+      .map((row) => ({
+        slug: row.slug,
+        title: row.title,
+        docVersion: row.docVersion,
+        contentHash: row.contentHash,
+        updatedAt: row.updatedAt,
+        position: row.position,
+        delivery: corpusDelivery(row.delivery),
       }));
   }
 
@@ -400,16 +403,15 @@ export class CorpusGraph {
   async collectionsIncluding(
     documentSlug: DocumentSlug,
   ): Promise<readonly string[]> {
-    const doc = await this.findDoc(documentSlug);
-    if (doc === undefined) return [];
-    const edges = await this.g.edges.includes.findTo({
-      kind: "Document",
-      id: doc.id,
-    });
-    const cols = await this.g.nodes.Collection.getByIds(
-      edges.map((edge) => edge.fromId),
-    );
-    return cols.flatMap((c) => (c === undefined ? [] : [c.slug]));
+    const rows = await this.g
+      .query()
+      .from("Document", "d")
+      .whereNode("d", (d) => d.slug.eq(documentSlug))
+      .traverse("includes", "e", { direction: "in" })
+      .to("Collection", "c")
+      .project((e) => ({ slug: e.c.slug }))
+      .execute();
+    return rows.map((row) => row.slug);
   }
 
   // — Folder→corpus links ————————————————————————————————————
@@ -425,49 +427,48 @@ export class CorpusGraph {
   // Raw direct-document + folder-include edges (slug + position), the
   // shared resolver's input. undefined when the corpus is missing.
   async entries(corpusSlug: CorpusSlug): Promise<CorpusEntries | undefined> {
-    const col = await this.findCorpus(corpusSlug);
-    if (col === undefined) return undefined;
-    const [documentEdges, folderEdges] = await Promise.all([
-      this.g.edges.includes.findFrom({ kind: "Collection", id: col.id }),
-      this.g.edges.includes_folder.findFrom({
-        kind: "Collection",
-        id: col.id,
-      }),
+    const [cols, documents, folders] = await this.g.batchOnce(() => [
+      this.g
+        .query()
+        .from("Collection", "c")
+        .whereNode("c", (c) => c.slug.eq(corpusSlug))
+        .select((ctx) => ctx.c.id)
+        .limit(1),
+      this.g
+        .query()
+        .from("Collection", "c")
+        .whereNode("c", (c) => c.slug.eq(corpusSlug))
+        .traverse("includes", "e")
+        .to("Document", "d")
+        .project((e) => ({
+          slug: e.d.slug,
+          position: e.e.position,
+          delivery: e.e.delivery,
+        })),
+      this.g
+        .query()
+        .from("Collection", "c")
+        .whereNode("c", (c) => c.slug.eq(corpusSlug))
+        .traverse("includes_folder", "e")
+        .to("Folder", "f")
+        .project((e) => ({
+          slug: e.f.slug,
+          position: e.e.position,
+          delivery: e.e.delivery,
+        })),
     ]);
-    // One chunked read per member kind, not a `getById` per edge — this
-    // is the corpus read path (UI and MCP), so its statement count
-    // must not scale with membership. `getByIds` preserves input order,
-    // so index `i` of each result belongs to edge `i`; a `undefined`
-    // there is a member node that no longer exists, which is dropped.
-    const [docs, folders] = await Promise.all([
-      this.g.nodes.Document.getByIds(documentEdges.map((e) => e.toId)),
-      this.g.nodes.Folder.getByIds(folderEdges.map((e) => e.toId)),
-    ]);
+    if (cols[0] === undefined) return undefined;
     return {
-      documents: documentEdges.flatMap((e, i) => {
-        const d = docs[i];
-        return d === undefined
-          ? []
-          : [
-              {
-                slug: d.slug,
-                position: e.position,
-                delivery: corpusDelivery(e.delivery),
-              },
-            ];
-      }),
-      folders: folderEdges.flatMap((e, i) => {
-        const f = folders[i];
-        return f === undefined
-          ? []
-          : [
-              {
-                slug: f.slug,
-                position: e.position,
-                delivery: corpusDelivery(e.delivery),
-              },
-            ];
-      }),
+      documents: documents.map((row) => ({
+        slug: row.slug,
+        position: row.position,
+        delivery: corpusDelivery(row.delivery),
+      })),
+      folders: folders.map((row) => ({
+        slug: row.slug,
+        position: row.position,
+        delivery: corpusDelivery(row.delivery),
+      })),
     };
   }
 
@@ -587,15 +588,13 @@ export class CorpusGraph {
   // path-map-mutation fan-out set (a folder rename/move can only change
   // the expansion of a corpus that links some folder).
   async collectionsWithFolderLinks(): Promise<readonly string[]> {
-    const cols = await findAll((w) => this.g.nodes.Collection.find(w));
-    // "Has at least one link" only needs the first edge of each
-    // corpus, so cap the fan-out and read them all in one statement.
-    const grouped = await this.g.edges.includes_folder.bulkFindFrom(
-      cols.map((c) => ({ kind: "Collection" as const, id: c.id })),
-      { limitPerInput: 1 },
-    );
-    return cols
-      .filter((_, i) => (grouped[i]?.length ?? 0) > 0)
-      .map((c) => c.slug);
+    const rows = await this.g
+      .query()
+      .from("Collection", "c")
+      .traverse("includes_folder", "e")
+      .to("Folder", "f")
+      .project((e) => ({ slug: e.c.slug }))
+      .execute();
+    return [...new Set(rows.map((row) => row.slug))];
   }
 }

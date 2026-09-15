@@ -37,6 +37,14 @@ export class DocumentRepo {
     return this.g.nodes.Document.find({ limit });
   }
 
+  liveCount(): Promise<number> {
+    return this.g
+      .query()
+      .from("Document", "d")
+      .whereNode("d", (d) => d.archivedAt.isNull())
+      .count();
+  }
+
   // The whole document set, paginated. Use where a caller needs *every*
   // document (reap, bundle export, slug-collision scan); `list(limit)` is for
   // callers that deliberately bound the result.
