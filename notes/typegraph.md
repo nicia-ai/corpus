@@ -115,7 +115,7 @@ have. Run them by hand against a suspect database; do not wire them into
 
 ## Upstream gaps being tracked
 
-- **No `bulkHardDelete`** (still absent as of 0.63). The store surface's
+- **No `bulkHardDelete`** (still absent as of 0.64). The store surface's
   `bulkDelete` is **soft** — a different operation. Do not "fix"
   `VersionRepo.reapDocumentVersions` or `FolderRepo`'s subtree loop with it.
 - **`neighbors()` node typing** (0.59). `NeighborResult.node` is
@@ -250,3 +250,14 @@ have. Run them by hand against a suspect database; do not wire them into
   rows, and `collect` needs `orderedAggregates` (probed, not guaranteed
   on DO SQLite). Custom dialect `orderedRecordJsonArray` is inert; Corpus
   uses the bundled SQLite adapter.
+- **0.64** — query-backed `updateWhere({ candidates })`, transaction
+  `describe()` / `validateStore()`, deployment-scoped full-text
+  materialization, and the `endpointSetRead` capability for bulk
+  endpoint reads. Corpus already opens through
+  `createAdapterStoreWithSchema`, which attests the deployment-scoped
+  FTS table and activates this graph — `createStore()` would not. No
+  `updateWhere` path: search backfill writes a distinct `searchText` per
+  document, and archive is per-node so change events can name the slug.
+  `describe()` / `validateStore()` stay off the boot path (same as
+  0.54). Bundled SQLite already supports `bulkFindFrom` / `bulkFindTo`;
+  the new capability is a custom-backend contract, not an app change.
