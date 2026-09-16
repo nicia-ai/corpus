@@ -153,14 +153,8 @@ async function hitPath(
 export async function listDocumentRefsProjection(
   u: ProjectUnit,
 ): Promise<{ slug: string; path: string }[]> {
-  const docs = await u.docs.listAll();
   const { slugToPath } = await pathIndex(u);
-  return docs
-    .filter((d) => d.archivedAt === undefined)
-    .map((d) => ({
-      slug: d.slug,
-      path: slugToPath.get(d.slug) ?? d.filename,
-    }));
+  return [...slugToPath.entries()].map(([slug, path]) => ({ slug, path }));
 }
 
 export function listCorporaProjection(
@@ -507,7 +501,11 @@ export async function resolvedViews(
 ): Promise<readonly CorpusDocView[] | undefined> {
   const e = await u.cols.entries(corpusSlug);
   if (e === undefined) return undefined;
-  if (e.folders.length === 0) return u.cols.ordered(corpusSlug);
+  if (e.folders.length === 0) {
+    return [...e.documents].sort(
+      (a, b) => a.position - b.position || a.slug.localeCompare(b.slug),
+    );
+  }
 
   const tree = new Map<string, FolderTreeNode>();
   for (const sub of await Promise.all(
@@ -530,8 +528,8 @@ export async function resolvedViews(
     })),
   ];
   const expanded = expandCorpusDocuments(entries, tree);
-  const nodes = await Promise.all(
-    expanded.map((d) => u.docs.find(asDocumentSlug(d.slug))),
+  const nodes = await u.docs.findMany(
+    expanded.map((d) => asDocumentSlug(d.slug)),
   );
   return nodes
     .map((node, i) =>

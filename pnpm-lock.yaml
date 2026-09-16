@@ -46,8 +46,8 @@ importers:
         specifier: ^0.2.0
         version: 0.2.0(supports-color@10.2.2)
       '@nicia-ai/typegraph':
-        specifier: ^0.62.0
-        version: 0.62.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0))(pg@8.20.0)(zod@4.5.4)
+        specifier: ^0.63.0
+        version: 0.63.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0))(pg@8.20.0)(zod@4.5.4)
       '@tanstack/react-router':
         specifier: ^1.170.32
         version: 1.170.32(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -173,8 +173,8 @@ importers:
         specifier: ^4.23.13
         version: 4.23.13
       typegraph-prev:
-        specifier: npm:@nicia-ai/typegraph@0.61.0
-        version: '@nicia-ai/typegraph@0.61.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0))(pg@8.20.0)(zod@4.5.4)'
+        specifier: npm:@nicia-ai/typegraph@0.62.0
+        version: '@nicia-ai/typegraph@0.62.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0))(pg@8.20.0)(zod@4.5.4)'
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1478,8 +1478,8 @@ packages:
     resolution: {integrity: sha512-DwDktnCXkb5pS/y1M95qtklwmCe0ztfqus8dkhDGTec1jcFi5ic21GgRRZfbyoN9VXWmEoDDCcJQCmyy2wHWmw==}
     engines: {node: '>=22'}
 
-  '@nicia-ai/typegraph@0.61.0':
-    resolution: {integrity: sha512-jM6Eoo6syq86rn/Ssv+eoCjUUqJQDbMGqZocyG64ltCBf2NlR2JC4wYHlOBHu3QtfnlMgEtASXYfnWr1WQI7hg==}
+  '@nicia-ai/typegraph@0.62.0':
+    resolution: {integrity: sha512-0gBi+WlqMNuMVoWO6Cj92EwXZ40GcUxIbag4ody9duWx/z0hOhOkHNKwQHwIJDOtiRCXDU4Uwzppej5aIbKpcA==}
     engines: {node: '>=22'}
     peerDependencies:
       '@electric-sql/pglite': '>=0.5.0 <0.6.0'
@@ -1509,8 +1509,8 @@ packages:
       postgres:
         optional: true
 
-  '@nicia-ai/typegraph@0.62.0':
-    resolution: {integrity: sha512-0gBi+WlqMNuMVoWO6Cj92EwXZ40GcUxIbag4ody9duWx/z0hOhOkHNKwQHwIJDOtiRCXDU4Uwzppej5aIbKpcA==}
+  '@nicia-ai/typegraph@0.63.0':
+    resolution: {integrity: sha512-szVg1VvwdNZBrNmg8szKQhug5G6ZBcHfewN7gLponUD6u7KdfbSiA6kIJSDqylnPU1N6q62o+hj3q4qT662qiw==}
     engines: {node: '>=22'}
     peerDependencies:
       '@electric-sql/pglite': '>=0.5.0 <0.6.0'
@@ -5437,7 +5437,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@nicia-ai/typegraph@0.61.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0))(pg@8.20.0)(zod@4.5.4)':
+  '@nicia-ai/typegraph@0.62.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0))(pg@8.20.0)(zod@4.5.4)':
     dependencies:
       nanoid: 5.1.16
       zod: 4.5.4
@@ -5446,7 +5446,7 @@ snapshots:
       drizzle-orm: 0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0)
       pg: 8.20.0
 
-  '@nicia-ai/typegraph@0.62.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0))(pg@8.20.0)(zod@4.5.4)':
+  '@nicia-ai/typegraph@0.63.0(better-sqlite3@12.10.0)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.10.0)(kysely@0.29.4)(pg@8.20.0))(pg@8.20.0)(zod@4.5.4)':
     dependencies:
       nanoid: 5.1.16
       zod: 4.5.4

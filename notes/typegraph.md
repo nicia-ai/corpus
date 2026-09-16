@@ -115,7 +115,7 @@ have. Run them by hand against a suspect database; do not wire them into
 
 ## Upstream gaps being tracked
 
-- **No `bulkHardDelete`** (still absent as of 0.62). The store surface's
+- **No `bulkHardDelete`** (still absent as of 0.63). The store surface's
   `bulkDelete` is **soft** — a different operation. Do not "fix"
   `VersionRepo.reapDocumentVersions` or `FolderRepo`'s subtree loop with it.
 - **`neighbors()` node typing** (0.59). `NeighborResult.node` is
@@ -241,3 +241,12 @@ have. Run them by hand against a suspect database; do not wire them into
   required members (`planEvolution`, `refreshSchema`,
   `schemaProvisioning`) are inert. Same posture as 0.54: a runtime-
   evolved-schema release against a compile-time graph.
+- **0.63** — `relation.topPerPartition()` (windowed top-N per parent) and
+  `expr.collect({ field }, { orderBy, filter })` (ordered record arrays).
+  Adopted: `latestCollectionVersions` now ranks one row per
+  `collectionSlug` in SQL instead of hydrating every snapshot and
+  reducing in memory. Ruled out: record `collect()` for corpus membership
+  or folder children — `batchOnce` + `project()` already returns typed
+  rows, and `collect` needs `orderedAggregates` (probed, not guaranteed
+  on DO SQLite). Custom dialect `orderedRecordJsonArray` is inert; Corpus
+  uses the bundled SQLite adapter.

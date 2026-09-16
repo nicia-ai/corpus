@@ -20,30 +20,6 @@ import { findAll } from "./paginate";
 
 export type CorpusNode = Node<typeof Collection>;
 
-// Raw corpus membership edges (no hydration): the input the shared
-// resolver merges by the unified position space.
-export type CorpusEntries = Readonly<{
-  documents: readonly Readonly<{
-    slug: string;
-    position: number;
-    delivery: CollectionDelivery;
-  }>[];
-  folders: readonly Readonly<{
-    slug: string;
-    position: number;
-    delivery: CollectionDelivery;
-  }>[];
-}>;
-
-// The corpus head-node fields the repo returns from `list`. Derived
-// from the user-defined `Corpus` Zod schema (`src/graph.ts`) so a
-// new editable field added to the node schema flows through here without
-// a duplicated declaration. `Compact<>` converts Zod's `T | undefined`
-// optionals into true `T?` optionals so the shape composes under
-// `exactOptionalPropertyTypes` without forcing every caller's destination
-// type to widen.
-export type CorpusMeta = Readonly<Compact<CollectionFields>>;
-
 // A corpus member as resolved from the graph: the document head
 // pinned by content hash + version, in attach order. The DO hydrates
 // `markdown` from the blob store (corpus) or snapshots this directly
@@ -57,6 +33,19 @@ export type CorpusDocView = Readonly<{
   position: number;
   delivery: CollectionDelivery;
 }>;
+
+// Direct-document + folder-include membership. Document heads are
+// hydrated; folders stay slug + position for the shared expander.
+export type CorpusEntries = Readonly<{
+  documents: readonly CorpusDocView[];
+  folders: readonly Readonly<{
+    slug: string;
+    position: number;
+    delivery: CollectionDelivery;
+  }>[];
+}>;
+
+export type CorpusMeta = Readonly<Compact<CollectionFields>>;
 
 // What happened to the includes edge — the DO turns this into the change
 // event so the attached-vs-reordered rule lives in one place. `unchanged`
@@ -362,41 +351,11 @@ export class CorpusGraph {
   async ordered(
     corpusSlug: CorpusSlug,
   ): Promise<readonly CorpusDocView[] | undefined> {
-    const [cols, rows] = await this.g.batchOnce(() => [
-      this.g
-        .query()
-        .from("Collection", "c")
-        .whereNode("c", (c) => c.slug.eq(corpusSlug))
-        .select((ctx) => ctx.c.id)
-        .limit(1),
-      this.g
-        .query()
-        .from("Collection", "c")
-        .whereNode("c", (c) => c.slug.eq(corpusSlug))
-        .traverse("includes", "e")
-        .to("Document", "d")
-        .project((e) => ({
-          slug: e.d.slug,
-          title: e.d.title,
-          docVersion: e.d.docVersion,
-          contentHash: e.d.contentHash,
-          updatedAt: e.d.updatedAt,
-          position: e.e.position,
-          delivery: e.e.delivery,
-        })),
-    ]);
-    if (cols[0] === undefined) return undefined;
-    return [...rows]
-      .sort((a, b) => a.position - b.position || a.slug.localeCompare(b.slug))
-      .map((row) => ({
-        slug: row.slug,
-        title: row.title,
-        docVersion: row.docVersion,
-        contentHash: row.contentHash,
-        updatedAt: row.updatedAt,
-        position: row.position,
-        delivery: corpusDelivery(row.delivery),
-      }));
+    const e = await this.entries(corpusSlug);
+    if (e === undefined) return undefined;
+    return [...e.documents].sort(
+      (a, b) => a.position - b.position || a.slug.localeCompare(b.slug),
+    );
   }
 
   // Corpora whose assembled corpus changes when this document changes.
@@ -442,6 +401,10 @@ export class CorpusGraph {
         .to("Document", "d")
         .project((e) => ({
           slug: e.d.slug,
+          title: e.d.title,
+          docVersion: e.d.docVersion,
+          contentHash: e.d.contentHash,
+          updatedAt: e.d.updatedAt,
           position: e.e.position,
           delivery: e.e.delivery,
         })),
@@ -461,6 +424,10 @@ export class CorpusGraph {
     return {
       documents: documents.map((row) => ({
         slug: row.slug,
+        title: row.title,
+        docVersion: row.docVersion,
+        contentHash: row.contentHash,
+        updatedAt: row.updatedAt,
         position: row.position,
         delivery: corpusDelivery(row.delivery),
       })),

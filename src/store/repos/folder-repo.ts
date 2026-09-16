@@ -21,6 +21,8 @@ import type { DocumentNode } from "./document-repo";
 
 export type FolderNode = Node<typeof Folder>;
 
+const FOLDER_WALK_MAX_HOPS = 100;
+
 export type DocumentPathRow = Readonly<{
   slug: string;
   filename: string;
@@ -192,10 +194,10 @@ export class FolderRepo {
         .from("Folder", "f")
         .optionalTraverse("folder_child", "e", { direction: "in" })
         .to("Folder", "parent")
-        .select((ctx) => ({ node: ctx.f, parent: ctx.parent }))
+        .select((ctx) => ({ node: ctx.f, orphan: ctx.parent === undefined }))
         .execute();
       return rows
-        .filter((row) => row.parent === undefined)
+        .filter((row) => row.orphan)
         .map((row) => ({ node: row.node, position: 0 }));
     }
     return this.g
@@ -217,11 +219,9 @@ export class FolderRepo {
         .from("Document", "d")
         .optionalTraverse("in_folder", "e")
         .to("Folder", "folder")
-        .select((ctx) => ({ doc: ctx.d, folder: ctx.folder }))
+        .select((ctx) => ({ doc: ctx.d, orphan: ctx.folder === undefined }))
         .execute();
-      return rows
-        .filter((row) => row.folder === undefined)
-        .map((row) => row.doc);
+      return rows.filter((row) => row.orphan).map((row) => row.doc);
     }
     return this.g
       .query()
@@ -273,17 +273,9 @@ export class FolderRepo {
 
   // child slug → parent slug | null, for cycle detection on move.
   private async parentMap(): Promise<Map<string, string | null>> {
-    const rows = await this.g
-      .query()
-      .from("Folder", "f")
-      .optionalTraverse("folder_child", "e", { direction: "in" })
-      .to("Folder", "parent")
-      .select((ctx) => ({
-        slug: ctx.f.slug,
-        parentSlug: ctx.parent?.slug,
-      }))
-      .execute();
-    return new Map(rows.map((row) => [row.slug, row.parentSlug ?? null]));
+    return new Map(
+      (await this.listAll()).map((folder) => [folder.slug, folder.parentSlug]),
+    );
   }
 
   // — Derived reads ——————————————————————————————————————————
@@ -297,7 +289,7 @@ export class FolderRepo {
       .from("Folder", "f")
       .whereNode("f", (f) => f.id.eq(node.id))
       .traverse("folder_child", "e", { direction: "in" })
-      .recursive({ maxHops: 100, depth: "depth" })
+      .recursive({ minHops: 1, maxHops: FOLDER_WALK_MAX_HOPS, depth: "depth" })
       .to("Folder", "ancestor")
       .select((ctx) => ({ ancestor: ctx.ancestor, depth: ctx.depth }))
       .execute();
@@ -346,7 +338,7 @@ export class FolderRepo {
         direction: "in",
         from: "folder",
       })
-      .recursive({ minHops: 0, maxHops: 100, depth: "depth" })
+      .recursive({ minHops: 0, maxHops: FOLDER_WALK_MAX_HOPS, depth: "depth" })
       .to("Folder", "ancestor")
       .select((ctx) => ({
         slug: ctx.d.slug,
@@ -412,7 +404,7 @@ export class FolderRepo {
   }
 
   // The subtree rooted at `rootSlug` as plain data for the pure
-  // resolver (zero-IO there). Cycle-guarded by the visited set.
+  // resolver (zero-IO there). Recursive expansion is cycle-prevented.
   async subtree(rootSlug: string): Promise<Map<string, FolderTreeNode>> {
     const map = new Map<string, FolderTreeNode>();
     const rows = await this.g
@@ -420,7 +412,7 @@ export class FolderRepo {
       .from("Folder", "root")
       .whereNode("root", (root) => root.slug.eq(rootSlug))
       .optionalTraverse("folder_child", "e")
-      .recursive({ minHops: 0, maxHops: 100 })
+      .recursive({ minHops: 0, maxHops: FOLDER_WALK_MAX_HOPS })
       .to("Folder", "folder")
       .select((ctx) => ctx.folder)
       .execute();
@@ -770,18 +762,15 @@ export class FolderRepo {
     return { ok: true, documentSlugs, unlinkedCollections: [...unlinked] };
   }
 
-  // The folder plus every descendant folder, deepest-first (post-order):
-  // each node is emitted only after its children, the safe hard-delete
-  // order (a parent is never removed while a child edge still binds it).
-  // Loads the folder set once and walks in memory — calling `childFolders`
-  // per node would re-scan the whole folder table at every step.
+  // The folder plus every descendant folder, deepest-first: a parent is
+  // never removed while a child edge still binds it.
   private async subtreeFolders(root: FolderNode): Promise<FolderNode[]> {
     const rows = await this.g
       .query()
       .from("Folder", "root")
       .whereNode("root", (folder) => folder.id.eq(root.id))
       .optionalTraverse("folder_child", "e")
-      .recursive({ minHops: 0, maxHops: 100, depth: "depth" })
+      .recursive({ minHops: 0, maxHops: FOLDER_WALK_MAX_HOPS, depth: "depth" })
       .to("Folder", "folder")
       .select((ctx) => ({ folder: ctx.folder, depth: ctx.depth }))
       .execute();
