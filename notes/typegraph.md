@@ -261,3 +261,14 @@ have. Run them by hand against a suspect database; do not wire them into
   `describe()` / `validateStore()` stay off the boot path (same as
   0.54). Bundled SQLite already supports `bulkFindFrom` / `bulkFindTo`;
   the new capability is a custom-backend contract, not an app change.
+- **0.65** — evolution-aware candidate write sets
+  (`planCandidateWriteSetForEvolution`, `MergePlanningStaleError`),
+  cold cursor pages inside `batchOnce()`, expression-level
+  `arrayContains()`, native tuple comparisons for keyset cursors, and
+  version-gated batch updates in `bulkUpsertById()`. Corpus does not
+  evolve `canonicalGraph` at runtime (same as 0.62) and has no merge
+  or candidate-write path. `batchOnce` is three independent hydrations,
+  not cursor pages; `findAll` still offset-pages `find()`. No
+  `bulkUpsertById` / `arrayContains` callers. Compiled-SQL caching and
+  the optional `updateResolvedNodesBatch` / `jsonArrayContainsExpression`
+  hooks are bundled-adapter internals.
