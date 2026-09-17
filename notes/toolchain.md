@@ -32,8 +32,8 @@ source changes were needed.
 typescript-eslint hard-refuses it. `@typescript-eslint/eslint-plugin`
 throws "typescript-eslint does not support TS 7.0" at require time, and
 its peer range is `>=4.8.4 <6.1.0`. No released version supports TS 7
-(8.69.0 is latest; TS >=7.1 support is tracked in typescript-eslint#10940),
-so `pnpm lint` does not run at all.
+(8.70.0 is latest as of 2026-09-16; TS >=7.1 support is still tracked
+in typescript-eslint#10940), so `pnpm lint` does not run at all.
 
 The documented side-by-side workaround — keep TS 6 installed for the
 eslint API — is not worth taking. It leaves `pnpm lint`, the ~7.8 GiB

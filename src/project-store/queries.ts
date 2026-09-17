@@ -78,21 +78,18 @@ export async function listDocumentsProjection(u: ProjectUnit): Promise<
   const docs = (await u.docs.listAll())
     .filter((d) => d.archivedAt === undefined)
     .slice(0, DOC_LIST_LIMIT);
-  const [bytes, folders] = await Promise.all([
+  const [bytes, paths] = await Promise.all([
     u.blobs.getMany(docs.map((d) => d.contentHash)),
-    Promise.all(
-      docs.map((d) => u.folders.documentFolder(asDocumentSlug(d.slug))),
-    ),
+    pathIndex(u),
   ]);
-  const { slugToPath } = await pathIndex(u);
-  return docs.map((d, i) => ({
+  return docs.map((d) => ({
     slug: d.slug,
     title: d.title,
     docVersion: d.docVersion,
     size: estimateTokens(bytes.get(d.contentHash) ?? ""),
     filename: d.filename,
-    path: slugToPath.get(d.slug) ?? d.filename,
-    folderSlug: folders[i]?.slug ?? null,
+    path: paths.slugToPath.get(d.slug) ?? d.filename,
+    folderSlug: paths.slugToFolderSlug.get(d.slug) ?? null,
     updatedAt: d.updatedAt,
   }));
 }
@@ -156,14 +153,8 @@ async function hitPath(
 export async function listDocumentRefsProjection(
   u: ProjectUnit,
 ): Promise<{ slug: string; path: string }[]> {
-  const docs = await u.docs.listAll();
   const { slugToPath } = await pathIndex(u);
-  return docs
-    .filter((d) => d.archivedAt === undefined)
-    .map((d) => ({
-      slug: d.slug,
-      path: slugToPath.get(d.slug) ?? d.filename,
-    }));
+  return [...slugToPath.entries()].map(([slug, path]) => ({ slug, path }));
 }
 
 export function listCorporaProjection(
@@ -175,16 +166,18 @@ export function listCorporaProjection(
 export async function usageSnapshotProjection(
   u: ProjectUnit,
 ): Promise<ProjectUsageSnapshot> {
-  const [docs, corpora, versions, blobs] = await Promise.all([
-    u.docs.list(DOC_LIST_LIMIT),
-    u.cols.list(DOC_LIST_LIMIT),
-    u.versions.allDocumentVersions(),
-    u.blobs.all(),
-  ]);
+  const [activeDocuments, corpora, documentVersions, blobs] = await Promise.all(
+    [
+      u.docs.liveCount(),
+      u.cols.count(),
+      u.versions.totalCount(),
+      u.blobs.all(),
+    ],
+  );
   return {
-    activeDocuments: docs.filter((d) => d.archivedAt === undefined).length,
-    corpora: corpora.length,
-    documentVersions: versions.length,
+    activeDocuments,
+    corpora,
+    documentVersions,
     storedMarkdownBytes: blobs.reduce(
       (sum, b) => sum + new TextEncoder().encode(b.bytes).byteLength,
       0,
@@ -508,7 +501,11 @@ export async function resolvedViews(
 ): Promise<readonly CorpusDocView[] | undefined> {
   const e = await u.cols.entries(corpusSlug);
   if (e === undefined) return undefined;
-  if (e.folders.length === 0) return u.cols.ordered(corpusSlug);
+  if (e.folders.length === 0) {
+    return [...e.documents].sort(
+      (a, b) => a.position - b.position || a.slug.localeCompare(b.slug),
+    );
+  }
 
   const tree = new Map<string, FolderTreeNode>();
   for (const sub of await Promise.all(
@@ -531,8 +528,8 @@ export async function resolvedViews(
     })),
   ];
   const expanded = expandCorpusDocuments(entries, tree);
-  const nodes = await Promise.all(
-    expanded.map((d) => u.docs.find(asDocumentSlug(d.slug))),
+  const nodes = await u.docs.findMany(
+    expanded.map((d) => asDocumentSlug(d.slug)),
   );
   return nodes
     .map((node, i) =>
@@ -559,36 +556,20 @@ export async function pathIndex(u: ProjectUnit): Promise<
   Readonly<{
     pathToSlug: Map<string, string>;
     slugToPath: Map<string, string>;
+    slugToFolderSlug: Map<string, string | null>;
   }>
 > {
-  // Archived docs retain their in_folder edge but must not occupy a path —
-  // otherwise a re-upload at the same path collides and relative-link
-  // resolution becomes non-deterministic (can resolve to the hidden doc).
-  const docs = (await u.docs.listAll()).filter(
-    (d) => d.archivedAt === undefined,
-  );
-  const folders = await Promise.all(
-    docs.map((d) => u.folders.documentFolder(asDocumentSlug(d.slug))),
-  );
-  const namesByFolder = new Map<string, readonly string[]>();
+  const rows = await u.folders.liveDocumentPaths();
   const pathToSlug = new Map<string, string>();
   const slugToPath = new Map<string, string>();
-  for (let i = 0; i < docs.length; i += 1) {
-    const d = docs[i];
-    if (d === undefined) continue;
-    const folder = folders[i];
-    let names: readonly string[] = [];
-    if (folder != null) {
-      names =
-        namesByFolder.get(folder.slug) ??
-        (await u.folders.ancestorNames(folder));
-      namesByFolder.set(folder.slug, names);
-    }
-    const path = derivePath(names, d.filename);
-    pathToSlug.set(path, d.slug);
-    slugToPath.set(d.slug, path);
+  const slugToFolderSlug = new Map<string, string | null>();
+  for (const row of rows) {
+    const path = derivePath(row.ancestorNames, row.filename);
+    pathToSlug.set(path, row.slug);
+    slugToPath.set(row.slug, path);
+    slugToFolderSlug.set(row.slug, row.folderSlug);
   }
-  return { pathToSlug, slugToPath };
+  return { pathToSlug, slugToPath, slugToFolderSlug };
 }
 
 export async function corpusOutlineProjection(

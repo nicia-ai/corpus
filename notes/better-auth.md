@@ -23,6 +23,12 @@ See the [upgrade guide](https://better-auth.com/docs/guides/1-7-upgrade-guide).
   provider mapping (`credential` → `local:credential`, `google` →
   `https://accounts.google.com`); `0004` adds the NOT NULL + unique index
   once every row already has a value.
+- 1.7.3 restored the 1.6 account key (`providerId`, `accountId`) and
+  dropped `issuer` from the generated schema. Databases that already
+  applied 1.7.0–1.7.2 must drop the unique index then the column
+  (SQLite has no `ALTER COLUMN`); `0005_volatile_warbird.sql` is that
+  cleanup. New rows no longer write `issuer`, so leaving the NOT NULL
+  column in place rejects every sign-up.
 - `@better-auth/oauth-provider@1.7`'s bundled `.d.mts` widens some
   OpenAPI-parameter literals to include explicit `key?: undefined`
   members, which fails `BetterAuthPlugin` under our

@@ -6,23 +6,19 @@ import { setGraphStatementSinkForTest } from "../src/store/statement-log";
 
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
-// The set-oriented reads (`bulkFindFrom` / `bulkFindTo` / `getByIds`) are
-// invisible in results — a `findFrom` per node returns exactly the same
-// data, just one statement at a time. So the regression these tests keep
-// is the COST: run the identical operation over a small and a large
-// fixture and require the statements it submits to match. An absolute
-// count would break on any unrelated TypeGraph change; invariance across
-// N is the property that actually matters and only breaks when someone
-// reintroduces a per-item read.
+// The set-oriented reads (`query` traversals, `bulkFindFrom` /
+// `bulkFindTo`, `getByIds`) are invisible in results — a `findFrom` per
+// node returns exactly the same data, just one statement at a time. So
+// the regression these tests keep is the COST: run the identical
+// operation over a small and a large fixture and require the statements
+// it submits to match. An absolute count would break on any unrelated
+// TypeGraph change; invariance across N is the property that actually
+// matters and only breaks when someone reintroduces a per-item read.
 //
 // `setGraphStatementSinkForTest` is module-level (like the paging seam), so
 // it observes the statements issued INSIDE the DO.
 const SMALL = 3;
 const LARGE = 12;
-
-// A widened endpoint predicate — `to_id IN (?, ?, …)` — is what a bulk
-// read compiles to, and what a loop of point reads never produces.
-const WIDENED_ENDPOINT = '_id" IN (';
 
 type Store = DurableObjectStub<ProjectStore>;
 
@@ -106,7 +102,7 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     return store;
   }
 
-  it("reads every folder's parent edge in one widened statement", async () => {
+  it("reads every folder's parent in a statement count independent of N", async () => {
     const [few, many] = await Promise.all([
       withChildFolders(SMALL),
       withChildFolders(LARGE),
@@ -117,9 +113,6 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     expect(forFew.result).toHaveLength(SMALL + 1);
     expect(forMany.result).toHaveLength(LARGE + 1);
     expectSameCost(forFew.statements, forMany.statements);
-    expect(
-      forMany.statements.filter((sql) => sql.includes(WIDENED_ENDPOINT)),
-    ).toHaveLength(1);
   });
 
   it("scans the root's documents in one read when placing a document there", async () => {

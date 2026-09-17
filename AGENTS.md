@@ -229,18 +229,31 @@ rules.
   never to bare `Store<…>` — Corpus needs the **adapter** surface, which
   is what exposes the `tx.sql` the atomic graph+ledger write depends on.
   Backends import from `@nicia-ai/typegraph/adapters/drizzle/sqlite`.
+  Since 0.60 the adapter store and transaction also share `query()`,
+  `neighbors()`, `countNeighbors()`, `subgraph()`, and `batchOnce()`.
 - Reach `tx.sql` only by narrowing the `tx.sqlAvailability` discriminant
   (`"available" | "history" | "revisionTracking" | "unavailable"`); the
   non-available arms omit `sql` outright. `ProjectStore.write()` narrows
   once, at the single point a transaction opens.
+- Hydrate one source node's adjacent entities with
+  `query().traverse().to()` (and `batchOnce` of those when several
+  independent reads share a round trip), not `findFrom`/`findTo` plus
+  `getByIds`. Use `project()` when only fields are needed; `select()`
+  when the full node is. `neighbors()` returns `Node<AllNodeTypes>`
+  which does not kind-narrow — skip it when the adjacent kind matters.
+  `select()` of `ctx.e.id` is a plain `string` and cannot be passed to
+  `edges.update` / `hardDelete`; keep the collection `findFrom` /
+  `findTo` when the branded `EdgeId` is required for a later write.
 - Reading the edges of a SET of nodes goes through `bulkFindFrom` /
   `bulkFindTo`, never `findFrom` / `findTo` per item: they widen
   `from_id = ?` to `from_id IN (…)`, so a whole-tree walk costs a
   statement per bind-budget chunk instead of one per node. Results are
-  grouped parallel to the input. `FolderRepo.parentEdgesOf` /
-  `docFolderEdgesOf` are the shape to copy; `limitPerInput: 1` when the
-  question is only "does a link exist". Keeper:
-  `test/bulk-edge-reads.test.ts`.
+  grouped parallel to the input. `FolderRepo.parentEdgesOf` is the
+  shape to copy; `limitPerInput: 1` when the question is only "does a
+  link exist". Keeper: `test/bulk-edge-reads.test.ts`.
+- `query().count()` / `.first()` for aggregates and latest-version
+  reads. Do not hydrate a matching set just to take `.length` or
+  `reduce(max)`.
 - `hardDelete` per node/edge is correct, not a missed optimization. The
   store surface's `bulkDelete` is **soft** — a different operation. Do
   not "fix" `VersionRepo.reapDocumentVersions` or `FolderRepo`'s subtree

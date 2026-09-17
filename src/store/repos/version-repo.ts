@@ -66,8 +66,16 @@ export class VersionRepo {
     );
   }
 
-  async versionCount(slug: DocumentSlug): Promise<number> {
-    return (await this.findDocumentVersions(slug)).length;
+  versionCount(slug: DocumentSlug): Promise<number> {
+    return this.g
+      .query()
+      .from("DocumentVersion", "v")
+      .whereNode("v", (v) => v.slug.eq(slug))
+      .count();
+  }
+
+  totalCount(): Promise<number> {
+    return this.g.query().from("DocumentVersion", "v").count();
   }
 
   async documentVersions(
@@ -160,36 +168,42 @@ export class VersionRepo {
     );
   }
 
-  private async findCollectionVersions(
-    collectionSlug: CorpusSlug,
-  ): Promise<CollectionVersionNode[]> {
-    return findAll((w) =>
-      this.g.nodes.CollectionVersion.find({
-        where: (c) => c.collectionSlug.eq(collectionSlug),
-        ...w,
-      }),
-    );
-  }
-
   // Highest collectionVersion for a corpus, or 0 if none yet.
   async latestCollectionVersion(collectionSlug: CorpusSlug): Promise<number> {
-    const nodes = await this.findCollectionVersions(collectionSlug);
-    return nodes.reduce((max, n) => Math.max(max, n.collectionVersion), 0);
+    const latest = await this.g
+      .query()
+      .from("CollectionVersion", "v")
+      .whereNode("v", (v) => v.collectionSlug.eq(collectionSlug))
+      .orderBy("v", "collectionVersion", "desc")
+      .select((ctx) => ctx.v.collectionVersion)
+      .first();
+    return latest ?? 0;
   }
 
   // The current membership snapshot per corpus (bundle export, verifier).
   async latestCollectionVersions(): Promise<readonly CollectionVersionRow[]> {
-    const nodes = await findAll((w) => this.g.nodes.CollectionVersion.find(w));
-    const latest = new Map<string, CollectionVersionNode>();
-    for (const n of nodes) {
-      const prev = latest.get(n.collectionSlug);
-      if (prev === undefined || n.collectionVersion > prev.collectionVersion) {
-        latest.set(n.collectionSlug, n);
-      }
-    }
-    return [...latest.values()]
-      .map(toCollectionVersionRow)
-      .sort((a, b) => a.collectionSlug.localeCompare(b.collectionSlug));
+    const rows = await this.g
+      .query()
+      .from("CollectionVersion", "v")
+      .project((e) => ({
+        collectionSlug: e.v.collectionSlug,
+        collectionVersion: e.v.collectionVersion,
+        members: e.v.members,
+        changedAt: e.v.changedAt,
+        changedBy: e.v.changedBy,
+      }))
+      .asRelation()
+      .topPerPartition({
+        partitionBy: (columns) => [columns.collectionSlug],
+        orderBy: (columns) => [
+          { expression: columns.collectionVersion, direction: "desc" },
+          { expression: columns.collectionSlug },
+        ],
+        limit: 1,
+      })
+      .orderBy((columns) => columns.collectionSlug)
+      .execute();
+    return rows.map(toCollectionVersionRow);
   }
 
   // EVERY membership snapshot, not just the latest per corpus. Retention
@@ -223,7 +237,13 @@ function toDocumentVersionRow(n: DocumentVersionNode): DocumentVersionRow {
 }
 
 function toCollectionVersionRow(
-  n: CollectionVersionNode,
+  n: Readonly<{
+    collectionSlug: string;
+    collectionVersion: number;
+    members: string;
+    changedAt: string;
+    changedBy: string;
+  }>,
 ): CollectionVersionRow {
   return {
     collectionSlug: n.collectionSlug,

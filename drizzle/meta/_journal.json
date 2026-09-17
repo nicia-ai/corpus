@@ -36,6 +36,13 @@
       "when": 1787875875485,
       "tag": "0004_robust_terror",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789578843638,
+      "tag": "0005_volatile_warbird",
+      "breakpoints": true
     }
   ]
 }

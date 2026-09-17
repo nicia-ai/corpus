@@ -1,6 +1,6 @@
 import type { Node } from "@nicia-ai/typegraph";
 
-import type { Document } from "../../graph";
+import { DOCUMENT_SLUG_INDEX, type Document } from "../../graph";
 import type { DocumentSlug } from "../../ids";
 import type { GraphHandle } from "../handle";
 
@@ -33,8 +33,27 @@ export class DocumentRepo {
     return node;
   }
 
+  async findMany(
+    slugs: readonly DocumentSlug[],
+  ): Promise<readonly (DocumentNode | undefined)[]> {
+    const groups = await this.g.nodes.Document.bulkFindByIndex(
+      DOCUMENT_SLUG_INDEX,
+      slugs.map((slug) => ({ props: { slug } })),
+      { limitPerInput: 1 },
+    );
+    return groups.map((group) => group[0]);
+  }
+
   list(limit: number): Promise<readonly DocumentNode[]> {
     return this.g.nodes.Document.find({ limit });
+  }
+
+  liveCount(): Promise<number> {
+    return this.g
+      .query()
+      .from("Document", "d")
+      .whereNode("d", (d) => d.archivedAt.isNull())
+      .count();
   }
 
   // The whole document set, paginated. Use where a caller needs *every*

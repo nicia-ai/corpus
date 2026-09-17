@@ -115,11 +115,15 @@ have. Run them by hand against a suspect database; do not wire them into
 
 ## Upstream gaps being tracked
 
-- **No `bulkHardDelete`** (still absent as of 0.56). The store surface
-  exposes only a soft `bulkDelete`, so `VersionRepo.reapDocumentVersions`
-  and `FolderRepo`'s subtree delete loop `hardDelete` per node/edge. 0.53
-  made `bulkDelete` a single atomic exchange, which does not help a hard
-  delete.
+- **No `bulkHardDelete`** (still absent as of 0.64). The store surface's
+  `bulkDelete` is **soft** — a different operation. Do not "fix"
+  `VersionRepo.reapDocumentVersions` or `FolderRepo`'s subtree loop with it.
+- **`neighbors()` node typing** (0.59). `NeighborResult.node` is
+  `Node<AllNodeTypes<G>>`, not the kind-discriminated `AnyNode<G>`, so
+  `hit.node.kind === "Document"` does not expose `slug`. Corpus hydrates
+  a known adjacent kind through `query().traverse().to()` instead.
+  `select()` of `ctx.e.id` is also a plain `string`, so mutation paths
+  that need a branded `EdgeId` keep `findFrom` / `findTo`.
 
 ## Per-release evaluations
 
@@ -171,3 +175,100 @@ have. Run them by hand against a suspect database; do not wire them into
   graph merge write-set, and the ledger-enlisted `ProjectStore.write()`
   already owns apply atomicity. Tracked as a possible future redesign
   of proposal apply, not adopted on this bump.
+- **0.57** — backend contract (`createSqlBackend` + engine profiles),
+  `TransactionConflictError`, and an optional `typegraph_fences` row
+  lock. Corpus passes no capability override and DO SQLite is
+  engine-serialized, so the fences table is not required; `ensureStore`
+  still adopts base storage on boot. `Store.clear()` now rotates the
+  revision-origin nonce — Corpus `purge()` uses `storage.deleteAll()`,
+  not `store.clear()`, so the token-reuse fix is inert here.
+  `applyMergePlanInTransaction` is 0.61; 0.57's merge-retry `cause`
+  nesting does not apply. Ruled out: `retry: { attempts }` on
+  `store.transaction()` — Corpus writes are already single-flighted by
+  the DO.
+- **0.58** — `bulkFindEdgesTo` (cross-kind inbound) and
+  `executeChecked`. Corpus always knows the edge kind, so per-kind
+  `bulkFindTo` remains the call. `canonicalGraph` is static; a
+  schema-version check on every read would add a predicate Corpus
+  cannot violate mid-request. Whole-node `select()` now plans a full
+  fetch up front (no extra statement on a fresh query instance) — that
+  is why folder/document hydrations can `select((ctx) => ctx.child)`
+  without a follow-up load.
+- **0.59** — `batchOnce`, `neighbors`, `countNeighbors`, per-edge-kind
+  `subgraph` windows, `withCheckedReads`. Adopted: `batchOnce` of fluent
+  queries for corpus membership (`ordered` / `entries`) so the corpus
+  lookup and both membership kinds share one statement. Ruled out:
+  `neighbors()` for kind-narrowed hydrations (see gap above);
+  `withCheckedReads` (same reason as `executeChecked`); `subgraph()`
+  for folder trees (`edgeWindows.limit` is required, so an unbounded
+  child set cannot be expressed).
+- **0.60** — the 0.59 read APIs land on `TransactionContext`. This is
+  the hop that made `GraphHandle.query()` / `batchOnce()` legal inside
+  `ProjectStore.write()`, not just `read()`. No new Corpus surface
+  beyond unlocking those calls on the union.
+- **0.61** — query DSL as SQL result shaping: `project()`, `count()`,
+  `exists()`, selected-query `first()`, `expr.collect()`, completed-
+  match `where()`, multi-kind `from([...])`, directed node index keys,
+  `applyMergePlanInTransaction`, `requestRecordedRevision`. Adopted:
+  `count()` / `first()` for version aggregates and usage snapshot
+  (replacing hydrate-then-length / hydrate-then-max); `project()` for
+  corpus membership DTOs; `optionalTraverse` for root-folder /
+  root-document scans and `listFolders`; recursive `folder_child` for
+  ancestor chains, subtree folder sets, and `liveDocumentPaths`
+  (pathIndex is one statement instead of per-doc `documentFolder` +
+  per-folder ancestor walks). Ruled out: directed `keys` indexes
+  (SQLite already scans `(slug, docVersion)` both ways; `keys` cannot
+  back `bulkFindByIndex`); `expr.collect()` (neighbors/project already
+  return typed rows); `from(["Document","Folder"])` for the sibling
+  namespace (shared fields are not the collision key — `name` vs
+  `filename`); merge-plan-in-transaction and recorded checkpoints
+  (Corpus has no graph-merge apply path and does not enable
+  `history: true`). `shareSubgraphs` is opt-in and needs overlapping
+  payload-heavy roots — Corpus subgraphs are disjoint folder trees.
+- **0.62** — `planEvolution()` / `withEvolvedTransaction()` /
+  `refreshSchema()`, plus `branchForEvolution` /
+  `planMergeForEvolution` so a schema change, graph writes, recorded
+  history, and application SQL can share one caller-owned transaction.
+  Corpus does not evolve `canonicalGraph` at runtime and does not merge
+  graphs, so none of this is a boot or write-path change. Bundled
+  SQLite stays `schemaProvisioning: "dml-only"` (identity/vector DDL
+  inside an adopted tx is refused, which Corpus never requests).
+  `ensureStore` remains the only graph entry; do not route schema
+  adoption through `withEvolvedTransaction()`. `SchemaFenceTimeoutError`
+  and `refreshSchema({ ref, minVersion })` are for that evolution
+  handshake, not for `createAdapterStoreWithSchema`. No Corpus mocks
+  implement `StoreEvolution` or `AdapterBackend` by hand, so the new
+  required members (`planEvolution`, `refreshSchema`,
+  `schemaProvisioning`) are inert. Same posture as 0.54: a runtime-
+  evolved-schema release against a compile-time graph.
+- **0.63** — `relation.topPerPartition()` (windowed top-N per parent) and
+  `expr.collect({ field }, { orderBy, filter })` (ordered record arrays).
+  Adopted: `latestCollectionVersions` now ranks one row per
+  `collectionSlug` in SQL instead of hydrating every snapshot and
+  reducing in memory. Ruled out: record `collect()` for corpus membership
+  or folder children — `batchOnce` + `project()` already returns typed
+  rows, and `collect` needs `orderedAggregates` (probed, not guaranteed
+  on DO SQLite). Custom dialect `orderedRecordJsonArray` is inert; Corpus
+  uses the bundled SQLite adapter.
+- **0.64** — query-backed `updateWhere({ candidates })`, transaction
+  `describe()` / `validateStore()`, deployment-scoped full-text
+  materialization, and the `endpointSetRead` capability for bulk
+  endpoint reads. Corpus already opens through
+  `createAdapterStoreWithSchema`, which attests the deployment-scoped
+  FTS table and activates this graph — `createStore()` would not. No
+  `updateWhere` path: search backfill writes a distinct `searchText` per
+  document, and archive is per-node so change events can name the slug.
+  `describe()` / `validateStore()` stay off the boot path (same as
+  0.54). Bundled SQLite already supports `bulkFindFrom` / `bulkFindTo`;
+  the new capability is a custom-backend contract, not an app change.
+- **0.65** — evolution-aware candidate write sets
+  (`planCandidateWriteSetForEvolution`, `MergePlanningStaleError`),
+  cold cursor pages inside `batchOnce()`, expression-level
+  `arrayContains()`, native tuple comparisons for keyset cursors, and
+  version-gated batch updates in `bulkUpsertById()`. Corpus does not
+  evolve `canonicalGraph` at runtime (same as 0.62) and has no merge
+  or candidate-write path. `batchOnce` is three independent hydrations,
+  not cursor pages; `findAll` still offset-pages `find()`. No
+  `bulkUpsertById` / `arrayContains` callers. Compiled-SQL caching and
+  the optional `updateResolvedNodesBatch` / `jsonArrayContainsExpression`
+  hooks are bundled-adapter internals.
