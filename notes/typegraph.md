@@ -52,6 +52,24 @@ the adoption really runs and is not a no-op. This is a second reason
 `ensureStore` must stay the single entry to a project's graph: a
 least-privilege open would now fail instead of self-healing.
 
+## Legacy DOs and base-schema release 3 (0.57)
+
+The 0.56 -> 0.65 bump 500'd every project provisioned before 0.33 with
+`no such table: typegraph_recorded_nodes`. Release 3 adopts by running
+`CREATE INDEX ... ON typegraph_recorded_nodes/edges`, assuming the recorded
+relations exist; those DOs never got them (Corpus doesn't capture history,
+and `ensureSchema` only creates base tables on a fresh database). The
+failed open had already stamped base schema v2, so **rolling back to 0.56
+does not help** -- it refuses a DO stamped newer than it knows. Roll
+forward only.
+
+`ensureStore` now calls `backend.bootstrapTables()` before opening: all
+`IF NOT EXISTS`, creates whatever is missing, stamps the current version.
+The bump's own `typegraph-prev` alias pointed at 0.64 (already release 3),
+which is why the keeper passed; it must name the release _deployed to
+production_, not merely the previous npm version. Keeper case: "predates
+the recorded-history relations".
+
 ## Why the atomic-write releases don't speed Corpus up
 
 0.53's headline is a large write-path reduction (atomic mutation programs
@@ -272,3 +290,9 @@ have. Run them by hand against a suspect database; do not wire them into
   `bulkUpsertById` / `arrayContains` callers. Compiled-SQL caching and
   the optional `updateResolvedNodesBatch` / `jsonArrayContainsExpression`
   hooks are bundled-adapter internals.
+- **0.66** — `tx.writeNodeUpsertBatch()` for recorded PostgreSQL
+  transactions, plus schema-fence evidence leased across recorded
+  transactions. Both are PostgreSQL-only and need `history`; Corpus is DO
+  SQLite with no capture, so this is a no-op. It does not touch SQLite
+  base-schema adoption, so the legacy-DO `bootstrapTables()` call in
+  `ensureStore` (see above) is still required.
