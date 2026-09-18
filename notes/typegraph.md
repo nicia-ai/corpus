@@ -63,12 +63,17 @@ failed open had already stamped base schema v2, so **rolling back to 0.56
 does not help** -- it refuses a DO stamped newer than it knows. Roll
 forward only.
 
-`ensureStore` now calls `backend.bootstrapTables()` before opening: all
-`IF NOT EXISTS`, creates whatever is missing, stamps the current version.
+Fixed upstream in 0.66.1: version-3 adoption now creates the missing
+recorded relations and their indexes first, and resumes from a DO left at
+v2. An interim `backend.bootstrapTables()` call in `ensureStore` was
+verified as a workaround and then removed; 0.66.0 still fails without it
+(both keeper cases below fail there with the production error).
+
 The bump's own `typegraph-prev` alias pointed at 0.64 (already release 3),
 which is why the keeper passed; it must name the release _deployed to
-production_, not merely the previous npm version. Keeper case: "predates
-the recorded-history relations".
+production_, not merely the previous npm version. Keeper cases: "predates
+the recorded-history relations" at base-schema v1 (untouched legacy DO) and
+v2 (already failed once).
 
 ## Why the atomic-write releases don't speed Corpus up
 
@@ -293,6 +298,6 @@ have. Run them by hand against a suspect database; do not wire them into
 - **0.66** — `tx.writeNodeUpsertBatch()` for recorded PostgreSQL
   transactions, plus schema-fence evidence leased across recorded
   transactions. Both are PostgreSQL-only and need `history`; Corpus is DO
-  SQLite with no capture, so this is a no-op. It does not touch SQLite
-  base-schema adoption, so the legacy-DO `bootstrapTables()` call in
-  `ensureStore` (see above) is still required.
+  SQLite with no capture, so this is a no-op. **0.66.1** is the patch that
+  matters: it fixes base-schema release 3 adoption on databases without
+  the recorded relations (see "Legacy DOs" above).
