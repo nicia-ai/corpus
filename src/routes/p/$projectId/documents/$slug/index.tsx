@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DocumentCurrentPage } from "@/features/documents/DocumentCurrentPage";
 import { asProjectId } from "@/ids";
 import { getDocumentReview } from "@/lib/server/document-review";
+import { Route as ProjectRoute } from "@/routes/p/$projectId/route";
 
 export const Route = createFileRoute("/p/$projectId/documents/$slug/")({
   component: CurrentTabRoute,
@@ -21,6 +22,7 @@ function CurrentTabRoute(): React.ReactElement {
   const { doc, blocks, comments, suggestions, viewerId, docRefs } =
     Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
+  const isOwner = ProjectRoute.useLoaderData().current.role === "owner";
   if (doc === undefined) {
     return <p className="mt-4 text-slate-500">Document not found.</p>;
   }
@@ -33,6 +35,7 @@ function CurrentTabRoute(): React.ReactElement {
       suggestions={suggestions}
       viewerId={viewerId}
       docRefs={docRefs}
+      isOwner={isOwner}
     />
   );
 }

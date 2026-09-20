@@ -190,8 +190,36 @@ export const adminAudit = sqliteTable(
   (t) => [index("admin_audit_created_at_idx").on(t.createdAt)],
 );
 
+// Cross-tenant document handshake. The unguessable `id` is the path
+// segment on `/s/:id` (share-link pattern — owner can recopy). There is
+// NO FK to the Document: documents live in the per-Project DO, so
+// `documentSlug` is a non-FK pointer (404 if missing/archived). Grant is
+// suggest | replace; read is implied. SQL mutations are scoped by
+// `(id, projectId)` so a stray id from another project is a silent no-op.
+export const embassy = sqliteTable(
+  "embassy",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    documentSlug: text("document_slug").notNull(),
+    grant: text("grant", { enum: ["read", "suggest", "replace"] }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    fetchCount: integer("fetch_count").notNull().default(0),
+    lastFetchedAt: integer("last_fetched_at", { mode: "timestamp_ms" }),
+    writeCount: integer("write_count").notNull().default(0),
+    createdAt,
+  },
+  (t) => [index("embassy_project_slug_idx").on(t.projectId, t.documentSlug)],
+);
+
 export type Project = Readonly<typeof project.$inferSelect>;
 export type Connection = Readonly<typeof connection.$inferSelect>;
 export type ApiKey = Readonly<typeof apiKey.$inferSelect>;
 export type PendingConnect = Readonly<typeof pendingConnect.$inferSelect>;
 export type AdminAudit = Readonly<typeof adminAudit.$inferSelect>;
+export type Embassy = Readonly<typeof embassy.$inferSelect>;

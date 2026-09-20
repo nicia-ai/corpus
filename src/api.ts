@@ -24,6 +24,7 @@ import { connectionClaimKey } from "./control/oauth-selection";
 import { resolveProjectById } from "./control/project-resolution";
 import type { ConnectionRef } from "./control/refs";
 import { storeFor } from "./control/store-for";
+import { embassyGet, embassyReplace, embassySuggest } from "./embassy/http";
 import {
   asDocumentSlug,
   asProjectId,
@@ -244,6 +245,9 @@ async function apiKeyScope(
 
 export const api = new Hono<{ Bindings: Env }>()
   .get("/healthz", (c) => c.json({ ok: true }))
+  .get("/s/:token", (c) => embassyGet(c))
+  .post("/s/:token/suggest", (c) => embassySuggest(c))
+  .put("/s/:token", (c) => embassyReplace(c))
   // Real-time collaboration channel. Authenticate the upgrade (web session →
   // project member) HERE, then forward it to the per-Project DO, which owns
   // presence + change-nudge fan-out. The DO never sees an unauthenticated

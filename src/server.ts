@@ -41,6 +41,7 @@ const API_PREFIXES = [
   "/mcp",
   "/.well-known/",
   "/healthz",
+  "/s/",
 ];
 
 export type ServerRequestContextExtras = Readonly<

@@ -8,6 +8,7 @@ import { AddMetadataButton } from "@/components/document/AddMetadataButton";
 import { DocHeader } from "@/components/document/DocHeader";
 import { DocumentActionBar } from "@/components/document/DocumentActionBar";
 import { RenameField } from "@/components/document/RenameField";
+import { ShareDialog } from "@/components/document/ShareDialog";
 import type {
   ReviewMark,
   SourceRange,
@@ -52,6 +53,7 @@ import {
   renameFilename,
   saveDocument,
 } from "@/lib/server/documents";
+import { listEmbassies, type EmbassyDto } from "@/lib/server/embassies";
 import {
   createSuggestion,
   type CreateSuggestionResult,
@@ -99,6 +101,7 @@ export function DocumentEditor({
   changeFlash,
   onRemoteContentChange,
   onRemoteSuggestionChange,
+  isOwner,
 }: Readonly<{
   doc: DocSnapshot;
   projectId: ProjectId;
@@ -113,6 +116,7 @@ export function DocumentEditor({
     slug: string,
     seenSuggestionIds: readonly number[],
   ) => void;
+  isOwner: boolean;
 }>): React.ReactElement {
   const router = useRouter();
   // The document is one always-editable surface; comments and suggestions are
@@ -125,6 +129,7 @@ export function DocumentEditor({
   const [renamingFile, setRenamingFile] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
+  const [shareRows, setShareRows] = useState<readonly EmbassyDto[]>();
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const draftRef = useRef(doc.markdown);
   const dirtyRef = useRef(false);
@@ -864,6 +869,18 @@ export function DocumentEditor({
       {deleteError && (
         <span className="text-base text-red-600">{deleteError}</span>
       )}
+      {isOwner && (
+        <Button
+          variant="secondary"
+          onClick={() => {
+            void listEmbassies({
+              data: { projectId, slug: doc.slug },
+            }).then(setShareRows);
+          }}
+        >
+          Share
+        </Button>
+      )}
       <Button
         variant="danger"
         disabled={deletePending}
@@ -930,6 +947,15 @@ export function DocumentEditor({
 
   return (
     <div className="max-w-7xl">
+      {shareRows !== undefined && (
+        <ShareDialog
+          projectId={projectId}
+          slug={head.slug}
+          markdown={head.markdown}
+          initialRows={shareRows}
+          onClose={() => setShareRows(undefined)}
+        />
+      )}
       {reviewModel.items.map((item) =>
         item.kind === "suggestion" ? (
           <span

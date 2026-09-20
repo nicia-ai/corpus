@@ -23,6 +23,7 @@ export type CorpusSlug = Id<"CorpusSlug">;
 export type FolderSlug = Id<"FolderSlug">;
 export type ApiKeyId = Id<"ApiKeyId">;
 export type ConnectionId = Id<"ConnectionId">;
+export type EmbassyId = Id<"EmbassyId">;
 // Better Auth organization-plugin entities: a `member` row id and an
 // `invitation` id. Owned by the plugin (not hand-rolled) but branded
 // here so the web/team surface passes them around type-safely.
@@ -45,6 +46,7 @@ export const asProjectId = (s: string): ProjectId => s as ProjectId;
 export const asUserId = (s: string): UserId => s as UserId;
 export const asApiKeyId = (s: string): ApiKeyId => s as ApiKeyId;
 export const asConnectionId = (s: string): ConnectionId => s as ConnectionId;
+export const asEmbassyId = (s: string): EmbassyId => s as EmbassyId;
 export const asMemberId = (s: string): MemberId => s as MemberId;
 export const asInvitationId = (s: string): InvitationId => s as InvitationId;
 export const asDocumentSlug = (s: string): DocumentSlug => s as DocumentSlug;
@@ -70,6 +72,10 @@ export function callerRefFromOAuth(
   return asCallerRef(`oauth:${userId}:connection:${connectionId}`);
 }
 
+export function callerRefFromEmbassy(embassyId: EmbassyId): CallerRef {
+  return asCallerRef(`embassy:${embassyId}`);
+}
+
 // Decode a stored author id into its kind + bare id — the inverse of the
 // two constructors above and the single sanctioned site where the
 // `apikey:` / `oauth:` prefixes are READ. Server-side label resolution
@@ -79,7 +85,7 @@ export function callerRefFromOAuth(
 // "user".
 export function parseCallerRef(
   ref: string,
-): Readonly<{ kind: "apikey" | "oauth" | "user"; id: string }> {
+): Readonly<{ kind: "apikey" | "oauth" | "embassy" | "user"; id: string }> {
   if (ref.startsWith("apikey:")) {
     const id = ref.slice("apikey:".length);
     if (id !== "") return { kind: "apikey", id };
@@ -89,6 +95,10 @@ export function parseCallerRef(
     const connectionMarker = body.lastIndexOf(":connection:");
     const id = connectionMarker === -1 ? body : body.slice(0, connectionMarker);
     if (id !== "") return { kind: "oauth", id };
+  }
+  if (ref.startsWith("embassy:")) {
+    const id = ref.slice("embassy:".length);
+    if (id !== "") return { kind: "embassy", id };
   }
   return { kind: "user", id: ref };
 }

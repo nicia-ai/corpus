@@ -44,6 +44,7 @@ export function DocumentCurrentPage({
   suggestions,
   viewerId,
   docRefs,
+  isOwner,
 }: Readonly<{
   doc: DocSnapshot | undefined;
   projectId: ProjectId;
@@ -52,6 +53,7 @@ export function DocumentCurrentPage({
   suggestions: SuggestionsResult;
   viewerId: string;
   docRefs: readonly DocRef[];
+  isOwner: boolean;
 }>): React.ReactElement | null {
   const nextFlashId = useRef(0);
   const [remoteFlashRequest, setRemoteFlashRequest] =
@@ -125,6 +127,7 @@ export function DocumentCurrentPage({
       changeFlash={changeFlash}
       onRemoteContentChange={queueRemoteContentFlash}
       onRemoteSuggestionChange={queueRemoteSuggestionFlash}
+      isOwner={isOwner}
     />
   );
 }

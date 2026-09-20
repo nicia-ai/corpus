@@ -81,6 +81,9 @@ function labelFor(callerRef: string): {
   if (kind === "oauth") {
     return { callerLabel: `User · ${id.slice(0, 8)}…`, authPath: "oauth" };
   }
+  if (kind === "embassy") {
+    return { callerLabel: "Shared agent", authPath: "apikey" };
+  }
   return { callerLabel: callerRef, authPath: "apikey" };
 }
 
