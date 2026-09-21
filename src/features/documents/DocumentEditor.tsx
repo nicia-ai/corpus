@@ -875,7 +875,11 @@ export function DocumentEditor({
           onClick={() => {
             void listEmbassies({
               data: { projectId, slug: doc.slug },
-            }).then(setShareRows);
+            })
+              .then((rows) => setShareRows(rows))
+              .catch(() => {
+                showToast("Could not load sharing links");
+              });
           }}
         >
           Share

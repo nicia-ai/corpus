@@ -25,6 +25,21 @@ function grantLabel(grant: EmbassyGrant): string {
   return "Can suggest edits";
 }
 
+async function copyWithToast(
+  input: Readonly<{
+    value: string;
+    successMessage: string;
+    failureMessage: string;
+  }>,
+): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(input.value);
+    showToast(input.successMessage);
+  } catch {
+    showToast(input.failureMessage);
+  }
+}
+
 export function ShareDialog({
   projectId,
   slug,
@@ -183,10 +198,11 @@ function EmbassyRow({
         <Button
           variant="secondary"
           onClick={() => {
-            void navigator.clipboard.writeText(
-              embassyPrompt({ url, grant: row.grant }),
-            );
-            showToast("Prompt copied");
+            void copyWithToast({
+              value: embassyPrompt({ url, grant: row.grant }),
+              successMessage: "Prompt copied",
+              failureMessage: "Could not copy prompt",
+            });
           }}
         >
           Copy prompt
@@ -194,8 +210,11 @@ function EmbassyRow({
         <Button
           variant="secondary"
           onClick={() => {
-            void navigator.clipboard.writeText(url);
-            showToast("Link copied");
+            void copyWithToast({
+              value: url,
+              successMessage: "Link copied",
+              failureMessage: "Could not copy link",
+            });
           }}
         >
           Copy link

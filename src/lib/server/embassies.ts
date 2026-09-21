@@ -65,12 +65,10 @@ export const createEmbassy = createServerFn({ method: "POST" })
     const c = srv(context);
     const ref = requireProjectOwner(c.project, EMBASSY_ADMIN_MSG);
     const slug = asDocumentSlug(data.slug);
-    if (data.grant === "replace") {
-      const doc = await storeOf(c).getDocument(slug);
-      if (doc === undefined) throw new ValidationError("Document not found");
-      if (!isIntakeMarkdown(doc.markdown)) {
-        throw new ValidationError("Replace is only for empty intake pages");
-      }
+    const doc = await storeOf(c).getDocument(slug);
+    if (doc === undefined) throw new ValidationError("Document not found");
+    if (data.grant === "replace" && !isIntakeMarkdown(doc.markdown)) {
+      throw new ValidationError("Replace is only for empty intake pages");
     }
     const row = await mintEmbassy(connectControlDb(c.env.DB), {
       projectId: ref.projectId,

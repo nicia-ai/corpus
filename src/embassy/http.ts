@@ -92,7 +92,10 @@ async function maybeRedirectMember(
     row.projectId,
   );
   if (ref === undefined) return undefined;
-  return c.redirect(`/p/${row.projectId}/documents/${row.documentSlug}`, 302);
+  return c.redirect(
+    `/p/${encodeURIComponent(row.projectId)}/documents/${encodeURIComponent(row.documentSlug)}`,
+    302,
+  );
 }
 
 type WritePrep =
@@ -165,7 +168,13 @@ export async function embassyGet(c: EnvC): Promise<Response> {
     row.documentSlug,
   );
   if (doc === undefined) return notFound(c, html);
-  void noteEmbassyFetch(connectControlDb(c.env.DB), row.id, row.lastFetchedAt);
+  void noteEmbassyFetch(
+    connectControlDb(c.env.DB),
+    row.id,
+    row.lastFetchedAt,
+  ).catch(() => {
+    // Metrics-only; a D1 failure must not surface as an unhandled rejection.
+  });
   if (html) {
     return c.html(
       embassyPageHtml({
