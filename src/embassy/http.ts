@@ -3,19 +3,30 @@ import type { Context } from "hono";
 import { getAuth } from "@/auth.server";
 import { connectControlDb, type ControlDb } from "@/control/db";
 import {
-  EMBASSY_WRITE_LIMIT,
   noteEmbassyFetch,
-  recordEmbassyWrite,
+  organizationIdForProject,
+  releaseEmbassyWrite,
+  reserveEmbassyWrite,
   resolveLiveEmbassy,
+  spendEmbassyReplace,
   type EmbassyView,
 } from "@/control/embassies";
+import { entitlementsForRequest } from "@/control/entitlements";
 import { resolveProjectById } from "@/control/project-resolution";
 import { storeFor } from "@/control/store-for";
 import { embassyGoneHtml, embassyPageHtml } from "@/embassy/html";
 import { isIntakeMarkdown } from "@/embassy/intake";
 import { embassyPath } from "@/embassy/url";
+import { QuotaExceededError } from "@/errors";
 import { asEmbassyId, callerRefFromEmbassy } from "@/ids";
-import { MARKDOWN_TOO_LARGE_MESSAGE, markdownTooLarge } from "@/util";
+import type { SaveResult } from "@/project-store/contracts";
+import { parseFrontmatter } from "@/store/domain/frontmatter";
+import {
+  isBlank,
+  MARKDOWN_TOO_LARGE_MESSAGE,
+  markdownTooLarge,
+  utf8Bytes,
+} from "@/util";
 
 type EnvC = Readonly<Context<{ Bindings: Env }>>;
 
@@ -111,9 +122,6 @@ async function prepareWrite(
   if (markdownTooLarge(body)) {
     return { ok: false, response: c.text(MARKDOWN_TOO_LARGE_MESSAGE, 413) };
   }
-  if (row.writeCount >= EMBASSY_WRITE_LIMIT) {
-    return { ok: false, response: c.text("rate limited", 429) };
-  }
   return {
     ok: true,
     row,
@@ -121,6 +129,28 @@ async function prepareWrite(
     body,
     db: connectControlDb(c.env.DB),
   };
+}
+
+async function claimWrite(
+  c: EnvC,
+  prep: Extract<WritePrep, { ok: true }>,
+  grant: EmbassyView["grant"],
+): Promise<Response | undefined> {
+  const reserved = await reserveEmbassyWrite(prep.db, {
+    id: prep.row.id,
+    grant,
+  });
+  if (reserved) return undefined;
+  const again = await resolveLiveEmbassy(prep.db, prep.row.id);
+  if (again === undefined) return c.text("not found", 404);
+  if (again.grant !== grant) return c.text("forbidden", 403);
+  return c.text("rate limited", 429);
+}
+
+async function releaseClaim(
+  prep: Extract<WritePrep, { ok: true }>,
+): Promise<void> {
+  await releaseEmbassyWrite(prep.db, prep.row.id);
 }
 
 export async function embassyGet(c: EnvC): Promise<Response> {
@@ -161,29 +191,38 @@ export async function embassyGet(c: EnvC): Promise<Response> {
 export async function embassySuggest(c: EnvC): Promise<Response> {
   const prep = await prepareWrite(c, "suggest");
   if (!prep.ok) return prep.response;
-  const r = await storeFor(c.env, prep.row.projectId).createSuggestion({
-    slug: prep.row.documentSlug,
-    proposedMarkdown: prep.body,
-    clientVersion: prep.clientVersion,
-    createdBy: callerRefFromEmbassy(prep.row.id),
-    channel: "cli",
-  });
-  if (r.ok) {
-    await recordEmbassyWrite(prep.db, { id: prep.row.id });
+  const refused = await claimWrite(c, prep, "suggest");
+  if (refused !== undefined) return refused;
+  try {
+    const r = await storeFor(c.env, prep.row.projectId).createSuggestion({
+      slug: prep.row.documentSlug,
+      proposedMarkdown: prep.body,
+      clientVersion: prep.clientVersion,
+      createdBy: callerRefFromEmbassy(prep.row.id),
+      channel: "cli",
+    });
+    if (!r.ok) {
+      await releaseClaim(prep);
+      if (r.reason === "conflict") {
+        return c.json(
+          { ok: false, conflict: true, currentVersion: r.currentVersion },
+          409,
+        );
+      }
+      if (r.reason === "too-large") {
+        return c.text(MARKDOWN_TOO_LARGE_MESSAGE, 413);
+      }
+      if (r.reason === "missing") return c.text("not found", 404);
+      return c.json({ ok: false, reason: r.reason }, 400);
+    }
     return c.json({ ok: true, suggestionId: r.suggestionId }, 201);
+  } catch (err) {
+    await releaseClaim(prep);
+    throw err;
   }
-  if (r.reason === "conflict") {
-    return c.json(
-      { ok: false, conflict: true, currentVersion: r.currentVersion },
-      409,
-    );
-  }
-  if (r.reason === "too-large") {
-    return c.text(MARKDOWN_TOO_LARGE_MESSAGE, 413);
-  }
-  if (r.reason === "missing") return c.text("not found", 404);
-  return c.json({ ok: false, reason: r.reason }, 400);
 }
+
+const REPLACE_BODY_REQUIRED = "body required";
 
 export async function embassyReplace(c: EnvC): Promise<Response> {
   const prep = await prepareWrite(c, "replace");
@@ -192,25 +231,67 @@ export async function embassyReplace(c: EnvC): Promise<Response> {
   const head = await store.getDocument(prep.row.documentSlug);
   if (head === undefined) return c.text("not found", 404);
   if (!isIntakeMarkdown(head.markdown)) return c.text("forbidden", 403);
-  const r = await store.saveDocument({
-    slug: prep.row.documentSlug,
-    markdown: prep.body,
-    clientVersion: prep.clientVersion,
-    changedBy: callerRefFromEmbassy(prep.row.id),
-  });
-  if (r.ok) {
-    await recordEmbassyWrite(prep.db, {
-      id: prep.row.id,
-      flipGrantToSuggest: true,
+  const fm = parseFrontmatter(prep.body);
+  if (!fm.ok) {
+    return c.text(`invalid YAML frontmatter: ${fm.error}`, 400);
+  }
+  if (isBlank(fm.body)) return c.text(REPLACE_BODY_REQUIRED, 400);
+  const denied = await assertReplaceQuota(c, prep);
+  if (denied !== undefined) return denied;
+  const refused = await claimWrite(c, prep, "replace");
+  if (refused !== undefined) return refused;
+  const r = await saveReplace(store, prep);
+  if (!r.ok) {
+    await releaseClaim(prep);
+    if ("conflict" in r) {
+      return c.json(
+        { ok: false, conflict: true, currentVersion: r.currentVersion },
+        409,
+      );
+    }
+    if ("tooLarge" in r) return c.text(MARKDOWN_TOO_LARGE_MESSAGE, 413);
+    return c.json({ ok: false }, 409);
+  }
+  await spendEmbassyReplace(prep.db, prep.row.id);
+  return c.json({ ok: true, docVersion: r.docVersion }, 200);
+}
+
+async function saveReplace(
+  store: ReturnType<typeof storeFor>,
+  prep: Extract<WritePrep, { ok: true }>,
+): Promise<SaveResult> {
+  try {
+    return await store.saveDocument({
+      slug: prep.row.documentSlug,
+      markdown: prep.body,
+      clientVersion: prep.clientVersion,
+      changedBy: callerRefFromEmbassy(prep.row.id),
     });
-    return c.json({ ok: true, docVersion: r.docVersion }, 200);
+  } catch (err) {
+    await releaseClaim(prep);
+    throw err;
   }
-  if ("conflict" in r) {
-    return c.json(
-      { ok: false, conflict: true, currentVersion: r.currentVersion },
-      409,
-    );
+}
+
+async function assertReplaceQuota(
+  c: EnvC,
+  prep: Extract<WritePrep, { ok: true }>,
+): Promise<Response | undefined> {
+  const organizationId = await organizationIdForProject(
+    prep.db,
+    prep.row.projectId,
+  );
+  try {
+    await entitlementsForRequest(c.req.raw).assertWithinQuota({
+      action: "version_create",
+      organizationId,
+      projectId: prep.row.projectId,
+      amount: 1,
+      bytes: utf8Bytes(prep.body),
+    });
+    return undefined;
+  } catch (err) {
+    if (err instanceof QuotaExceededError) return c.text(err.message, 403);
+    throw err;
   }
-  if ("tooLarge" in r) return c.text(MARKDOWN_TOO_LARGE_MESSAGE, 413);
-  return c.json({ ok: false }, 409);
 }

@@ -149,7 +149,7 @@ export async function createSuggestionCommand(
     return commandOutcome({ ok: false, reason: "too-large" });
   }
   const head = await ctx.u.docs.find(input.slug);
-  if (head === undefined) {
+  if (head === undefined || head.archivedAt !== undefined) {
     return commandOutcome({ ok: false, reason: "missing" });
   }
   if (head.docVersion !== input.clientVersion) {

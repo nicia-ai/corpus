@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { connectControlDb } from "../src/control/db";
 import {
+  EMBASSY_WRITE_LIMIT,
   mintEmbassy,
   resolveLiveEmbassy,
   revokeEmbassy,
@@ -200,5 +201,188 @@ describe("Embassy HTTP", () => {
       .from(embassy)
       .where(eq(embassy.id, live.id));
     expect(row?.revokedAt).not.toBeNull();
+  });
+
+  it("stops at the write limit even when requests race the stale count", async () => {
+    const user = await signUp("em-limit");
+    const org = await createOrg(user, "Limit Org");
+    await seedDoc(org.projectId, "capped", "# Meeting\n\nHello.\n");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("capped"),
+      grant: "suggest",
+    });
+    await db
+      .update(embassy)
+      .set({ writeCount: EMBASSY_WRITE_LIMIT - 1 })
+      .where(eq(embassy.id, link.id));
+
+    const raced = await Promise.all(
+      ["# one\n", "# two\n"].map((body) =>
+        SELF.fetch(`${ORIGIN}/s/${link.id}/suggest`, {
+          method: "POST",
+          headers: {
+            "content-type": "text/markdown",
+            "x-doc-version": "1",
+          },
+          body,
+        }),
+      ),
+    );
+    expect(raced.map((r) => r.status).sort()).toEqual([201, 429]);
+    const [row] = await db
+      .select({ writeCount: embassy.writeCount })
+      .from(embassy)
+      .where(eq(embassy.id, link.id));
+    expect(row?.writeCount).toBe(EMBASSY_WRITE_LIMIT);
+
+    const blocked = await SELF.fetch(`${ORIGIN}/s/${link.id}/suggest`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "# three\n",
+    });
+    expect(blocked.status).toBe(429);
+    expect(
+      await storeFor(env, org.projectId).listSuggestions(docSlug("capped")),
+    ).toHaveLength(1);
+  });
+
+  it("releases a reserved slot when the write conflicts", async () => {
+    const user = await signUp("em-release");
+    const org = await createOrg(user, "Release Org");
+    await seedDoc(org.projectId, "race", "# Meeting\n\nHello.\n");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("race"),
+      grant: "suggest",
+    });
+    await db
+      .update(embassy)
+      .set({ writeCount: EMBASSY_WRITE_LIMIT - 1 })
+      .where(eq(embassy.id, link.id));
+
+    const conflict = await SELF.fetch(`${ORIGIN}/s/${link.id}/suggest`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "0",
+      },
+      body: "# proposed\n",
+    });
+    expect(conflict.status).toBe(409);
+    const [afterConflict] = await db
+      .select({ writeCount: embassy.writeCount })
+      .from(embassy)
+      .where(eq(embassy.id, link.id));
+    expect(afterConflict?.writeCount).toBe(EMBASSY_WRITE_LIMIT - 1);
+
+    const retry = await SELF.fetch(`${ORIGIN}/s/${link.id}/suggest`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "# proposed\n",
+    });
+    expect(retry.status).toBe(201);
+  });
+
+  it("rejects a suggest against an archived document", async () => {
+    const user = await signUp("em-arch");
+    const org = await createOrg(user, "Archive Org");
+    await seedDoc(org.projectId, "gone", "# Meeting\n\nHello.\n");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("gone"),
+      grant: "suggest",
+    });
+    await storeFor(env, org.projectId).archiveDocument(
+      docSlug("gone"),
+      "owner",
+    );
+
+    const suggest = await SELF.fetch(`${ORIGIN}/s/${link.id}/suggest`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "# still here\n",
+    });
+    expect(suggest.status).toBe(404);
+    expect(
+      await storeFor(env, org.projectId).listSuggestions(docSlug("gone")),
+    ).toHaveLength(0);
+  });
+
+  it("does not spend a replace link on an empty or invalid fill", async () => {
+    const user = await signUp("em-fill");
+    const org = await createOrg(user, "Fill Org");
+    await seedDoc(org.projectId, "blank", "");
+    await seedDoc(org.projectId, "fenced", "");
+    const db = connectControlDb(env.DB);
+    const blank = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("blank"),
+      grant: "replace",
+    });
+    const fenced = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("fenced"),
+      grant: "replace",
+    });
+
+    const empty = await SELF.fetch(`${ORIGIN}/s/${blank.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "",
+    });
+    expect(empty.status).toBe(400);
+    const frontmatterOnly = await SELF.fetch(`${ORIGIN}/s/${blank.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "---\ntitle: x\n---\n\n",
+    });
+    expect(frontmatterOnly.status).toBe(400);
+    expect((await resolveLiveEmbassy(db, blank.id))?.grant).toBe("replace");
+
+    const filled = await SELF.fetch(`${ORIGIN}/s/${blank.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "# Filled\n\nWiki notes.\n",
+    });
+    expect(filled.status).toBe(200);
+    expect((await resolveLiveEmbassy(db, blank.id))?.grant).toBe("suggest");
+
+    const badYaml = await SELF.fetch(`${ORIGIN}/s/${fenced.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "---\n- not a mapping\n---\nFilled body.\n",
+    });
+    expect(badYaml.status).toBe(400);
+    expect(await badYaml.text()).toContain("invalid YAML frontmatter");
+    expect((await resolveLiveEmbassy(db, fenced.id))?.grant).toBe("replace");
+    const head = await storeFor(env, org.projectId).getDocument(
+      docSlug("fenced"),
+    );
+    expect(head?.markdown).toBe("");
   });
 });

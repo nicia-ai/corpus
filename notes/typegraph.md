@@ -303,3 +303,9 @@ have. Run them by hand against a suspect database; do not wire them into
   Corpus does not merge graphs or call `clear()`; no app change.
 - **0.68** — atomic durable-branch operations (`operateDurableBranch`).
   Same: Corpus has no durable-merge host. No app change.
+- **0.68.1** — `cloneWorkingCopyStrategy` allows undeclared properties on
+  import, and `compareAndSet` / `updateWhere` no longer throw an untyped
+  Zod error on refined node schemas. Corpus does not branch or use
+  `compareAndSet` (OCC stays the version-node unique). No app change.
+  `typegraph-prev` stays at 0.66.0: that is the release on `main`, so the
+  keeper still tests the hop this branch ships.

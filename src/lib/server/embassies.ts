@@ -135,7 +135,11 @@ export const createIntake = createServerFn({ method: "POST" })
         }),
       );
       if (!saved.ok) {
-        throw new ValidationError("Could not create intake document");
+        throw new ValidationError(
+          "conflict" in saved
+            ? "A document with this title already exists."
+            : "Could not create intake document",
+        );
       }
       const embassy = await mintEmbassy(connectControlDb(c.env.DB), {
         projectId: ref.projectId,

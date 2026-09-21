@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   type EntitlementAction,
   type Entitlements,
+  bindRequestEntitlements,
+  entitlementsForRequest,
   entitlementsOf,
   QuotaExceededError,
   unlimitedEntitlements,
@@ -52,6 +54,22 @@ describe("entitlements port — shipped OSS default is unbounded", () => {
       resolved.assertWithinQuota({ action: "document_create" }),
     ).rejects.toBeInstanceOf(QuotaExceededError);
     expect(seen).toEqual(["document_create"]);
+  });
+
+  it("binds an injected impl to the request for Hono handlers", () => {
+    const request = new Request("https://example.com/s/token");
+    expect(entitlementsForRequest(request)).toBe(unlimitedEntitlements);
+    const denying: Entitlements = {
+      assertWithinQuota: () =>
+        Promise.reject(new QuotaExceededError("over the free tier")),
+    };
+    bindRequestEntitlements(request, denying);
+    expect(entitlementsForRequest(request)).toBe(denying);
+    bindRequestEntitlements(
+      new Request("https://example.com/s/other"),
+      undefined,
+    );
+    expect(entitlementsForRequest(request)).toBe(denying);
   });
 });
 

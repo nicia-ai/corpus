@@ -52,4 +52,19 @@ export function entitlementsOf(
   return source?.entitlements ?? unlimitedEntitlements;
 }
 
+const entitlementsByRequest = new WeakMap<Request, Entitlements>();
+
+export function bindRequestEntitlements(
+  request: Request,
+  entitlements: Entitlements | undefined,
+): void {
+  if (entitlements !== undefined) {
+    entitlementsByRequest.set(request, entitlements);
+  }
+}
+
+export function entitlementsForRequest(request: Request): Entitlements {
+  return entitlementsByRequest.get(request) ?? unlimitedEntitlements;
+}
+
 export { QuotaExceededError };

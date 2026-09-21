@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 
 import type { EmbassyGrant } from "../embassy/grant";
 import {
@@ -11,13 +11,14 @@ import {
 } from "../ids";
 
 import type { ControlDb } from "./db";
-import { embassy } from "./schema/app";
+import { embassy, project } from "./schema/app";
 
 export type { EmbassyGrant };
 
 export const EMBASSY_DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const EMBASSY_WRITE_LIMIT = 30;
 export const EMBASSY_FETCH_DEBOUNCE_MS = 60_000;
+const EMBASSY_REVOKE_BATCH = 80;
 
 export type EmbassyView = Readonly<{
   id: EmbassyId;
@@ -120,16 +121,44 @@ export async function revokeEmbassiesForDocument(
   db: ControlDb,
   input: Readonly<{ projectId: ProjectId; documentSlug: DocumentSlug }>,
 ): Promise<void> {
-  await db
-    .update(embassy)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(embassy.projectId, input.projectId),
-        eq(embassy.documentSlug, input.documentSlug),
-        isNull(embassy.revokedAt),
-      ),
-    );
+  await revokeEmbassiesForDocuments(db, {
+    projectId: input.projectId,
+    documentSlugs: [input.documentSlug],
+  });
+}
+
+export async function revokeEmbassiesForDocuments(
+  db: ControlDb,
+  input: Readonly<{
+    projectId: ProjectId;
+    documentSlugs: readonly DocumentSlug[];
+  }>,
+): Promise<void> {
+  const slugs = input.documentSlugs;
+  for (let i = 0; i < slugs.length; i += EMBASSY_REVOKE_BATCH) {
+    const batch = slugs.slice(i, i + EMBASSY_REVOKE_BATCH);
+    await db
+      .update(embassy)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(embassy.projectId, input.projectId),
+          inArray(embassy.documentSlug, [...batch]),
+          isNull(embassy.revokedAt),
+        ),
+      );
+  }
+}
+
+export async function organizationIdForProject(
+  db: ControlDb,
+  projectId: ProjectId,
+): Promise<string | undefined> {
+  const [row] = await db
+    .select({ organizationId: project.organizationId })
+    .from(project)
+    .where(eq(project.id, projectId));
+  return row?.organizationId;
 }
 
 export async function noteEmbassyFetch(
@@ -153,25 +182,42 @@ export async function noteEmbassyFetch(
     .where(eq(embassy.id, id));
 }
 
-export async function recordEmbassyWrite(
+export async function reserveEmbassyWrite(
   db: ControlDb,
-  input: Readonly<{
-    id: EmbassyId;
-    flipGrantToSuggest?: boolean;
-  }>,
-): Promise<void> {
-  await db
+  input: Readonly<{ id: EmbassyId; grant: EmbassyGrant }>,
+): Promise<boolean> {
+  const updated = await db
     .update(embassy)
-    .set({
-      writeCount: sql`${embassy.writeCount} + 1`,
-      ...(input.flipGrantToSuggest === true
-        ? { grant: "suggest" as const }
-        : {}),
-    })
+    .set({ writeCount: sql`${embassy.writeCount} + 1` })
     .where(
       and(
         eq(embassy.id, input.id),
+        eq(embassy.grant, input.grant),
+        isNull(embassy.revokedAt),
+        gt(embassy.expiresAt, new Date()),
         lt(embassy.writeCount, EMBASSY_WRITE_LIMIT),
       ),
-    );
+    )
+    .returning({ id: embassy.id });
+  return updated.length > 0;
+}
+
+export async function releaseEmbassyWrite(
+  db: ControlDb,
+  id: EmbassyId,
+): Promise<void> {
+  await db
+    .update(embassy)
+    .set({ writeCount: sql`${embassy.writeCount} - 1` })
+    .where(and(eq(embassy.id, id), gt(embassy.writeCount, 0)));
+}
+
+export async function spendEmbassyReplace(
+  db: ControlDb,
+  id: EmbassyId,
+): Promise<void> {
+  await db
+    .update(embassy)
+    .set({ grant: "suggest" })
+    .where(and(eq(embassy.id, id), eq(embassy.grant, "replace")));
 }
