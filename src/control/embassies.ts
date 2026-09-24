@@ -17,7 +17,7 @@ import { embassy, project } from "./schema/app";
 export type { EmbassyGrant };
 
 export const EMBASSY_DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-export const EMBASSY_WRITE_LIMIT = 30;
+export const EMBASSY_WRITE_LIMIT = 1000;
 export const EMBASSY_FETCH_DEBOUNCE_MS = 60_000;
 const EMBASSY_REVOKE_BATCH = 80;
 

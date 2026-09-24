@@ -19,8 +19,15 @@ export const Route = createFileRoute("/p/$projectId/documents/$slug/")({
 });
 
 function CurrentTabRoute(): React.ReactElement {
-  const { doc, blocks, comments, suggestions, viewerId, docRefs } =
-    Route.useLoaderData();
+  const {
+    doc,
+    sharedAgentEdit,
+    blocks,
+    comments,
+    suggestions,
+    viewerId,
+    docRefs,
+  } = Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
   const isOwner = ProjectRoute.useLoaderData().current.role === "owner";
   if (doc === undefined) {
@@ -29,6 +36,7 @@ function CurrentTabRoute(): React.ReactElement {
   return (
     <DocumentCurrentPage
       doc={doc}
+      sharedAgentEdit={sharedAgentEdit}
       projectId={projectId}
       blocks={blocks}
       comments={comments}

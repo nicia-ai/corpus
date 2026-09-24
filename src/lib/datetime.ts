@@ -21,7 +21,8 @@ export function formatTimestampUTC(iso: string): string {
   )} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
 }
 
-const MINUTE = 60_000;
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
@@ -30,14 +31,25 @@ const WEEK = 7 * DAY;
 // picker, where a precise locale timestamp would be noise). Degrades to
 // the locale date for anything older than ~4 weeks or an unparseable
 // value, so the column never reads "Invalid Date" or a stale "53w ago".
-export function relativeTime(iso: string): string {
+export function relativeTime(iso: string, now: number = Date.now()): string {
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return iso;
-  const ms = Date.now() - t;
+  const ms = now - t;
   if (ms < MINUTE) return "just now";
   if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m ago`;
   if (ms < DAY) return `${Math.floor(ms / HOUR)}h ago`;
   if (ms < WEEK) return `${Math.floor(ms / DAY)}d ago`;
   if (ms < 4 * WEEK) return `${Math.floor(ms / WEEK)}w ago`;
   return new Date(t).toLocaleDateString();
+}
+
+// Seconds-precise under a minute ("20s ago"), for activity that is happening
+// right now; otherwise the same buckets as `relativeTime`.
+export function recentTime(iso: string, now: number): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const ms = Math.max(0, now - t);
+  if (ms < 5 * SECOND) return "just now";
+  if (ms < MINUTE) return `${String(Math.floor(ms / SECOND))}s ago`;
+  return relativeTime(iso, now);
 }

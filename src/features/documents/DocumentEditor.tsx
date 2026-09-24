@@ -26,9 +26,11 @@ import {
 } from "@/components/review/ReviewRail";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { LiveRelativeTime } from "@/components/ui/DateTime";
 import { Card } from "@/components/ui/Surface";
 import { textLinkClass } from "@/components/ui/text-link";
 import { showToast } from "@/components/ui/Toast";
+import { EMBASSY_ACTOR_LABEL } from "@/embassy/actor";
 import type { ProjectId } from "@/ids";
 import {
   blockAnchorsToSourceRanges,
@@ -45,6 +47,7 @@ import {
   type CreateCommentResult,
   type DocumentBlocksResult,
 } from "@/lib/server/comments";
+import type { SharedAgentEdit } from "@/lib/server/document-review";
 import {
   archiveDocument,
   type DocSnapshot,
@@ -92,6 +95,7 @@ const EMPTY_REVIEW_LAYOUT: ReviewRailLayout = {
 
 export function DocumentEditor({
   doc,
+  sharedAgentEdit,
   projectId,
   blocks,
   comments,
@@ -104,6 +108,7 @@ export function DocumentEditor({
   isOwner,
 }: Readonly<{
   doc: DocSnapshot;
+  sharedAgentEdit: SharedAgentEdit | undefined;
   projectId: ProjectId;
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
@@ -858,6 +863,15 @@ export function DocumentEditor({
         Rename file
       </button>
       {!hasFrontmatter && <AddMetadataButton editorRef={editorRef} />}
+      {sharedAgentEdit?.docVersion === head.docVersion && (
+        <span>
+          · {EMBASSY_ACTOR_LABEL} edited{" "}
+          <LiveRelativeTime
+            iso={sharedAgentEdit.changedAt}
+            className="tabular-nums"
+          />
+        </span>
+      )}
     </div>
   );
 

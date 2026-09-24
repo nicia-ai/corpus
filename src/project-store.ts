@@ -248,6 +248,8 @@ type RealtimeChangeResolver<T> = (
 
 export type DocumentReviewSnapshot = Readonly<{
   doc: DocumentSnapshot | undefined;
+  // Who wrote the head version; the document node itself does not record it.
+  headChange: Readonly<{ changedBy: string; changedAt: string }> | undefined;
   blocks: DocumentBlocksResult;
   comments: readonly CommentThreadView[];
   suggestions: readonly SuggestionView[];
@@ -733,17 +735,23 @@ export class ProjectStore extends DurableObject<Env> {
     if (doc === undefined) {
       return {
         doc: undefined,
+        headChange: undefined,
         blocks: { found: false },
         comments: [],
         suggestions: [],
       };
     }
-    const [blocks, comments, suggestions] = await Promise.all([
+    const [head, blocks, comments, suggestions] = await Promise.all([
+      u.versions.documentVersion(slug, doc.docVersion),
       this.documentBlocksForHead(u, slug, doc.docVersion, doc.markdown),
       this.commentThreadViews(u, slug),
       this.suggestionViews(u, slug),
     ]);
-    return { doc, blocks, comments, suggestions };
+    const headChange =
+      head === undefined
+        ? undefined
+        : { changedBy: head.changedBy, changedAt: head.changedAt };
+    return { doc, headChange, blocks, comments, suggestions };
   }
 
   async documentHistoryPageSnapshot(

@@ -221,6 +221,10 @@ describe("Embassy HTTP", () => {
       body: "# Revised\n\nWiki notes, round two.\n",
     });
     expect(put2.status).toBe(200);
+    const review = await storeFor(env, org.projectId).documentReviewSnapshot(
+      docSlug("intake-page"),
+    );
+    expect(review.headChange?.changedBy).toBe(callerRefFromEmbassy(intake.id));
     const revised = await storeFor(env, org.projectId).getDocument(
       docSlug("intake-page"),
     );
