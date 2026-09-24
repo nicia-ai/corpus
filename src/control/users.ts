@@ -1,5 +1,6 @@
 import { inArray } from "drizzle-orm";
 
+import { EMBASSY_ACTOR_LABEL } from "../embassy/actor";
 import { parseCallerRef } from "../ids";
 
 import type { ControlDb } from "./db";
@@ -83,7 +84,7 @@ export async function resolveAuthorLabels(
   const out = new Map<string, string>();
   for (const p of parsed) {
     if (p.kind === "embassy") {
-      out.set(p.ref, "Shared agent");
+      out.set(p.ref, EMBASSY_ACTOR_LABEL);
     } else if (p.kind === "apikey") {
       const key = keyById.get(p.id);
       const owner = key === undefined ? undefined : names.get(key.userId);

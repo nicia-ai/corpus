@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { useDialogFocusTrap } from "@/components/ui/dialog-focus";
 import { DialogFrame } from "@/components/ui/DialogFrame";
+import { Segmented } from "@/components/ui/Segmented";
 import { showToast } from "@/components/ui/Toast";
 import type { EmbassyGrant } from "@/embassy/grant";
 import { isIntakeMarkdown } from "@/embassy/intake";
@@ -13,17 +14,21 @@ import { embassyUrl } from "@/embassy/url";
 import type { DocumentSlug, ProjectId } from "@/ids";
 import { useSubmit } from "@/lib/forms";
 import {
+  changeEmbassyGrant,
   createEmbassy,
   revokeEmbassy,
   unshareDocument,
   type EmbassyDto,
 } from "@/lib/server/embassies";
 
-function grantLabel(grant: EmbassyGrant): string {
-  if (grant === "read") return "View only";
-  if (grant === "replace") return "Can fill this page";
-  return "Can suggest edits";
-}
+const GRANT_OPTIONS = [
+  { value: "read", label: "View" },
+  { value: "suggest", label: "Suggest" },
+  { value: "edit", label: "Edit" },
+] as const satisfies readonly Readonly<{
+  value: EmbassyGrant;
+  label: string;
+}>[];
 
 async function copyWithToast(
   input: Readonly<{
@@ -60,9 +65,10 @@ export function ShareDialog({
     onClose,
     initialFocus: closeRef,
   });
-  const intake = isIntakeMarkdown(markdown);
   const [rows, setRows] = useState(initialRows);
-  const [grant, setGrant] = useState<EmbassyGrant>("read");
+  const [grant, setGrant] = useState<EmbassyGrant>(
+    isIntakeMarkdown(markdown) ? "edit" : "read",
+  );
   const shared = rows.length > 0;
 
   const { pending, error, run } = useSubmit(async () => {
@@ -124,11 +130,10 @@ export function ShareDialog({
           <input
             type="radio"
             className="mr-1.5"
-            checked={grant === "replace"}
-            disabled={!intake}
-            onChange={() => setGrant("replace")}
+            checked={grant === "edit"}
+            onChange={() => setGrant("edit")}
           />
-          Fill this page{intake ? "" : " — for empty intake pages only"}
+          Edit directly — until you switch the link to Suggest
         </label>
       </fieldset>
       {error !== undefined && (
@@ -158,6 +163,11 @@ export function ShareDialog({
               key={row.id}
               row={row}
               projectId={projectId}
+              onChanged={(next) =>
+                setRows((prev) =>
+                  prev.map((r) => (r.id === next.id ? next : r)),
+                )
+              }
               onRevoked={() =>
                 setRows((prev) => prev.filter((r) => r.id !== row.id))
               }
@@ -172,21 +182,37 @@ export function ShareDialog({
 function EmbassyRow({
   row,
   projectId,
+  onChanged,
   onRevoked,
 }: Readonly<{
   row: EmbassyDto;
   projectId: ProjectId;
+  onChanged: (next: EmbassyDto) => void;
   onRevoked: () => void;
 }>): React.ReactElement {
   const { pending, run } = useSubmit(async () => {
     await revokeEmbassy({ data: { projectId, embassyId: row.id } });
     onRevoked();
   });
+  const { error: grantError, run: runGrant } = useSubmit(
+    async (next: EmbassyGrant) => {
+      onChanged(
+        await changeEmbassyGrant({
+          data: { projectId, embassyId: row.id, grant: next },
+        }),
+      );
+    },
+  );
   const url = embassyUrl(window.location.origin, row.id);
   return (
     <li className="text-sm text-slate-700">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{grantLabel(row.grant)}</span>
+        <Segmented
+          ariaLabel="Link access"
+          options={GRANT_OPTIONS}
+          value={row.grant}
+          onChange={(next) => void runGrant(next)}
+        />
         <span className="text-slate-500 tabular-nums">
           {row.fetchCount} fetch{row.fetchCount === 1 ? "" : "es"}
         </span>
@@ -194,6 +220,9 @@ function EmbassyRow({
           until {new Date(row.expiresAt).toLocaleDateString()}
         </span>
       </div>
+      {grantError !== undefined && (
+        <p className="mt-1 text-sm text-red-600">{grantError}</p>
+      )}
       <div className="mt-1 flex flex-wrap gap-2">
         <Button
           variant="secondary"

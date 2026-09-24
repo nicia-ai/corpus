@@ -7,11 +7,11 @@ import {
   mintEmbassy,
   revokeEmbassy as revokeEmbassyRow,
   revokeEmbassiesForDocument,
+  setEmbassyGrant,
   type EmbassyView,
 } from "@/control/embassies";
 import { entitlementsOf } from "@/control/entitlements";
-import type { EmbassyGrant } from "@/embassy/grant";
-import { isIntakeMarkdown } from "@/embassy/intake";
+import { EMBASSY_GRANTS, type EmbassyGrant } from "@/embassy/grant";
 import { ValidationError } from "@/errors";
 import { asDocumentSlug, asEmbassyId } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
@@ -58,7 +58,7 @@ export const createEmbassy = createServerFn({ method: "POST" })
   .validator(
     z.object({
       slug: z.string().min(1),
-      grant: z.enum(["read", "suggest", "replace"]),
+      grant: z.enum(EMBASSY_GRANTS),
     }),
   )
   .handler(async ({ data, context }): Promise<EmbassyDto> => {
@@ -67,14 +67,32 @@ export const createEmbassy = createServerFn({ method: "POST" })
     const slug = asDocumentSlug(data.slug);
     const doc = await storeOf(c).getDocument(slug);
     if (doc === undefined) throw new ValidationError("Document not found");
-    if (data.grant === "replace" && !isIntakeMarkdown(doc.markdown)) {
-      throw new ValidationError("Replace is only for empty intake pages");
-    }
     const row = await mintEmbassy(connectControlDb(c.env.DB), {
       projectId: ref.projectId,
       documentSlug: slug,
       grant: data.grant,
     });
+    return toDto(row);
+  });
+
+export const changeEmbassyGrant = createServerFn({ method: "POST" })
+  .middleware([projectMiddleware])
+  .validator(
+    z.object({
+      embassyId: z.string().min(1),
+      grant: z.enum(EMBASSY_GRANTS),
+    }),
+  )
+  .handler(async ({ data, context }): Promise<EmbassyDto> => {
+    const c = srv(context);
+    const ref = requireProjectOwner(c.project, EMBASSY_ADMIN_MSG);
+    const row = await setEmbassyGrant(connectControlDb(c.env.DB), {
+      id: asEmbassyId(data.embassyId),
+      projectId: ref.projectId,
+      grant: data.grant,
+    });
+    if (row === undefined)
+      throw new ValidationError("This link was revoked or has expired");
     return toDto(row);
   });
 
@@ -142,7 +160,7 @@ export const createIntake = createServerFn({ method: "POST" })
       const embassy = await mintEmbassy(connectControlDb(c.env.DB), {
         projectId: ref.projectId,
         documentSlug: slug,
-        grant: "replace",
+        grant: "edit",
       });
       return { slug, embassy: toDto(embassy) };
     },

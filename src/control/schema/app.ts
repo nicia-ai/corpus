@@ -7,6 +7,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import { EMBASSY_GRANTS } from "../../embassy/grant";
+
 import { organization, user } from "./better-auth";
 
 // Application tables we own. Identity (organization, member, invitation,
@@ -194,7 +196,7 @@ export const adminAudit = sqliteTable(
 // segment on `/s/:id` (share-link pattern — owner can recopy). There is
 // NO FK to the Document: documents live in the per-Project DO, so
 // `documentSlug` is a non-FK pointer (404 if missing/archived). Grant is
-// suggest | replace; read is implied. SQL mutations are scoped by
+// read | suggest | edit, each implying the weaker ones. SQL mutations are scoped by
 // `(id, projectId)` so a stray id from another project is a silent no-op.
 export const embassy = sqliteTable(
   "embassy",
@@ -206,7 +208,7 @@ export const embassy = sqliteTable(
       .notNull()
       .references(() => project.id, { onDelete: "cascade" }),
     documentSlug: text("document_slug").notNull(),
-    grant: text("grant", { enum: ["read", "suggest", "replace"] }).notNull(),
+    grant: text("grant", { enum: EMBASSY_GRANTS }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
     fetchCount: integer("fetch_count").notNull().default(0),

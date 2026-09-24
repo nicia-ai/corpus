@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 
-import type { EmbassyGrant } from "../embassy/grant";
+import { grantsAllowing, type EmbassyGrant } from "../embassy/grant";
 import {
   asDocumentSlug,
   asEmbassyId,
@@ -10,6 +10,7 @@ import {
   type ProjectId,
 } from "../ids";
 
+import { ACCESSIBLE_STATUSES, isAccessible } from "./access";
 import type { ControlDb } from "./db";
 import { embassy, project } from "./schema/app";
 
@@ -99,10 +100,20 @@ export async function resolveLiveEmbassy(
   db: ControlDb,
   id: EmbassyId,
 ): Promise<EmbassyView | undefined> {
-  const [row] = await db.select().from(embassy).where(eq(embassy.id, id));
-  if (row === undefined) return undefined;
-  if (!isLive(row, new Date())) return undefined;
-  return toView(row);
+  const [row] = await db
+    .select()
+    .from(embassy)
+    .innerJoin(
+      project,
+      and(
+        eq(project.id, embassy.projectId),
+        inArray(project.status, ACCESSIBLE_STATUSES),
+      ),
+    )
+    .where(eq(embassy.id, id));
+  if (row === undefined || !isAccessible(row.project.status)) return undefined;
+  if (!isLive(row.embassy, new Date())) return undefined;
+  return toView(row.embassy);
 }
 
 export async function revokeEmbassy(
@@ -125,6 +136,16 @@ export async function revokeEmbassiesForDocument(
     projectId: input.projectId,
     documentSlugs: [input.documentSlug],
   });
+}
+
+export async function revokeEmbassiesForProject(
+  db: ControlDb,
+  projectId: ProjectId,
+): Promise<void> {
+  await db
+    .update(embassy)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(embassy.projectId, projectId), isNull(embassy.revokedAt)));
 }
 
 export async function revokeEmbassiesForDocuments(
@@ -182,17 +203,38 @@ export async function noteEmbassyFetch(
     .where(eq(embassy.id, id));
 }
 
+export async function setEmbassyGrant(
+  db: ControlDb,
+  input: Readonly<{ id: EmbassyId; projectId: ProjectId; grant: EmbassyGrant }>,
+): Promise<EmbassyView | undefined> {
+  const [row] = await db
+    .update(embassy)
+    .set({ grant: input.grant })
+    .where(
+      and(
+        eq(embassy.id, input.id),
+        eq(embassy.projectId, input.projectId),
+        isNull(embassy.revokedAt),
+        gt(embassy.expiresAt, new Date()),
+      ),
+    )
+    .returning();
+  return row === undefined ? undefined : toView(row);
+}
+
 export async function reserveEmbassyWrite(
   db: ControlDb,
-  input: Readonly<{ id: EmbassyId; grant: EmbassyGrant }>,
+  input: Readonly<{ id: EmbassyId; needed: EmbassyGrant }>,
 ): Promise<boolean> {
+  // The grant is re-checked in the same update as the reservation, so an
+  // owner switching a link to suggest-only takes effect on the next write.
   const updated = await db
     .update(embassy)
     .set({ writeCount: sql`${embassy.writeCount} + 1` })
     .where(
       and(
         eq(embassy.id, input.id),
-        eq(embassy.grant, input.grant),
+        inArray(embassy.grant, [...grantsAllowing(input.needed)]),
         isNull(embassy.revokedAt),
         gt(embassy.expiresAt, new Date()),
         lt(embassy.writeCount, EMBASSY_WRITE_LIMIT),
@@ -210,14 +252,4 @@ export async function releaseEmbassyWrite(
     .update(embassy)
     .set({ writeCount: sql`${embassy.writeCount} - 1` })
     .where(and(eq(embassy.id, id), gt(embassy.writeCount, 0)));
-}
-
-export async function spendEmbassyReplace(
-  db: ControlDb,
-  id: EmbassyId,
-): Promise<void> {
-  await db
-    .update(embassy)
-    .set({ grant: "suggest" })
-    .where(and(eq(embassy.id, id), eq(embassy.grant, "replace")));
 }

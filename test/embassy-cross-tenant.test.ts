@@ -2,6 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
+import { markProjectBroken } from "../src/control/access";
 import { connectControlDb } from "../src/control/db";
 import {
   EMBASSY_WRITE_LIMIT,
@@ -9,7 +10,9 @@ import {
   resolveLiveEmbassy,
   revokeEmbassy,
   revokeEmbassiesForDocument,
+  setEmbassyGrant,
 } from "../src/control/embassies";
+import { createProject, deleteProject } from "../src/control/project-admin";
 import { embassy } from "../src/control/schema/app";
 import { storeFor } from "../src/control/store-for";
 import { isIntakeMarkdown } from "../src/embassy/intake";
@@ -95,10 +98,39 @@ describe("Embassy admin scoping — cross-tenant guard", () => {
     expect(await resolveLiveEmbassy(db, aLink.id)).toBeDefined();
     expect(await resolveLiveEmbassy(db, bLink.id)).toBeUndefined();
   });
+
+  it("grant change scoped to the wrong project is a silent no-op", async () => {
+    const alice = await signUp("em-gr-a");
+    const bob = await signUp("em-gr-b");
+    const orgA = await createOrg(alice, "Alice Org");
+    const orgB = await createOrg(bob, "Bob Org");
+    await seedDoc(orgA.projectId, "notes", "# hi\n");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: orgA.projectId,
+      documentSlug: docSlug("notes"),
+      grant: "read",
+    });
+    const stray = await setEmbassyGrant(db, {
+      id: link.id,
+      projectId: orgB.projectId,
+      grant: "edit",
+    });
+    expect(stray).toBeUndefined();
+    expect((await resolveLiveEmbassy(db, link.id))?.grant).toBe("read");
+
+    await revokeEmbassy(db, { id: link.id, projectId: orgA.projectId });
+    const revived = await setEmbassyGrant(db, {
+      id: link.id,
+      projectId: orgA.projectId,
+      grant: "edit",
+    });
+    expect(revived).toBeUndefined();
+  });
 });
 
 describe("Embassy HTTP", () => {
-  it("GET markdown, revoke 404s, spent PUT is 403 not 409", async () => {
+  it("GET markdown, revoke 404s, edit PUTs repeat until switched to suggest", async () => {
     const user = await signUp("em-http");
     const org = await createOrg(user, "Http Org");
     await seedDoc(org.projectId, "live-notes", "# Meeting\n\nHello.\n");
@@ -117,7 +149,7 @@ describe("Embassy HTTP", () => {
     const intake = await mintEmbassy(db, {
       projectId: org.projectId,
       documentSlug: docSlug("intake-page"),
-      grant: "replace",
+      grant: "edit",
     });
 
     const md = await SELF.fetch(`${ORIGIN}/s/${live.id}`, {
@@ -186,9 +218,39 @@ describe("Embassy HTTP", () => {
         "content-type": "text/markdown",
         "x-doc-version": "2",
       },
-      body: "# again\n",
+      body: "# Revised\n\nWiki notes, round two.\n",
     });
-    expect(put2.status).toBe(403);
+    expect(put2.status).toBe(200);
+    const revised = await storeFor(env, org.projectId).getDocument(
+      docSlug("intake-page"),
+    );
+    expect(revised?.markdown).toBe("# Revised\n\nWiki notes, round two.\n");
+    expect(revised?.docVersion).toBe(3);
+
+    await setEmbassyGrant(db, {
+      id: intake.id,
+      projectId: org.projectId,
+      grant: "suggest",
+    });
+    const put3 = await SELF.fetch(`${ORIGIN}/s/${intake.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "3",
+      },
+      body: "# Round three\n",
+    });
+    expect(put3.status).toBe(403);
+    expect(await put3.text()).toContain("/suggest");
+    const proposed = await SELF.fetch(`${ORIGIN}/s/${intake.id}/suggest`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "3",
+      },
+      body: "# Round three\n",
+    });
+    expect(proposed.status).toBe(201);
 
     await revokeEmbassy(db, { id: live.id, projectId: org.projectId });
     const gone = await SELF.fetch(`${ORIGIN}/s/${live.id}`, {
@@ -321,7 +383,7 @@ describe("Embassy HTTP", () => {
     ).toHaveLength(0);
   });
 
-  it("does not spend a replace link on an empty or invalid fill", async () => {
+  it("rejects an empty or invalid edit without writing", async () => {
     const user = await signUp("em-fill");
     const org = await createOrg(user, "Fill Org");
     await seedDoc(org.projectId, "blank", "");
@@ -330,12 +392,12 @@ describe("Embassy HTTP", () => {
     const blank = await mintEmbassy(db, {
       projectId: org.projectId,
       documentSlug: docSlug("blank"),
-      grant: "replace",
+      grant: "edit",
     });
     const fenced = await mintEmbassy(db, {
       projectId: org.projectId,
       documentSlug: docSlug("fenced"),
-      grant: "replace",
+      grant: "edit",
     });
 
     const empty = await SELF.fetch(`${ORIGIN}/s/${blank.id}`, {
@@ -356,7 +418,7 @@ describe("Embassy HTTP", () => {
       body: "---\ntitle: x\n---\n\n",
     });
     expect(frontmatterOnly.status).toBe(400);
-    expect((await resolveLiveEmbassy(db, blank.id))?.grant).toBe("replace");
+    expect((await resolveLiveEmbassy(db, blank.id))?.writeCount).toBe(0);
 
     const filled = await SELF.fetch(`${ORIGIN}/s/${blank.id}`, {
       method: "PUT",
@@ -367,7 +429,7 @@ describe("Embassy HTTP", () => {
       body: "# Filled\n\nWiki notes.\n",
     });
     expect(filled.status).toBe(200);
-    expect((await resolveLiveEmbassy(db, blank.id))?.grant).toBe("suggest");
+    expect((await resolveLiveEmbassy(db, blank.id))?.writeCount).toBe(1);
 
     const badYaml = await SELF.fetch(`${ORIGIN}/s/${fenced.id}`, {
       method: "PUT",
@@ -379,10 +441,201 @@ describe("Embassy HTTP", () => {
     });
     expect(badYaml.status).toBe(400);
     expect(await badYaml.text()).toContain("invalid YAML frontmatter");
-    expect((await resolveLiveEmbassy(db, fenced.id))?.grant).toBe("replace");
+    expect((await resolveLiveEmbassy(db, fenced.id))?.writeCount).toBe(0);
     const head = await storeFor(env, org.projectId).getDocument(
       docSlug("fenced"),
     );
     expect(head?.markdown).toBe("");
+  });
+
+  it("archived project kills live embassy links", async () => {
+    const user = await signUp("em-dead");
+    const org = await createOrg(user, "Dead Org");
+    const db = connectControlDb(env.DB);
+    const extra = await createProject(db, org.organizationId, "Scratch");
+    await seedDoc(extra, "notes", "# hi\n");
+    await seedDoc(extra, "blank", "");
+    await seedDoc(org.projectId, "kept", "# stay\n");
+    const read = await mintEmbassy(db, {
+      projectId: extra,
+      documentSlug: docSlug("notes"),
+      grant: "read",
+    });
+    const suggest = await mintEmbassy(db, {
+      projectId: extra,
+      documentSlug: docSlug("notes"),
+      grant: "suggest",
+    });
+    const fill = await mintEmbassy(db, {
+      projectId: extra,
+      documentSlug: docSlug("blank"),
+      grant: "edit",
+    });
+    const kept = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("kept"),
+      grant: "suggest",
+    });
+
+    const live = await SELF.fetch(`${ORIGIN}/s/${read.id}`, {
+      headers: { accept: "text/markdown" },
+    });
+    expect(live.status).toBe(200);
+
+    await deleteProject(db, extra);
+
+    const gone = await SELF.fetch(`${ORIGIN}/s/${read.id}`, {
+      headers: { accept: "text/markdown" },
+    });
+    expect(gone.status).toBe(404);
+    const suggestGone = await SELF.fetch(`${ORIGIN}/s/${suggest.id}/suggest`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "# still here\n",
+    });
+    expect(suggestGone.status).toBe(404);
+    const putGone = await SELF.fetch(`${ORIGIN}/s/${fill.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "# Filled\n\nWiki notes.\n",
+    });
+    expect(putGone.status).toBe(404);
+    expect(await resolveLiveEmbassy(db, read.id)).toBeUndefined();
+    const [row] = await db
+      .select({ revokedAt: embassy.revokedAt })
+      .from(embassy)
+      .where(eq(embassy.id, read.id));
+    expect(row?.revokedAt).not.toBeNull();
+
+    const still = await SELF.fetch(`${ORIGIN}/s/${kept.id}`, {
+      headers: { accept: "text/markdown" },
+    });
+    expect(still.status).toBe(200);
+  });
+
+  it("broken project status fails closed without a revoke", async () => {
+    const user = await signUp("em-broken");
+    const org = await createOrg(user, "Broken Org");
+    await seedDoc(org.projectId, "notes", "# hi\n");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("notes"),
+      grant: "suggest",
+    });
+    await markProjectBroken(db, org.projectId);
+
+    const gone = await SELF.fetch(`${ORIGIN}/s/${link.id}`, {
+      headers: { accept: "text/markdown" },
+    });
+    expect(gone.status).toBe(404);
+    expect(await resolveLiveEmbassy(db, link.id)).toBeUndefined();
+    const [row] = await db
+      .select({ revokedAt: embassy.revokedAt })
+      .from(embassy)
+      .where(eq(embassy.id, link.id));
+    expect(row?.revokedAt).toBeNull();
+  });
+
+  it("an edit link keeps writing after a member edits the page", async () => {
+    const user = await signUp("em-owned");
+    const org = await createOrg(user, "Owned Org");
+    await seedDoc(org.projectId, "live", "# Meeting\n\nHello.\n");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("live"),
+      grant: "edit",
+    });
+    const saved = await storeFor(env, org.projectId).saveDocument({
+      slug: docSlug("live"),
+      markdown: "# Owner wrote\n",
+      clientVersion: 1,
+      changedBy: "owner",
+    });
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) throw new Error("owner save failed");
+
+    const stale = await SELF.fetch(`${ORIGIN}/s/${link.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "# Agent draft\n",
+    });
+    expect(stale.status).toBe(409);
+
+    const put = await SELF.fetch(`${ORIGIN}/s/${link.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": String(saved.docVersion),
+      },
+      body: "# Owner wrote\n\nAgent revision.\n",
+    });
+    expect(put.status).toBe(200);
+    expect((await resolveLiveEmbassy(db, link.id))?.grant).toBe("edit");
+
+    const suggest = await SELF.fetch(`${ORIGIN}/s/${link.id}/suggest`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": String(saved.docVersion + 1),
+      },
+      body: "# proposed\n",
+    });
+    expect(suggest.status).toBe(201);
+  });
+
+  it("releases an edit reservation when the save conflicts", async () => {
+    const user = await signUp("em-revert");
+    const org = await createOrg(user, "Revert Org");
+    await seedDoc(org.projectId, "blank", "");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("blank"),
+      grant: "edit",
+    });
+    await db
+      .update(embassy)
+      .set({ writeCount: EMBASSY_WRITE_LIMIT - 1 })
+      .where(eq(embassy.id, link.id));
+
+    const conflict = await SELF.fetch(`${ORIGIN}/s/${link.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "0",
+      },
+      body: "# Filled\n\nWiki notes.\n",
+    });
+    expect(conflict.status).toBe(409);
+    const [after] = await db
+      .select({ grant: embassy.grant, writeCount: embassy.writeCount })
+      .from(embassy)
+      .where(eq(embassy.id, link.id));
+    expect(after?.grant).toBe("edit");
+    expect(after?.writeCount).toBe(EMBASSY_WRITE_LIMIT - 1);
+
+    const retry = await SELF.fetch(`${ORIGIN}/s/${link.id}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": "1",
+      },
+      body: "# Filled\n\nWiki notes.\n",
+    });
+    expect(retry.status).toBe(200);
+    expect((await resolveLiveEmbassy(db, link.id))?.writeCount).toBe(
+      EMBASSY_WRITE_LIMIT,
+    );
   });
 });

@@ -23,6 +23,7 @@ import { ledgerMigrations } from "../drizzle-do/migrations";
 
 import type { AssembledCorpus } from "./corpus";
 import type { LedgerDb } from "./db";
+import { EMBASSY_ACTOR_LABEL } from "./embassy/actor";
 import { ConflictError, isUniqueViolation, RollbackProbe } from "./errors";
 import { canonicalGraph } from "./graph";
 import {
@@ -34,6 +35,7 @@ import {
   type FolderSlug,
   asProjectId,
   type CallerRef,
+  parseCallerRef,
   type ProjectId,
 } from "./ids";
 import {
@@ -506,6 +508,9 @@ export class ProjectStore extends DurableObject<Env> {
       change.channel === "cli"
     ) {
       return change;
+    }
+    if (parseCallerRef(change.actorId).kind === "embassy") {
+      return { ...change, actorName: EMBASSY_ACTOR_LABEL };
     }
     for (const ws of this.ctx.getWebSockets()) {
       const m = SocketAttachment.safeParse(ws.deserializeAttachment());

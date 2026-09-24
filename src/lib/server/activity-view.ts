@@ -1,3 +1,4 @@
+import { EMBASSY_ACTOR_LABEL } from "@/embassy/actor";
 import type { EventLogStore } from "@/event-log-store";
 import { type CorpusSlug, parseCallerRef } from "@/ids";
 import {
@@ -82,7 +83,7 @@ function labelFor(callerRef: string): {
     return { callerLabel: `User · ${id.slice(0, 8)}…`, authPath: "oauth" };
   }
   if (kind === "embassy") {
-    return { callerLabel: "Shared agent", authPath: "apikey" };
+    return { callerLabel: EMBASSY_ACTOR_LABEL, authPath: "apikey" };
   }
   return { callerLabel: callerRef, authPath: "apikey" };
 }

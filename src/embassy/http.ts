@@ -8,14 +8,13 @@ import {
   releaseEmbassyWrite,
   reserveEmbassyWrite,
   resolveLiveEmbassy,
-  spendEmbassyReplace,
   type EmbassyView,
 } from "@/control/embassies";
 import { entitlementsForRequest } from "@/control/entitlements";
 import { resolveProjectById } from "@/control/project-resolution";
 import { storeFor } from "@/control/store-for";
+import { grantAllows, type EmbassyGrant } from "@/embassy/grant";
 import { embassyGoneHtml, embassyPageHtml } from "@/embassy/html";
-import { isIntakeMarkdown } from "@/embassy/intake";
 import { embassyPath } from "@/embassy/url";
 import { QuotaExceededError } from "@/errors";
 import { asEmbassyId, callerRefFromEmbassy } from "@/ids";
@@ -108,15 +107,28 @@ type WritePrep =
       db: ControlDb;
     }>;
 
-async function prepareWrite(
+// Agents read the 403 body; an edit link the owner switched to review must
+// say where the change goes now instead.
+function forbidden(
   c: EnvC,
-  grant: EmbassyView["grant"],
-): Promise<WritePrep> {
+  held: EmbassyGrant,
+  needed: EmbassyGrant,
+): Response {
+  if (needed === "edit" && held === "suggest") {
+    return c.text(
+      "edit access withdrawn: the owner asked to review changes. POST the full proposed markdown to this URL + /suggest instead.",
+      403,
+    );
+  }
+  return c.text("forbidden", 403);
+}
+
+async function prepareWrite(c: EnvC, needed: EmbassyGrant): Promise<WritePrep> {
   const row = await liveEmbassy(c, c.req.param("token"));
   if (row === undefined)
     return { ok: false, response: c.text("not found", 404) };
-  if (row.grant !== grant)
-    return { ok: false, response: c.text("forbidden", 403) };
+  if (!grantAllows(row.grant, needed))
+    return { ok: false, response: forbidden(c, row.grant, needed) };
   const clientVersion = versionHeader(c.req.raw);
   if (clientVersion === undefined) {
     return { ok: false, response: c.text("X-Doc-Version required", 400) };
@@ -137,16 +149,18 @@ async function prepareWrite(
 async function claimWrite(
   c: EnvC,
   prep: Extract<WritePrep, { ok: true }>,
-  grant: EmbassyView["grant"],
+  needed: EmbassyGrant,
 ): Promise<Response | undefined> {
   const reserved = await reserveEmbassyWrite(prep.db, {
     id: prep.row.id,
-    grant,
+    needed,
   });
   if (reserved) return undefined;
   const again = await resolveLiveEmbassy(prep.db, prep.row.id);
   if (again === undefined) return c.text("not found", 404);
-  if (again.grant !== grant) return c.text("forbidden", 403);
+  if (!grantAllows(again.grant, needed)) {
+    return forbidden(c, again.grant, needed);
+  }
   return c.text("rate limited", 429);
 }
 
@@ -231,25 +245,21 @@ export async function embassySuggest(c: EnvC): Promise<Response> {
   }
 }
 
-const REPLACE_BODY_REQUIRED = "body required";
+const EDIT_BODY_REQUIRED = "body required";
 
-export async function embassyReplace(c: EnvC): Promise<Response> {
-  const prep = await prepareWrite(c, "replace");
+export async function embassyEdit(c: EnvC): Promise<Response> {
+  const prep = await prepareWrite(c, "edit");
   if (!prep.ok) return prep.response;
-  const store = storeFor(c.env, prep.row.projectId);
-  const head = await store.getDocument(prep.row.documentSlug);
-  if (head === undefined) return c.text("not found", 404);
-  if (!isIntakeMarkdown(head.markdown)) return c.text("forbidden", 403);
   const fm = parseFrontmatter(prep.body);
   if (!fm.ok) {
     return c.text(`invalid YAML frontmatter: ${fm.error}`, 400);
   }
-  if (isBlank(fm.body)) return c.text(REPLACE_BODY_REQUIRED, 400);
-  const denied = await assertReplaceQuota(c, prep);
+  if (isBlank(fm.body)) return c.text(EDIT_BODY_REQUIRED, 400);
+  const denied = await assertEditQuota(c, prep);
   if (denied !== undefined) return denied;
-  const refused = await claimWrite(c, prep, "replace");
+  const refused = await claimWrite(c, prep, "edit");
   if (refused !== undefined) return refused;
-  const r = await saveReplace(store, prep);
+  const r = await saveEdit(storeFor(c.env, prep.row.projectId), prep);
   if (!r.ok) {
     await releaseClaim(prep);
     if ("conflict" in r) {
@@ -261,11 +271,10 @@ export async function embassyReplace(c: EnvC): Promise<Response> {
     if ("tooLarge" in r) return c.text(MARKDOWN_TOO_LARGE_MESSAGE, 413);
     return c.json({ ok: false }, 409);
   }
-  await spendEmbassyReplace(prep.db, prep.row.id);
   return c.json({ ok: true, docVersion: r.docVersion }, 200);
 }
 
-async function saveReplace(
+async function saveEdit(
   store: ReturnType<typeof storeFor>,
   prep: Extract<WritePrep, { ok: true }>,
 ): Promise<SaveResult> {
@@ -282,7 +291,7 @@ async function saveReplace(
   }
 }
 
-async function assertReplaceQuota(
+async function assertEditQuota(
   c: EnvC,
   prep: Extract<WritePrep, { ok: true }>,
 ): Promise<Response | undefined> {

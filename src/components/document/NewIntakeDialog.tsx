@@ -45,7 +45,7 @@ export function NewIntakeDialog({
     const r = await createIntake({ data: { projectId, title } });
     const prompt = embassyPrompt({
       url: embassyUrl(window.location.origin, r.embassy.id),
-      grant: "replace",
+      grant: "edit",
     });
     try {
       await navigator.clipboard.writeText(prompt);
@@ -68,8 +68,9 @@ export function NewIntakeDialog({
       {created === undefined ? (
         <>
           <p className="mt-1 text-base text-slate-500">
-            Creates an empty page and copies a prompt their agent can use to
-            fill it.
+            Creates an empty page and copies a prompt an agent can use to write
+            it. The agent keeps editing until you switch the link to review in
+            Share.
           </p>
           <div className="mt-4">
             <Field label="Title" value={title} onChange={setTitle} autoFocus />
