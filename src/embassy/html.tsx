@@ -3,7 +3,7 @@ import { renderToString } from "react-dom/server";
 import { MarkdownContent } from "@/components/markdown/Markdown";
 import type { EmbassyGrant } from "@/embassy/grant";
 import { embassyPrompt } from "@/embassy/prompt";
-import { parseFrontmatter } from "@/store/domain/frontmatter";
+import { documentBody } from "@/store/domain/frontmatter";
 
 const PAGE_CSS = `
   :root { color-scheme: light; }
@@ -44,9 +44,9 @@ export function embassyPageHtml(input: {
   grant: EmbassyGrant;
 }): string {
   const prompt = embassyPrompt({ url: input.url, grant: input.grant });
-  const fm = parseFrontmatter(input.markdown);
-  const source = fm.ok ? fm.body : input.markdown;
-  const body = renderToString(<MarkdownContent source={source} />);
+  const body = renderToString(
+    <MarkdownContent source={documentBody(input.markdown)} />,
+  );
   const escaped = escapeHtml(prompt);
   return `<!doctype html>
 <html lang="en">

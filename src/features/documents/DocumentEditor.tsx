@@ -26,6 +26,7 @@ import {
 } from "@/components/review/ReviewRail";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { CopyButton } from "@/components/ui/CopyButton";
 import { LiveRelativeTime } from "@/components/ui/DateTime";
 import { Card } from "@/components/ui/Surface";
 import { textLinkClass } from "@/components/ui/text-link";
@@ -65,7 +66,7 @@ import {
 import { useCollab, type RealtimeChange } from "@/lib/use-collab";
 import { useFollowDocLink } from "@/lib/use-follow-doc-link";
 import { MIN_ANCHOR_CHARS } from "@/store/domain/anchor";
-import { hasFrontmatterFence } from "@/store/domain/frontmatter";
+import { documentBody, hasFrontmatterFence } from "@/store/domain/frontmatter";
 
 // A transient remote-change cue, keyed by the blocks that moved. The page owns
 // this block-indexed shape; it maps the indexes to source ranges before handing
@@ -883,6 +884,10 @@ export function DocumentEditor({
       {deleteError && (
         <span className="text-base text-red-600">{deleteError}</span>
       )}
+      <CopyButton
+        label="Copy document body"
+        value={() => documentBody(currentDraft())}
+      />
       {isOwner && (
         <Button
           variant="secondary"
