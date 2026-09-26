@@ -307,5 +307,13 @@ have. Run them by hand against a suspect database; do not wire them into
   import, and `compareAndSet` / `updateWhere` no longer throw an untyped
   Zod error on refined node schemas. Corpus does not branch or use
   `compareAndSet` (OCC stays the version-node unique). No app change.
+- **0.69** — base schema v4 adds revision-change storage. `ensureStore()`
+  adopts it on each project's SQLite DO at boot. Namespace forks and
+  journal-backed lineage are unused; Corpus does not install the revision
+  journal. The PostgreSQL owner/runtime deployment order does not apply.
+- **0.70** — durable branch allocation, merge evidence, namespace-fork
+  preparation, and printable `base@V` tokens change. Corpus does not use
+  these APIs or persist their tokens. `nanoid` 6 requires Node 22, matching
+  TypeGraph's existing engine requirement. No application API change.
   `typegraph-prev` stays at 0.66.0: that is the release on `main`, so the
   keeper still tests the hop this branch ships.

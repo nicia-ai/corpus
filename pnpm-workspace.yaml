@@ -29,6 +29,6 @@ allowBuilds:
   unrs-resolver: true
 
 minimumReleaseAgeExclude:
-  - "@nicia-ai/typegraph@0.66.0 || 0.68.1"
+  - "@nicia-ai/typegraph@0.66.0 || 0.68.1 || 0.70.0"
   - "@vitejs/plugin-react@6.1.1"
   - globals@17.12.0
