@@ -511,35 +511,7 @@ export function DocumentsPage({
       )}
 
       {recentDocuments.length > 0 && !searchActive && (
-        <section aria-labelledby="recent-documents-heading" className="mb-8">
-          <h2
-            id="recent-documents-heading"
-            className="mb-3 text-xl font-semibold text-slate-900"
-          >
-            Recently modified
-          </h2>
-          <ol className={listSurface("divide-y divide-slate-200")}>
-            {recentDocuments.map((document) => (
-              <li key={document.slug}>
-                <Link
-                  to="/p/$projectId/documents/$slug"
-                  params={{ projectId, slug: document.slug }}
-                  className="flex min-h-14 items-center gap-4 px-4 py-2.5 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-600"
-                >
-                  <div className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-slate-900">
-                      {document.title}
-                    </span>
-                  </div>
-                  <RelativeTime
-                    iso={document.updatedAt}
-                    className="shrink-0 text-sm tabular-nums text-slate-500"
-                  />
-                </Link>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <RecentDocuments projectId={projectId} documents={recentDocuments} />
       )}
 
       {!empty && (
@@ -700,6 +672,46 @@ export function DocumentsPage({
         </div>
       )}
     </div>
+  );
+}
+
+function RecentDocuments({
+  projectId,
+  documents,
+}: Readonly<{
+  projectId: ProjectId;
+  documents: readonly RecentDocument[];
+}>): React.ReactElement {
+  return (
+    <section aria-labelledby="recent-documents-heading" className="mb-8">
+      <h2
+        id="recent-documents-heading"
+        className="mb-3 text-xl font-semibold text-slate-900"
+      >
+        Recently modified
+      </h2>
+      <ol className={listSurface("divide-y divide-slate-200")}>
+        {documents.map((document) => (
+          <li key={document.slug}>
+            <Link
+              to="/p/$projectId/documents/$slug"
+              params={{ projectId, slug: document.slug }}
+              className="flex min-h-14 items-center gap-4 px-4 py-2.5 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-600"
+            >
+              <div className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-slate-900">
+                  {document.title}
+                </span>
+              </div>
+              <RelativeTime
+                iso={document.updatedAt}
+                className="shrink-0 text-sm tabular-nums text-slate-500"
+              />
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

@@ -193,7 +193,10 @@ import { BlockMapRepo } from "./store/repos/block-map";
 import { ChangeLog, type RecentChange } from "./store/repos/change-log";
 import { CorpusGraph, type CorpusMeta } from "./store/repos/collection-graph";
 import { CommentRepo } from "./store/repos/comment";
-import { DocumentRepo } from "./store/repos/document-repo";
+import {
+  DocumentRepo,
+  type RecentDocumentRow,
+} from "./store/repos/document-repo";
 import {
   type DeleteFolderResult,
   FolderRepo,
@@ -806,9 +809,7 @@ export class ProjectStore extends DurableObject<Env> {
     return listDocumentsProjection(await this.read());
   }
 
-  async recentDocuments(): Promise<
-    readonly { slug: string; title: string; updatedAt: string }[]
-  > {
+  async recentDocuments(): Promise<readonly RecentDocumentRow[]> {
     return (await this.read()).docs.recent(5);
   }
 

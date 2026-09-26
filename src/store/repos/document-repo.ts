@@ -18,6 +18,12 @@ export type DocumentFields = Readonly<{
   searchText: string;
 }>;
 
+export type RecentDocumentRow = Readonly<{
+  slug: string;
+  title: string;
+  updatedAt: string;
+}>;
+
 // All Document node reads/writes. The node carries only the head pointer
 // (`contentHash`), never inline markdown — bytes live in the blob store.
 // `put` owns the create-vs-update branch (so the DO never handles a node
@@ -50,13 +56,7 @@ export class DocumentRepo {
 
   // The landing list must sort the full live set before limiting. The
   // general document browser deliberately caps its projection at 500.
-  recent(limit: number): Promise<
-    readonly Readonly<{
-      slug: string;
-      title: string;
-      updatedAt: string;
-    }>[]
-  > {
+  recent(limit: number): Promise<readonly RecentDocumentRow[]> {
     return this.g
       .query()
       .from("Document", "d")

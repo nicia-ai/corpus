@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { docSlug, freshStore } from "./_helpers";
 
-const tick = (): Promise<void> =>
+// Document timestamps have millisecond precision; keep saves ordered.
+const waitForNextTimestamp = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 3));
 
 describe("recent documents", () => {
@@ -15,11 +16,11 @@ describe("recent documents", () => {
         clientVersion: 0,
         changedBy: "author",
       });
-      await tick();
+      await waitForNextTimestamp();
     }
 
     await store.archiveDocument(docSlug("g"), "author");
-    await tick();
+    await waitForNextTimestamp();
     await store.saveDocument({
       slug: docSlug("a"),
       markdown: "# a\n\nUpdated",
