@@ -57,7 +57,7 @@ import {
   renameFilename,
   saveDocument,
 } from "@/lib/server/documents";
-import { listEmbassies, type EmbassyDto } from "@/lib/server/embassies";
+import { listEmbassies, type EmbassyList } from "@/lib/server/embassies";
 import {
   createSuggestion,
   type CreateSuggestionResult,
@@ -135,7 +135,7 @@ export function DocumentEditor({
   const [renamingFile, setRenamingFile] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
-  const [shareRows, setShareRows] = useState<readonly EmbassyDto[]>();
+  const [shareState, setShareState] = useState<EmbassyList>();
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const draftRef = useRef(doc.markdown);
   const dirtyRef = useRef(false);
@@ -895,7 +895,7 @@ export function DocumentEditor({
             void listEmbassies({
               data: { projectId, slug: doc.slug },
             })
-              .then((rows) => setShareRows(rows))
+              .then((state) => setShareState(state))
               .catch(() => {
                 showToast("Could not load sharing links");
               });
@@ -970,13 +970,14 @@ export function DocumentEditor({
 
   return (
     <div className="max-w-7xl">
-      {shareRows !== undefined && (
+      {shareState !== undefined && (
         <ShareDialog
           projectId={projectId}
           slug={head.slug}
           markdown={head.markdown}
-          initialRows={shareRows}
-          onClose={() => setShareRows(undefined)}
+          initialRows={shareState.rows}
+          served={shareState.served}
+          onClose={() => setShareState(undefined)}
         />
       )}
       {reviewModel.items.map((item) =>

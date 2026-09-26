@@ -18,7 +18,7 @@ import { embassyGoneHtml, embassyPageHtml } from "@/embassy/html";
 import { embassyPath } from "@/embassy/url";
 import { QuotaExceededError } from "@/errors";
 import { asEmbassyId, callerRefFromEmbassy } from "@/ids";
-import type { SaveResult } from "@/project-store/contracts";
+import type { SaveSharedDraftResult } from "@/project-store/contracts";
 import { parseFrontmatter } from "@/store/domain/frontmatter";
 import {
   isBlank,
@@ -182,6 +182,11 @@ export async function embassyGet(c: EnvC): Promise<Response> {
     row.documentSlug,
   );
   if (doc === undefined) return notFound(c, html);
+  const grant =
+    row.grant === "edit" &&
+    (await storeFor(c.env, row.projectId).isDocumentServed(row.documentSlug))
+      ? "suggest"
+      : row.grant;
   void noteEmbassyFetch(
     connectControlDb(c.env.DB),
     row.id,
@@ -195,7 +200,8 @@ export async function embassyGet(c: EnvC): Promise<Response> {
         title: doc.title,
         markdown: doc.markdown,
         url: new URL(embassyPath(row.id), c.req.url).toString(),
-        grant: row.grant,
+        grant,
+        docVersion: doc.docVersion,
       }),
       200,
       {
@@ -262,6 +268,12 @@ export async function embassyEdit(c: EnvC): Promise<Response> {
   const r = await saveEdit(storeFor(c.env, prep.row.projectId), prep);
   if (!r.ok) {
     await releaseClaim(prep);
+    if ("served" in r) {
+      return c.text(
+        "This page is now served by a corpus. Propose changes with POST to this URL + /suggest instead.",
+        403,
+      );
+    }
     if ("conflict" in r) {
       return c.json(
         { ok: false, conflict: true, currentVersion: r.currentVersion },
@@ -277,9 +289,9 @@ export async function embassyEdit(c: EnvC): Promise<Response> {
 async function saveEdit(
   store: ReturnType<typeof storeFor>,
   prep: Extract<WritePrep, { ok: true }>,
-): Promise<SaveResult> {
+): Promise<SaveSharedDraftResult> {
   try {
-    return await store.saveDocument({
+    return await store.saveSharedDraft({
       slug: prep.row.documentSlug,
       markdown: prep.body,
       clientVersion: prep.clientVersion,

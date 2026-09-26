@@ -11,14 +11,22 @@ import {
   revokeEmbassy,
   revokeEmbassiesForDocument,
   setEmbassyGrant,
+  setEmbassyLabel,
 } from "../src/control/embassies";
 import { createProject, deleteProject } from "../src/control/project-admin";
 import { embassy } from "../src/control/schema/app";
 import { storeFor } from "../src/control/store-for";
 import { isIntakeMarkdown } from "../src/embassy/intake";
+import { embassyPrompt } from "../src/embassy/prompt";
 import { asEmbassyId, callerRefFromEmbassy, parseCallerRef } from "../src/ids";
 
-import { createOrg, docSlug, signUp } from "./_helpers";
+import {
+  colSlug,
+  createCorpusFor,
+  createOrg,
+  docSlug,
+  signUp,
+} from "./_helpers";
 
 const ORIGIN = "https://example.com";
 
@@ -127,9 +135,166 @@ describe("Embassy admin scoping — cross-tenant guard", () => {
     });
     expect(revived).toBeUndefined();
   });
+
+  it("link names are scoped to the owning project", async () => {
+    const alice = await signUp("em-name-a");
+    const bob = await signUp("em-name-b");
+    const orgA = await createOrg(alice, "Named Link A");
+    const orgB = await createOrg(bob, "Named Link B");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: orgA.projectId,
+      documentSlug: docSlug("notes"),
+      label: "Reviewer A",
+      grant: "suggest",
+    });
+    expect(link.label).toBe("Reviewer A");
+    expect(
+      await setEmbassyLabel(db, {
+        id: link.id,
+        projectId: orgB.projectId,
+        label: "Other",
+      }),
+    ).toBeUndefined();
+    expect((await resolveLiveEmbassy(db, link.id))?.label).toBe("Reviewer A");
+  });
 });
 
 describe("Embassy HTTP", () => {
+  it("supports an agent drafting, merging a conflict, then proposing after publication", async () => {
+    const user = await signUp("em-agent-journey");
+    const org = await createOrg(user, "Agent Journey Org");
+    const store = storeFor(env, org.projectId);
+    const slug = docSlug("agent-draft");
+    await seedDoc(org.projectId, slug, "# Outline\n");
+    const link = await mintEmbassy(connectControlDb(env.DB), {
+      projectId: org.projectId,
+      documentSlug: slug,
+      label: "Drafting agent",
+      grant: "edit",
+    });
+    const url = `${ORIGIN}/s/${link.id}`;
+    const prompt = embassyPrompt({ url, grant: "edit" });
+    expect(prompt).toContain(`GET ${url}`);
+    expect(prompt).toContain(`PUT ${url}`);
+    expect(prompt).toContain("X-Doc-Version");
+    expect(prompt).toContain(`${url}/suggest`);
+
+    const initial = await SELF.fetch(url, {
+      headers: { accept: "text/markdown" },
+    });
+    expect(await initial.text()).toBe("# Outline\n");
+    const initialVersion = initial.headers.get("x-doc-version");
+    expect(initialVersion).toBe("1");
+    const first = await SELF.fetch(url, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": initialVersion ?? "",
+      },
+      body: "# First draft\n",
+    });
+    expect(first.status).toBe(200);
+
+    const ownerEdit = await store.saveDocument({
+      slug,
+      markdown: "# First draft\n\nOwner note.\n",
+      clientVersion: 2,
+      changedBy: "owner",
+    });
+    expect(ownerEdit.ok).toBe(true);
+    const stale = await SELF.fetch(url, {
+      method: "PUT",
+      headers: { "content-type": "text/markdown", "x-doc-version": "2" },
+      body: "# Agent revision\n",
+    });
+    expect(stale.status).toBe(409);
+
+    const latest = await SELF.fetch(url, {
+      headers: { accept: "text/markdown" },
+    });
+    expect(await latest.text()).toContain("Owner note.");
+    const latestVersion = latest.headers.get("x-doc-version");
+    expect(latestVersion).toBe("3");
+    const mergedMarkdown = "# First draft\n\nOwner note.\n\nAgent revision.\n";
+    const merged = await SELF.fetch(url, {
+      method: "PUT",
+      headers: {
+        "content-type": "text/markdown",
+        "x-doc-version": latestVersion ?? "",
+      },
+      body: mergedMarkdown,
+    });
+    expect(merged.status).toBe(200);
+    expect((await store.getDocument(slug))?.markdown).toBe(mergedMarkdown);
+
+    await createCorpusFor(org.projectId, colSlug("published"));
+    expect(
+      (await store.attachDocument(colSlug("published"), slug, 1, "owner")).ok,
+    ).toBe(true);
+    const denied = await SELF.fetch(url, {
+      method: "PUT",
+      headers: { "content-type": "text/markdown", "x-doc-version": "4" },
+      body: "# Unreviewed update\n",
+    });
+    expect(denied.status).toBe(403);
+    expect(await denied.text()).toContain("/suggest");
+    const proposal = await SELF.fetch(`${url}/suggest`, {
+      method: "POST",
+      headers: { "content-type": "text/markdown", "x-doc-version": "4" },
+      body: "# First draft\n\nOwner note.\n\nAgent proposal.\n",
+    });
+    expect(proposal.status).toBe(201);
+    expect((await store.getDocument(slug))?.markdown).toBe(mergedMarkdown);
+    const review = await store.documentReviewSnapshot(slug);
+    expect(review.suggestions).toHaveLength(1);
+    expect(review.suggestions[0]?.createdBy).toBe(
+      callerRefFromEmbassy(link.id),
+    );
+  });
+
+  it("stops direct edits when a draft enters a corpus", async () => {
+    const user = await signUp("em-served");
+    const org = await createOrg(user, "Served Draft Org");
+    const store = storeFor(env, org.projectId);
+    await seedDoc(org.projectId, "draft", "# Draft\n");
+    const db = connectControlDb(env.DB);
+    const link = await mintEmbassy(db, {
+      projectId: org.projectId,
+      documentSlug: docSlug("draft"),
+      grant: "edit",
+    });
+    await createCorpusFor(org.projectId, colSlug("published"));
+    expect(
+      (
+        await store.attachDocument(
+          colSlug("published"),
+          docSlug("draft"),
+          1,
+          "owner",
+        )
+      ).ok,
+    ).toBe(true);
+
+    const put = await SELF.fetch(`${ORIGIN}/s/${link.id}`, {
+      method: "PUT",
+      headers: { "content-type": "text/markdown", "x-doc-version": "1" },
+      body: "# Unreviewed\n",
+    });
+    expect(put.status).toBe(403);
+    expect(await put.text()).toContain("/suggest");
+    expect((await store.getDocument(docSlug("draft")))?.markdown).toBe(
+      "# Draft\n",
+    );
+
+    const html = await SELF.fetch(`${ORIGIN}/s/${link.id}`, {
+      headers: { accept: "text/html" },
+    });
+    const page = await html.text();
+    expect(page).toContain("Send proposal");
+    expect(page).not.toContain("Save draft");
+  });
+
   it("GET markdown, revoke 404s, edit PUTs repeat until switched to suggest", async () => {
     const user = await signUp("em-http");
     const org = await createOrg(user, "Http Org");

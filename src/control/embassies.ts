@@ -25,6 +25,7 @@ export type EmbassyView = Readonly<{
   id: EmbassyId;
   projectId: ProjectId;
   documentSlug: DocumentSlug;
+  label: string;
   grant: EmbassyGrant;
   expiresAt: number;
   fetchCount: number;
@@ -37,6 +38,7 @@ function toView(row: typeof embassy.$inferSelect): EmbassyView {
     id: asEmbassyId(row.id),
     projectId: asProjectId(row.projectId),
     documentSlug: asDocumentSlug(row.documentSlug),
+    label: row.label,
     grant: row.grant,
     expiresAt: row.expiresAt.getTime(),
     fetchCount: row.fetchCount,
@@ -56,6 +58,7 @@ export async function mintEmbassy(
   input: Readonly<{
     projectId: ProjectId;
     documentSlug: DocumentSlug;
+    label?: string;
     grant: EmbassyGrant;
     ttlMs?: number;
   }>,
@@ -67,6 +70,7 @@ export async function mintEmbassy(
     .values({
       projectId: input.projectId,
       documentSlug: input.documentSlug,
+      label: input.label ?? "Shared link",
       grant: input.grant,
       expiresAt: new Date(now.getTime() + ttl),
     })
@@ -210,6 +214,25 @@ export async function setEmbassyGrant(
   const [row] = await db
     .update(embassy)
     .set({ grant: input.grant })
+    .where(
+      and(
+        eq(embassy.id, input.id),
+        eq(embassy.projectId, input.projectId),
+        isNull(embassy.revokedAt),
+        gt(embassy.expiresAt, new Date()),
+      ),
+    )
+    .returning();
+  return row === undefined ? undefined : toView(row);
+}
+
+export async function setEmbassyLabel(
+  db: ControlDb,
+  input: Readonly<{ id: EmbassyId; projectId: ProjectId; label: string }>,
+): Promise<EmbassyView | undefined> {
+  const [row] = await db
+    .update(embassy)
+    .set({ label: input.label })
     .where(
       and(
         eq(embassy.id, input.id),

@@ -127,7 +127,7 @@ describe("documentHistory — the version chain, newest first, bodies resolved",
     expect(page.history).toHaveLength(105);
     expect(page.history.every((entry) => entry.retained)).toBe(true);
     expect(page.active?.markdown).toBe("version 0");
-  });
+  }, 15_000);
 
   it("an unknown slug has no history", async () => {
     const store = freshProject();

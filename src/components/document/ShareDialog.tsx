@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 
-import { FieldLabel } from "@/components/Field";
+import { Field, FieldLabel } from "@/components/Field";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { useDialogFocusTrap } from "@/components/ui/dialog-focus";
@@ -16,10 +16,12 @@ import { useSubmit } from "@/lib/forms";
 import {
   changeEmbassyGrant,
   createEmbassy,
+  renameEmbassy,
   revokeEmbassy,
   unshareDocument,
   type EmbassyDto,
 } from "@/lib/server/embassies";
+import { isBlank } from "@/util";
 
 const GRANT_OPTIONS = [
   { value: "read", label: "View" },
@@ -50,12 +52,14 @@ export function ShareDialog({
   slug,
   markdown,
   initialRows,
+  served,
   onClose,
 }: Readonly<{
   projectId: ProjectId;
   slug: DocumentSlug;
   markdown: string;
   initialRows: readonly EmbassyDto[];
+  served: boolean;
   onClose: () => void;
 }>): React.ReactElement {
   const titleId = useId();
@@ -66,16 +70,18 @@ export function ShareDialog({
     initialFocus: closeRef,
   });
   const [rows, setRows] = useState(initialRows);
+  const [label, setLabel] = useState("");
   const [grant, setGrant] = useState<EmbassyGrant>(
-    isIntakeMarkdown(markdown) ? "edit" : "read",
+    !served && isIntakeMarkdown(markdown) ? "edit" : "read",
   );
   const shared = rows.length > 0;
 
   const { pending, error, run } = useSubmit(async () => {
     const created = await createEmbassy({
-      data: { projectId, slug, grant },
+      data: { projectId, slug, grant, label },
     });
     setRows((prev) => [created, ...prev]);
+    setLabel("");
     showToast("Link created");
   });
 
@@ -104,6 +110,20 @@ export function ShareDialog({
           ? "People with a link can read this page without joining the organization. Links expire in 7 days."
           : "This page is not shared. Create a link to let someone outside the organization read it."}
       </p>
+      {served && (
+        <p className="mt-2 text-sm text-slate-600">
+          This page is served by a corpus. Shared links can propose edits for
+          review; direct editing is available while a draft is unserved.
+        </p>
+      )}
+      <div className="mt-4">
+        <Field
+          label="Link name"
+          value={label}
+          onChange={setLabel}
+          maxLength={80}
+        />
+      </div>
       <fieldset className="mt-4">
         <legend>
           <FieldLabel>Access</FieldLabel>
@@ -126,15 +146,17 @@ export function ShareDialog({
           />
           Suggest edits
         </label>
-        <label className="mt-1 block text-base text-slate-700">
-          <input
-            type="radio"
-            className="mr-1.5"
-            checked={grant === "edit"}
-            onChange={() => setGrant("edit")}
-          />
-          Edit directly — until you switch the link to Suggest
-        </label>
+        {!served && (
+          <label className="mt-1 block text-base text-slate-700">
+            <input
+              type="radio"
+              className="mr-1.5"
+              checked={grant === "edit"}
+              onChange={() => setGrant("edit")}
+            />
+            Edit directly while unserved — switch to Suggest for review
+          </label>
+        )}
       </fieldset>
       {error !== undefined && (
         <p className="mt-2 text-sm text-red-600">{error}</p>
@@ -152,7 +174,7 @@ export function ShareDialog({
             Unshare
           </Button>
         )}
-        <Button disabled={pending} onClick={() => void run()}>
+        <Button disabled={pending || isBlank(label)} onClick={() => void run()}>
           {shared ? "Create another link" : "Create link"}
         </Button>
       </div>
@@ -163,6 +185,7 @@ export function ShareDialog({
               key={row.id}
               row={row}
               projectId={projectId}
+              served={served}
               onChanged={(next) =>
                 setRows((prev) =>
                   prev.map((r) => (r.id === next.id ? next : r)),
@@ -182,11 +205,13 @@ export function ShareDialog({
 function EmbassyRow({
   row,
   projectId,
+  served,
   onChanged,
   onRevoked,
 }: Readonly<{
   row: EmbassyDto;
   projectId: ProjectId;
+  served: boolean;
   onChanged: (next: EmbassyDto) => void;
   onRevoked: () => void;
 }>): React.ReactElement {
@@ -203,16 +228,51 @@ function EmbassyRow({
       );
     },
   );
+  const [label, setLabel] = useState(row.label);
+  const {
+    pending: renaming,
+    error: renameError,
+    run: runRename,
+  } = useSubmit(async () => {
+    onChanged(
+      await renameEmbassy({ data: { projectId, embassyId: row.id, label } }),
+    );
+  });
   const url = embassyUrl(window.location.origin, row.id);
   return (
     <li className="text-sm text-slate-700">
+      <div className="mb-2 flex items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <Field
+            label="Link name"
+            value={label}
+            onChange={setLabel}
+            maxLength={80}
+          />
+        </div>
+        {label.trim() !== row.label && (
+          <Button
+            variant="secondary"
+            disabled={renaming || isBlank(label)}
+            onClick={() => void runRename()}
+          >
+            Save name
+          </Button>
+        )}
+      </div>
+      {renameError !== undefined && (
+        <p className="mb-2 text-sm text-red-600">{renameError}</p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Segmented
           ariaLabel="Link access"
-          options={GRANT_OPTIONS}
-          value={row.grant}
+          options={served ? GRANT_OPTIONS.slice(0, 2) : GRANT_OPTIONS}
+          value={served && row.grant === "edit" ? "suggest" : row.grant}
           onChange={(next) => void runGrant(next)}
         />
+        {served && row.grant === "edit" && (
+          <span className="text-slate-600">Direct editing paused</span>
+        )}
         <span className="text-slate-500 tabular-nums">
           {row.fetchCount} fetch{row.fetchCount === 1 ? "" : "es"}
         </span>

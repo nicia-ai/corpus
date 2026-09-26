@@ -16,6 +16,10 @@ const PAGE_CSS = `
   textarea { width: 100%; min-height: 12rem; font-family: ui-monospace, monospace; font-size: 0.8rem; line-height: 1.45; border: 1px solid #cbd5e1; border-radius: 0.375rem; padding: 0.75rem; background: #fff; }
   button.copy { margin-top: 0.75rem; min-height: 2.75rem; padding: 0.4rem 0.85rem; border: 0; border-radius: 0.375rem; background: #2563eb; color: #fff; font-weight: 500; font-size: 0.875rem; cursor: pointer; }
   button.copy:hover { background: #1d4ed8; }
+  button.copy:disabled { opacity: 0.5; cursor: wait; }
+  .status { min-height: 1.5rem; margin: 0.75rem 0 0; }
+  .conflict { margin-top: 1rem; }
+  .conflict textarea { margin-top: 0.5rem; }
   .md { font-size: 1.125rem; line-height: 1.7; }
   .md h1 { font-size: 1.875rem; letter-spacing: -0.02em; }
   .md h2 { font-size: 1.5rem; letter-spacing: -0.015em; }
@@ -42,12 +46,15 @@ export function embassyPageHtml(input: {
   markdown: string;
   url: string;
   grant: EmbassyGrant;
+  docVersion: number;
 }): string {
   const prompt = embassyPrompt({ url: input.url, grant: input.grant });
   const body = renderToString(
     <MarkdownContent source={documentBody(input.markdown)} />,
   );
   const escaped = escapeHtml(prompt);
+  const writable = input.grant !== "read";
+  const edit = input.grant === "edit";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -66,12 +73,74 @@ export function embassyPageHtml(input: {
       <button type="button" class="copy" id="copy">Copy prompt</button>
     </section>
     <article class="md">${body}</article>
+    ${
+      writable
+        ? `<section class="card">
+      <h2>${edit ? "Edit this draft" : "Propose an edit"}</h2>
+      <p>${edit ? "Direct edits are available while this draft is not served by a corpus. When it is served, changes go to review." : "Your proposal goes to the owner for review before it changes the page."}</p>
+      <label for="draft">Full markdown</label>
+      <textarea id="draft" spellcheck="false">${escapeHtml(input.markdown)}</textarea>
+      <button type="button" class="copy" id="submit-change">${edit ? "Save draft" : "Send proposal"}</button>
+      <p class="status" id="write-status" role="status" aria-live="polite"></p>
+      <div class="conflict" id="conflict" hidden>
+        <label for="latest">Latest page (compare with your draft above)</label>
+        <textarea id="latest" readonly></textarea>
+      </div>
+    </section>`
+        : ""
+    }
   </div>
   <script>
     const t = document.getElementById("prompt");
     document.getElementById("copy")?.addEventListener("click", async () => {
       const v = t?.value ?? "";
       try { await navigator.clipboard.writeText(v); } catch {}
+    });
+    const draft = document.getElementById("draft");
+    const submit = document.getElementById("submit-change");
+    const status = document.getElementById("write-status");
+    const conflict = document.getElementById("conflict");
+    const latest = document.getElementById("latest");
+    let version = ${String(input.docVersion)};
+    let direct = ${String(edit)};
+    submit?.addEventListener("click", async () => {
+      if (!draft || !status) return;
+      submit.disabled = true;
+      status.textContent = "Sending…";
+      try {
+        const response = await fetch(direct ? location.pathname : location.pathname + "/suggest", {
+          method: direct ? "PUT" : "POST",
+          headers: { "Content-Type": "text/markdown", "X-Doc-Version": String(version) },
+          body: draft.value,
+        });
+        if (response.status === 409) {
+          const current = await fetch(location.pathname, { headers: { Accept: "text/markdown" } });
+          if (current.ok && latest && conflict) {
+            latest.value = await current.text();
+            version = Number(current.headers.get("X-Doc-Version"));
+            conflict.hidden = false;
+          }
+          status.textContent = "The page changed. Compare the latest version below with your draft, merge the changes above, then retry.";
+        } else if (response.ok) {
+          const result = await response.json();
+          if (direct) version = result.docVersion;
+          if (conflict) conflict.hidden = true;
+          status.textContent = direct ? "Draft saved." : "Proposal sent for review.";
+        } else {
+          const message = await response.text();
+          if (direct && (message.startsWith("edit access withdrawn") || message.startsWith("This page is now served"))) {
+            direct = false;
+            submit.textContent = "Send proposal";
+            status.textContent = "Direct editing has ended. Your draft is still here; send it for review.";
+          } else {
+            status.textContent = message || "Could not send the change.";
+          }
+        }
+      } catch {
+        status.textContent = "Could not reach the page. Your draft is still here; try again.";
+      } finally {
+        submit.disabled = false;
+      }
     });
   </script>
 </body>

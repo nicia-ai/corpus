@@ -59,6 +59,9 @@ export type SaveResult = Readonly<
   | { ok: false; rolledBack: true }
 >;
 
+export type SaveSharedDraftResult =
+  SaveResult | Readonly<{ ok: false; served: true }>;
+
 // A scoped create either lands a new document or refuses because the slug
 // already exists outside the bound Corpus — another scope's document,
 // which the credential may never write. The existence check is decided

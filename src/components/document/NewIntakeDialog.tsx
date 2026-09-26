@@ -14,7 +14,7 @@ import { useSubmit } from "@/lib/forms";
 import { createIntake } from "@/lib/server/embassies";
 import { isBlank } from "@/util";
 
-type CreatedIntake = Readonly<{ slug: string; prompt: string }>;
+type CreatedIntake = Readonly<{ slug: string; prompt: string | undefined }>;
 
 export function NewIntakeDialog({
   projectId,
@@ -43,6 +43,11 @@ export function NewIntakeDialog({
   }
   const { pending, error, run } = useSubmit(async () => {
     const r = await createIntake({ data: { projectId, title } });
+    if (r.embassy === undefined) {
+      setCreated({ slug: r.slug, prompt: undefined });
+      void router.invalidate();
+      return;
+    }
     const prompt = embassyPrompt({
       url: embassyUrl(window.location.origin, r.embassy.id),
       grant: "edit",
@@ -69,8 +74,8 @@ export function NewIntakeDialog({
         <>
           <p className="mt-1 text-base text-slate-500">
             Creates an empty page and copies a prompt an agent can use to write
-            it. The agent keeps editing until you switch the link to review in
-            Share.
+            it. The agent can edit while the page is unserved. Switch the link
+            to Suggest in Share to review changes before publishing.
           </p>
           <div className="mt-4">
             <Field label="Title" value={title} onChange={setTitle} autoFocus />
@@ -93,15 +98,18 @@ export function NewIntakeDialog({
       ) : (
         <>
           <p className="mt-1 text-base text-slate-500">
-            Created. The prompt could not be copied — copy it below, then open
-            the page.
+            {created.prompt === undefined
+              ? "The page was created, but its link could not be made. Open the page and create an Edit link in Share."
+              : "Created. The prompt could not be copied — copy it below, then open the page."}
           </p>
-          <div className="mt-4 flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 p-2">
-            <pre className="max-h-40 min-w-0 flex-1 overflow-auto whitespace-pre-wrap font-mono text-sm text-slate-700">
-              {created.prompt}
-            </pre>
-            <CopyButton value={created.prompt} label="Copy prompt" />
-          </div>
+          {created.prompt !== undefined && (
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+              <pre className="max-h-40 min-w-0 flex-1 overflow-auto whitespace-pre-wrap font-mono text-sm text-slate-700">
+                {created.prompt}
+              </pre>
+              <CopyButton value={created.prompt} label="Copy prompt" />
+            </div>
+          )}
           <div className="mt-5 flex justify-end gap-3">
             <Button ref={cancelRef} variant="secondary" onClick={onClose}>
               Close

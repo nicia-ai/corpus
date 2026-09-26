@@ -20,7 +20,7 @@ times as needed (for example, after each round of feedback):
   body: full markdown
 
 On 409, someone else changed the page: GET it again, keep their changes,
-and retry. On 403, the owner wants to review changes: from then on, POST
+and retry. If direct editing ends with a 403, POST
 the full proposed markdown to ${url}/suggest instead (same headers).
 `;
 }

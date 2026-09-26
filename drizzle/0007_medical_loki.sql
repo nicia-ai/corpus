@@ -1,0 +1,1 @@
+ALTER TABLE `embassy` ADD `label` text DEFAULT 'Shared link' NOT NULL;

@@ -141,6 +141,7 @@ import type {
   RenameFilenameResult,
   SaveDocumentInput,
   SaveResult,
+  SaveSharedDraftResult,
   SeedResult,
   EnsureDefaultCorpusResult,
   UpdateCorpusInput,
@@ -727,6 +728,19 @@ export class ProjectStore extends DurableObject<Env> {
     return getDocumentProjection(await this.read(), slug);
   }
 
+  private async documentServed(u: Unit, slug: DocumentSlug): Promise<boolean> {
+    if ((await u.cols.collectionsIncluding(slug)).length > 0) return true;
+    const ancestors = await u.folders.documentFolderAncestorSlugs(slug);
+    return (
+      ancestors.length > 0 &&
+      (await u.cols.collectionsIncludingFolders(ancestors)).length > 0
+    );
+  }
+
+  async isDocumentServed(slug: DocumentSlug): Promise<boolean> {
+    return this.documentServed(await this.read(), slug);
+  }
+
   async documentReviewSnapshot(
     slug: DocumentSlug,
   ): Promise<DocumentReviewSnapshot> {
@@ -1073,6 +1087,36 @@ export class ProjectStore extends DurableObject<Env> {
         return { ...saved, changes: [...saved.changes, ...placed.changes] };
       });
       return { ok: true, docVersion: outcome.result.docVersion };
+    } catch (err) {
+      return this.saveError(err, input);
+    }
+  }
+
+  // A share link may draft directly only while the document is not served by
+  // any corpus. Check membership in the same graph transaction as the save:
+  // attaching the document concurrently cannot publish an unreviewed write.
+  async saveSharedDraft(
+    input: SaveDocumentInput,
+  ): Promise<SaveSharedDraftResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand<SaveSharedDraftResult>(
+        now,
+        async (ctx) => {
+          if (await this.documentServed(ctx.u, input.slug)) {
+            return {
+              result: { ok: false, served: true } as const,
+              changes: [],
+            };
+          }
+          const saved = await saveDocumentCommand(ctx, input);
+          return {
+            result: { ok: true, docVersion: saved.result.docVersion } as const,
+            changes: saved.changes,
+          };
+        },
+      );
+      return outcome.result;
     } catch (err) {
       return this.saveError(err, input);
     }

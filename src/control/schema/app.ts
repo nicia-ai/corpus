@@ -208,6 +208,7 @@ export const embassy = sqliteTable(
       .notNull()
       .references(() => project.id, { onDelete: "cascade" }),
     documentSlug: text("document_slug").notNull(),
+    label: text("label").notNull().default("Shared link"),
     grant: text("grant", { enum: EMBASSY_GRANTS }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
