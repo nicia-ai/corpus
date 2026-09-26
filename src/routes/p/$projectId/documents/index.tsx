@@ -6,6 +6,7 @@ import { getCorpusList, type CorpusListItem } from "@/lib/server/corpora";
 import { getDocumentList } from "@/lib/server/documents";
 import { getFolderList } from "@/lib/server/folders";
 import { listCreateProposals } from "@/lib/server/suggestions";
+import { Route as ProjectRoute } from "@/routes/p/$projectId/route";
 
 export const Route = createFileRoute("/p/$projectId/documents/")({
   component: DocumentsRoute,
@@ -38,6 +39,7 @@ function DocumentsRoute(): React.ReactElement {
       folders={data.folders}
       corpora={data.corpora}
       proposals={data.proposals}
+      isOwner={ProjectRoute.useLoaderData().current.role === "owner"}
     />
   );
 }

@@ -8,6 +8,7 @@ import { AddMetadataButton } from "@/components/document/AddMetadataButton";
 import { DocHeader } from "@/components/document/DocHeader";
 import { DocumentActionBar } from "@/components/document/DocumentActionBar";
 import { RenameField } from "@/components/document/RenameField";
+import { ShareDialog } from "@/components/document/ShareDialog";
 import type {
   ReviewMark,
   SourceRange,
@@ -25,9 +26,12 @@ import {
 } from "@/components/review/ReviewRail";
 import { Button } from "@/components/ui/Button";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { CopyButton } from "@/components/ui/CopyButton";
+import { LiveRelativeTime } from "@/components/ui/DateTime";
 import { Card } from "@/components/ui/Surface";
 import { textLinkClass } from "@/components/ui/text-link";
 import { showToast } from "@/components/ui/Toast";
+import { EMBASSY_ACTOR_LABEL } from "@/embassy/actor";
 import type { ProjectId } from "@/ids";
 import {
   blockAnchorsToSourceRanges,
@@ -44,6 +48,7 @@ import {
   type CreateCommentResult,
   type DocumentBlocksResult,
 } from "@/lib/server/comments";
+import type { SharedAgentEdit } from "@/lib/server/document-review";
 import {
   archiveDocument,
   type DocSnapshot,
@@ -52,6 +57,7 @@ import {
   renameFilename,
   saveDocument,
 } from "@/lib/server/documents";
+import { listEmbassies, type EmbassyDto } from "@/lib/server/embassies";
 import {
   createSuggestion,
   type CreateSuggestionResult,
@@ -60,7 +66,7 @@ import {
 import { useCollab, type RealtimeChange } from "@/lib/use-collab";
 import { useFollowDocLink } from "@/lib/use-follow-doc-link";
 import { MIN_ANCHOR_CHARS } from "@/store/domain/anchor";
-import { hasFrontmatterFence } from "@/store/domain/frontmatter";
+import { documentBody, hasFrontmatterFence } from "@/store/domain/frontmatter";
 
 // A transient remote-change cue, keyed by the blocks that moved. The page owns
 // this block-indexed shape; it maps the indexes to source ranges before handing
@@ -90,6 +96,7 @@ const EMPTY_REVIEW_LAYOUT: ReviewRailLayout = {
 
 export function DocumentEditor({
   doc,
+  sharedAgentEdit,
   projectId,
   blocks,
   comments,
@@ -99,8 +106,10 @@ export function DocumentEditor({
   changeFlash,
   onRemoteContentChange,
   onRemoteSuggestionChange,
+  isOwner,
 }: Readonly<{
   doc: DocSnapshot;
+  sharedAgentEdit: SharedAgentEdit | undefined;
   projectId: ProjectId;
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
@@ -113,6 +122,7 @@ export function DocumentEditor({
     slug: string,
     seenSuggestionIds: readonly number[],
   ) => void;
+  isOwner: boolean;
 }>): React.ReactElement {
   const router = useRouter();
   // The document is one always-editable surface; comments and suggestions are
@@ -125,6 +135,7 @@ export function DocumentEditor({
   const [renamingFile, setRenamingFile] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [mobileReviewOpen, setMobileReviewOpen] = useState(false);
+  const [shareRows, setShareRows] = useState<readonly EmbassyDto[]>();
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const draftRef = useRef(doc.markdown);
   const dirtyRef = useRef(false);
@@ -853,6 +864,15 @@ export function DocumentEditor({
         Rename file
       </button>
       {!hasFrontmatter && <AddMetadataButton editorRef={editorRef} />}
+      {sharedAgentEdit?.docVersion === head.docVersion && (
+        <span>
+          · {EMBASSY_ACTOR_LABEL} edited{" "}
+          <LiveRelativeTime
+            iso={sharedAgentEdit.changedAt}
+            className="tabular-nums"
+          />
+        </span>
+      )}
     </div>
   );
 
@@ -863,6 +883,26 @@ export function DocumentEditor({
     <>
       {deleteError && (
         <span className="text-base text-red-600">{deleteError}</span>
+      )}
+      <CopyButton
+        label="Copy document body"
+        value={() => documentBody(currentDraft())}
+      />
+      {isOwner && (
+        <Button
+          variant="secondary"
+          onClick={() => {
+            void listEmbassies({
+              data: { projectId, slug: doc.slug },
+            })
+              .then((rows) => setShareRows(rows))
+              .catch(() => {
+                showToast("Could not load sharing links");
+              });
+          }}
+        >
+          Share
+        </Button>
       )}
       <Button
         variant="danger"
@@ -930,6 +970,15 @@ export function DocumentEditor({
 
   return (
     <div className="max-w-7xl">
+      {shareRows !== undefined && (
+        <ShareDialog
+          projectId={projectId}
+          slug={head.slug}
+          markdown={head.markdown}
+          initialRows={shareRows}
+          onClose={() => setShareRows(undefined)}
+        />
+      )}
       {reviewModel.items.map((item) =>
         item.kind === "suggestion" ? (
           <span

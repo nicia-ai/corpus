@@ -71,6 +71,13 @@ export function hasFrontmatterFence(raw: string): boolean {
   return CLOSE_AT_START.test(rest) || CLOSE_AFTER.test(rest);
 }
 
+// The document body without its frontmatter fence or the blank lines after
+// it. Unparseable frontmatter is kept, so no content is ever dropped.
+export function documentBody(raw: string): string {
+  const fm = parseFrontmatter(raw);
+  return fm.ok ? fm.body.replace(/^(?:[ \t]*\r?\n)+/, "") : raw;
+}
+
 export function parseFrontmatter(raw: string): FrontmatterParse {
   const open = OPEN.exec(raw);
   if (open === null) return plain(raw);

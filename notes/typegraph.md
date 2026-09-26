@@ -63,12 +63,12 @@ failed open had already stamped base schema v2, so **rolling back to 0.56
 does not help** -- it refuses a DO stamped newer than it knows. Roll
 forward only.
 
-`ensureStore` now calls `backend.bootstrapTables()` before opening: all
-`IF NOT EXISTS`, creates whatever is missing, stamps the current version.
-The bump's own `typegraph-prev` alias pointed at 0.64 (already release 3),
-which is why the keeper passed; it must name the release _deployed to
-production_, not merely the previous npm version. Keeper case: "predates
-the recorded-history relations".
+0.66.1 creates the missing recorded tables inside v3 adoption, so the
+`bootstrapTables()` workaround is gone. `ensureStore` calls
+`migrateGraphSchemaIfNeeded` then `createAdapterStoreWithSchema`. The
+`typegraph-prev` alias must name the release _deployed to production_,
+not merely the previous npm version. Keeper case: "predates the
+recorded-history relations".
 
 ## Why the atomic-write releases don't speed Corpus up
 
@@ -293,6 +293,19 @@ have. Run them by hand against a suspect database; do not wire them into
 - **0.66** — `tx.writeNodeUpsertBatch()` for recorded PostgreSQL
   transactions, plus schema-fence evidence leased across recorded
   transactions. Both are PostgreSQL-only and need `history`; Corpus is DO
-  SQLite with no capture, so this is a no-op. It does not touch SQLite
-  base-schema adoption, so the legacy-DO `bootstrapTables()` call in
-  `ensureStore` (see above) is still required.
+  SQLite with no capture, so this is a no-op.
+- **0.66.1** — v3 base-schema adoption creates missing
+  `typegraph_recorded_nodes` / `_edges` before the changed-since indexes.
+  Removes the `bootstrapTables()` workaround added for the 0.56→0.65 hop.
+  Keeper still drops those tables and stamps v2.
+- **0.67 / 0.67.1** — durable graph-merge branches (`branchDurable`,
+  reopen, destroy) and `store.clear()` deleting contribution markers.
+  Corpus does not merge graphs or call `clear()`; no app change.
+- **0.68** — atomic durable-branch operations (`operateDurableBranch`).
+  Same: Corpus has no durable-merge host. No app change.
+- **0.68.1** — `cloneWorkingCopyStrategy` allows undeclared properties on
+  import, and `compareAndSet` / `updateWhere` no longer throw an untyped
+  Zod error on refined node schemas. Corpus does not branch or use
+  `compareAndSet` (OCC stays the version-node unique). No app change.
+  `typegraph-prev` stays at 0.66.0: that is the release on `main`, so the
+  keeper still tests the hop this branch ships.

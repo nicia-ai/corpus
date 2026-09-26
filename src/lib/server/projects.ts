@@ -33,7 +33,7 @@ function requireOwner(ref: ProjectRef): void {
 }
 
 // Soft-archive a project: the existing `deleteProject` (status →
-// `deleted` + epoch bump) revokes access near-immediately; the DO
+// `deleted`, embassy revoke, epoch bump) revokes access near-immediately; the DO
 // teardown is the reconcile sweep's job. The org's `default` project is
 // refused — it is the landing target the resolver falls back to, so
 // archiving it would strand the org with no reachable project.

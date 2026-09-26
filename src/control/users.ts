@@ -1,5 +1,6 @@
 import { inArray } from "drizzle-orm";
 
+import { EMBASSY_ACTOR_LABEL } from "../embassy/actor";
 import { parseCallerRef } from "../ids";
 
 import type { ControlDb } from "./db";
@@ -73,14 +74,18 @@ export async function resolveAuthorLabels(
 
   // Every user id we need a name for: direct authors + the key owners.
   const userIds = [
-    ...parsed.filter((p) => p.kind !== "apikey").map((p) => p.id),
+    ...parsed
+      .filter((p) => p.kind !== "apikey" && p.kind !== "embassy")
+      .map((p) => p.id),
     ...keyRows.map((r) => r.userId),
   ];
   const names = await resolveUserNames(db, userIds);
 
   const out = new Map<string, string>();
   for (const p of parsed) {
-    if (p.kind === "apikey") {
+    if (p.kind === "embassy") {
+      out.set(p.ref, EMBASSY_ACTOR_LABEL);
+    } else if (p.kind === "apikey") {
       const key = keyById.get(p.id);
       const owner = key === undefined ? undefined : names.get(key.userId);
       out.set(p.ref, owner ?? key?.name ?? "API key");
