@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DocumentsPage } from "@/features/documents/DocumentsPage";
 import { asProjectId } from "@/ids";
 import { getCorpusList, type CorpusListItem } from "@/lib/server/corpora";
-import { getDocumentList } from "@/lib/server/documents";
+import { getDocumentList, getRecentDocuments } from "@/lib/server/documents";
 import { getFolderList } from "@/lib/server/folders";
 import { listCreateProposals } from "@/lib/server/suggestions";
 import { Route as ProjectRoute } from "@/routes/p/$projectId/route";
@@ -17,8 +17,9 @@ export const Route = createFileRoute("/p/$projectId/documents/")({
   // to review on, and this is where a curator already scans documents.
   loader: async ({ params }) => {
     const { projectId } = params;
-    const [documents, folders, proposals] = await Promise.all([
+    const [documents, recentDocuments, folders, proposals] = await Promise.all([
       getDocumentList({ data: { projectId } }),
+      getRecentDocuments({ data: { projectId } }),
       getFolderList({ data: { projectId } }),
       listCreateProposals({ data: { projectId } }),
     ]);
@@ -26,7 +27,7 @@ export const Route = createFileRoute("/p/$projectId/documents/")({
       documents.length === 0 && folders.length === 0
         ? await getCorpusList({ data: { projectId } })
         : [];
-    return { documents, folders, corpora, proposals };
+    return { documents, recentDocuments, folders, corpora, proposals };
   },
 });
 
@@ -36,6 +37,7 @@ function DocumentsRoute(): React.ReactElement {
     <DocumentsPage
       projectId={asProjectId(Route.useParams().projectId)}
       documents={data.documents}
+      recentDocuments={data.recentDocuments}
       folders={data.folders}
       corpora={data.corpora}
       proposals={data.proposals}

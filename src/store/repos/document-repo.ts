@@ -48,6 +48,30 @@ export class DocumentRepo {
     return this.g.nodes.Document.find({ limit });
   }
 
+  // The landing list must sort the full live set before limiting. The
+  // general document browser deliberately caps its projection at 500.
+  recent(limit: number): Promise<
+    readonly Readonly<{
+      slug: string;
+      title: string;
+      updatedAt: string;
+    }>[]
+  > {
+    return this.g
+      .query()
+      .from("Document", "d")
+      .whereNode("d", (d) => d.archivedAt.isNull())
+      .select((ctx) => ({
+        slug: ctx.d.slug,
+        title: ctx.d.title,
+        updatedAt: ctx.d.updatedAt,
+      }))
+      .orderBy("d", "updatedAt", "desc")
+      .orderBy("d", "slug", "asc")
+      .limit(limit)
+      .execute();
+  }
+
   liveCount(): Promise<number> {
     return this.g
       .query()

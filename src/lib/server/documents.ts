@@ -51,6 +51,11 @@ export type DocListItem = Readonly<{
   folderSlug: FolderSlug | null;
   updatedAt: string;
 }>;
+export type RecentDocument = Readonly<{
+  slug: DocumentSlug;
+  title: string;
+  updatedAt: string;
+}>;
 export type DocSnapshot = Readonly<{
   slug: DocumentSlug;
   title: string;
@@ -141,6 +146,17 @@ export const getDocumentList = createServerFn({ method: "GET" })
       path: d.path,
       folderSlug: d.folderSlug === null ? null : asFolderSlug(d.folderSlug),
       updatedAt: d.updatedAt,
+    }));
+  });
+
+export const getRecentDocuments = createServerFn({ method: "GET" })
+  .middleware([projectMiddleware])
+  .handler(async ({ context }): Promise<RecentDocument[]> => {
+    const rows = await storeOf(srv(context)).recentDocuments();
+    return rows.map((row) => ({
+      slug: asDocumentSlug(row.slug),
+      title: row.title,
+      updatedAt: row.updatedAt,
     }));
   });
 

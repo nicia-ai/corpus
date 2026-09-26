@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { getAuth } from "@/auth.server";
 import type { Role } from "@/control/access";
-import { countConnectionsByCorpus } from "@/control/connections";
 import { connectControlDb } from "@/control/db";
 import { entitlementsOf } from "@/control/entitlements";
 import type { SidebarLink } from "@/control/env";
@@ -19,37 +18,11 @@ import {
 } from "@/control/project-resolution";
 import { storeFor } from "@/control/store-for";
 import { InternalError } from "@/errors";
-import type { OrganizationId, ProjectId, CorpusSlug } from "@/ids";
-import { asFolderSlug } from "@/ids";
+import type { OrganizationId, ProjectId } from "@/ids";
 import { authMiddleware } from "@/lib/middleware";
-import {
-  type CorpusMeta,
-  corpusMetas,
-  type CorpusMember,
-  corpusMemberMetas,
-} from "@/lib/server/corpora";
-import { type DocMeta, docMetas } from "@/lib/server/documents";
-import type { FolderRow } from "@/lib/server/folders";
 import { authedUserId } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
-import { DEFAULT_CORPUS_SLUG } from "@/store/domain/default-corpus";
 import { compact } from "@/util";
-
-// firstRun:false carries everything the dashboard renders in one
-// round-trip: counts + the shared-document proof
-// (documents / attachments) + recent corpus list + the MCP
-// endpoint + per-corpus connection counts (the Home corpora
-// strip's "N agents" pill). Corpora with zero Connections are
-// absent from `connectionsByCorpus`.
-export type DashboardData = Readonly<{
-  corpora: CorpusMeta[];
-  documents: DocMeta[];
-  members: CorpusMember[];
-  folders: readonly FolderRow[];
-  mcpUrl: string;
-  connectionsByCorpus: Readonly<Record<string, number>>;
-  defaultCorpusSlug: CorpusSlug;
-}>;
 
 // — Session / first-run ————————————————————————————————————————
 
@@ -251,13 +224,13 @@ export const loadProjectShell = createServerFn({ method: "GET" })
     },
   );
 
-// One round-trip for the dashboard route: signals unauthenticated (loader
-// redirects), first-run (no organization yet), or the full home payload.
+// Project entry only needs to know whether to show empty-project onboarding
+// or send the member directly to Documents.
 // No middleware so it never throws on an unauthenticated
 // visitor; it resolves the URL-named project itself, exactly once. The
 // `/p/$projectId` layout already gated membership — an unresolvable id
 // here only happens on a stale link, handled as "redirect to /".
-export const loadDashboard = createServerFn({ method: "GET" })
+export const loadProjectLanding = createServerFn({ method: "GET" })
   .validator(z.object({ projectId: z.string().min(1) }))
   .handler(
     async ({
@@ -266,7 +239,7 @@ export const loadDashboard = createServerFn({ method: "GET" })
     }): Promise<
       | { authed: false }
       | { authed: true; firstRun: true }
-      | ({ authed: true; firstRun: false } & DashboardData)
+      | { authed: true; firstRun: false; hasDocuments: boolean }
     > => {
       const c = srv(context);
       const userId = c.authSession?.user.id;
@@ -281,31 +254,11 @@ export const loadDashboard = createServerFn({ method: "GET" })
       if (ref === undefined) return { authed: true, firstRun: true };
       const store = storeFor(c.env, ref.projectId);
       await store.ensureDefaultCorpus(userId);
-      const db = connectControlDb(c.env.DB);
-      const [cols, documents, members, connCounts, folders] = await Promise.all(
-        [
-          store.listCorpora(),
-          store.listDocuments(),
-          store.listResolvedMembers(),
-          countConnectionsByCorpus(db, ref.projectId),
-          store.listFolders(),
-        ],
-      );
+      const documents = await store.listDocuments();
       return {
         authed: true,
         firstRun: false,
-        corpora: corpusMetas(cols),
-        documents: docMetas(documents),
-        members: corpusMemberMetas(members),
-        folders: folders.map((f) => ({
-          slug: asFolderSlug(f.slug),
-          name: f.name,
-          parentSlug: f.parentSlug === null ? null : asFolderSlug(f.parentSlug),
-          position: f.position,
-        })),
-        mcpUrl: `${c.env.BETTER_AUTH_URL}/mcp`,
-        connectionsByCorpus: Object.fromEntries(connCounts),
-        defaultCorpusSlug: DEFAULT_CORPUS_SLUG,
+        hasDocuments: documents.length > 0,
       };
     },
   );

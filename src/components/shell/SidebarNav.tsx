@@ -2,7 +2,6 @@ import { Link } from "@tanstack/react-router";
 import {
   FileText,
   History,
-  House,
   type LucideIcon,
   Settings,
   Share2,
@@ -12,9 +11,8 @@ import {
 import type { ProjectId } from "@/ids";
 
 // The project-scoped primary nav entries. Each `to` is the full route
-// path; the active project id is supplied from the URL at render. Home
-// is the project graph (one document feeding many agents); Share2
-// echoes the fan-out. Credentials (OAuth + API keys) live on the
+// path; the active project id is supplied from the URL at render.
+// Credentials (OAuth + API keys) live on the
 // per-Corpus Connect setup panel — a key has no meaning outside a
 // Connection (Project + one Corpus), so there is no project-wide
 // "API keys" or "MCP" nav slot. The Connect button on each Corpus
@@ -28,9 +26,8 @@ type NavEntry = Readonly<{
 }>;
 
 const NAV: readonly NavEntry[] = [
-  { to: "/p/$projectId", label: "Home", icon: House },
-  { to: "/p/$projectId/corpora", label: "Corpora", icon: Share2 },
   { to: "/p/$projectId/documents", label: "Documents", icon: FileText },
+  { to: "/p/$projectId/corpora", label: "Corpora", icon: Share2 },
   { to: "/p/$projectId/activity", label: "Activity", icon: History },
   { to: "/p/$projectId/team", label: "Team", icon: Users },
   {
@@ -60,7 +57,6 @@ export function SidebarNav({
             to={n.to}
             params={{ projectId }}
             onClick={onNavigate}
-            activeOptions={{ exact: n.to === "/p/$projectId" }}
             activeProps={{
               className:
                 "flex min-h-11 items-center gap-3 rounded-md bg-blue-50 px-3 py-2 text-base font-medium text-blue-700",

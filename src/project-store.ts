@@ -806,6 +806,12 @@ export class ProjectStore extends DurableObject<Env> {
     return listDocumentsProjection(await this.read());
   }
 
+  async recentDocuments(): Promise<
+    readonly { slug: string; title: string; updatedAt: string }[]
+  > {
+    return (await this.read()).docs.recent(5);
+  }
+
   async listDocumentRefs(): Promise<{ slug: string; path: string }[]> {
     return listDocumentRefsProjection(await this.read());
   }
