@@ -1,8 +1,10 @@
 # Product
 
-## Register
+<!-- impeccable:product-schema 1 -->
 
-product
+## Platform
+
+web
 
 ## Users
 
@@ -33,14 +35,42 @@ source of truth instead of stale prompt files copied into every agent.
 
 Success: one approved version of every document, maintained by non-engineers,
 read live by agents over MCP with per-project OAuth/API-key isolation. One
-edit updates every corpus and every agent that reads it at once (documents
-are graph nodes shared by reference, not copied). Never a lost write —
-optimistic-concurrency conflict detection turns a racing save into a 409, and a
-verifiable append-only version ledger lets any version be restored. Agents
-propose; only humans approve. The whole project is exportable as a
+edit updates every corpus and every agent that reads it at once. Never a lost
+write — optimistic-concurrency conflict detection turns a racing save into a
+409, and a verifiable append-only version ledger lets any version be restored.
+Agents propose; only humans approve. The whole project is exportable as a
 deterministic, content-addressed bundle that re-imports to the same hash.
 
-## Brand Personality
+## Positioning
+
+Documents are shared across corpora by reference, not copied. A curator edits
+one source document; every corpus and agent that reads it receives the
+approved change. Corpus makes this linkage visible while keeping authorship
+and agent consumption on separate sides of a human approval boundary.
+
+## Operating Context
+
+Curators enter a project to work on documents. The populated project opens
+Documents, where recently modified documents — including newly created ones —
+are visible before the folder browser. Search and folders support finding the
+rest; Activity remains available when a curator needs the event history.
+
+People write and review in the web app. Engineers can use the Git-free CLI,
+and agents consume an ordered corpus over MCP with a credential bound to one
+project and corpus. Documents may appear in several corpora without copies.
+
+## Capabilities and Constraints
+
+- Tenancy is Organization → Project. A project owns its documents, folders,
+  corpora, and credentials.
+- Document writes are versioned and use optimistic concurrency. A conflict
+  requires an explicit resolution rather than a silent overwrite.
+- Agents read approved content and may propose edits or new documents. Human
+  review state stays outside MCP and the portable bundle.
+- Project owners administer Connections and export or import bundles.
+- The project bundle is deterministic and content-addressed.
+
+## Brand Commitments
 
 **Quiet, engineered, trustworthy.** A precise instrument, not a dashboard.
 Function-first; the system recedes so the product's one memorable moment —
@@ -66,31 +96,29 @@ clone.
   discipline: dark-by-default, blurred glassmorphism, kinetic motion. Corpus
   is light, still, and its own thing.
 
-## Design Principles
+## Evidence on Hand
 
-1. **The system recedes so the graph speaks.** Restraint everywhere except
-   the one moment the product exists to deliver — one document feeding many
-   agents. A system that is expressive everywhere would bury that fan-out.
-   Color, motion, and decoration are spent on that moment, not spread thin.
-2. **Show the truth, not the tool.** Non-engineers author docs they already
-   have; the tool's job is to make them shared and versioned, not to feel like
-   a thing to learn. No Git, no markdown toolchain, no chrome that announces
-   itself. The interface gets out of the way of the content.
-3. **Never lose a write.** Trust is the whole product. Optimistic-concurrency
-   conflict detection, a verifiable append-only version ledger,
-   agents-propose / humans-approve, and a deterministic content-addressed
-   bundle are the contract. Every surface that touches authorship must make
-   correctness legible — a conflict is a side-by-side merge, never a silent
-   overwrite.
-4. **Approve, then serve.** Agents read approved docs; review state
-   (comments, suggestion threads) is off-MCP and out of the bundle. The
-   boundary between human authorship and agent consumption is the
-   architecture, not a setting — design it into every flow, not behind a
-   toggle.
-5. **One source, many readers.** Documents are shared by reference, not
-   copied — one edit propagates to every corpus and every agent at once.
-   The UI makes that linkage visible and the sharing unambiguous: the "In N
-   corpora" fan-out is the product's signature, not a footnote.
+The reported use pattern is that people leave the Activity home and click
+Documents to work. Users also report difficulty finding a document soon after
+creating it. No usage counts or study results accompany this feedback.
+
+`README.md`, `DESIGN.md`, and the current web and CLI implementations document
+the existing workflows and product boundaries. The product record contains no
+customer testimonials or performance claims.
+
+## Product Principles
+
+1. **The system recedes so the graph speaks.** The distinctive product truth
+   is one document feeding many agents. Make that relationship legible.
+2. **Show the truth, not the tool.** Start from the documents people maintain
+   and make recent work easy to find. Keep Git and markdown tooling out of the
+   curator's path.
+3. **Never lose a write.** Detect concurrent edits, preserve verifiable
+   history, and require explicit conflict resolution.
+4. **Approve, then serve.** Agents can propose changes; people approve what
+   becomes shared context. Review state does not leak into agent reads.
+5. **One source, many readers.** A document is shared by reference across
+   corpora, so one approved edit reaches every reader.
 
 ## Accessibility & Inclusion
 

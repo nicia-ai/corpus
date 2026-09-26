@@ -51,7 +51,7 @@ exists to deliver.
   - base 1.0 (secondary text)
   - lg 1.125 (body, node titles, rendered-document body)
   - xl 1.25 (section headings)
-  - 2xl 1.5 (page title "Home")
+  - 2xl 1.5 (page titles, including "Documents")
   - Line-height: 1.5 app body, 1.25 headings.
   - **Rendered-document prose (`.md`) is the exception** — a calmer
     reading surface authored by non-engineers and read far more than
@@ -145,9 +145,12 @@ exists to deliver.
 ## Layout
 
 - **Approach:** Grid-disciplined. The existing left sidebar shell (~240px) +
-  the deterministic layered project graph. No editorial asymmetry.
-- **Grid:** sidebar + fluid main; the graph is 3 fixed columns
-  (Documents · Corpora · MCP) computed as a pure function of data.
+  fluid document workspace. No editorial asymmetry.
+- **Document landing:** recently modified live documents appear above the
+  folder browser; Activity stays a separate navigation destination. The
+  project-root graph remains the empty-project onboarding surface.
+- **Graph:** its 3 fixed columns (Documents · Corpora · MCP) are computed
+  as a pure function of data.
 - **Max content width:** index/list pages fill the available main width
   (the house style — a primary action stays anchored to a full-width
   content panel, never flung to the far screen edge). Long-form prose
@@ -156,8 +159,9 @@ exists to deliver.
   cap. The project graph always fills available main width.
 - **Border radius:** sm 4px (chips/badges) · md 6px (node cards, buttons,
   inputs) · lg 8px (panels) · full 9999px (the "In N corpora" pill only).
-- **Responsive:** < 720px the home defaults to the List tab; the graph, when
-  opened, stacks vertically with connectors as left-rail brackets.
+- **Responsive:** the document landing keeps recent rows in one column with
+  truncation for long titles. The empty-project graph stacks vertically with
+  connectors as left-rail brackets.
 
 ## Motion
 
