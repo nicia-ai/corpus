@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { NewIntakeDialog } from "@/components/document/NewIntakeDialog";
 import { DocRow } from "@/components/documents/DocRow";
 import { FolderHeader } from "@/components/documents/FolderHeader";
 import { MoveDialog } from "@/components/documents/MoveDialog";
@@ -71,14 +72,17 @@ export function DocumentsPage({
   folders,
   corpora,
   proposals,
+  isOwner,
 }: Readonly<{
   projectId: ProjectId;
   documents: readonly DocListItem[];
   folders: readonly FolderRow[];
   corpora: readonly CorpusListItem[];
   proposals: readonly CreateProposalItem[];
+  isOwner: boolean;
 }>): React.ReactElement {
   const router = useRouter();
+  const [intakeOpen, setIntakeOpen] = useState(false);
   const refreshProposalReview = useCallback(
     (change: RealtimeChange | undefined): void => {
       if (
@@ -437,6 +441,12 @@ export function DocumentsPage({
 
   return (
     <div>
+      {intakeOpen && (
+        <NewIntakeDialog
+          projectId={projectId}
+          onClose={() => setIntakeOpen(false)}
+        />
+      )}
       <PageHeader
         title="Documents"
         actions={
@@ -474,6 +484,18 @@ export function DocumentsPage({
               <Plus className="size-4" />
               Document
             </Link>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setIntakeOpen(true)}
+                className={buttonStyles(
+                  "secondary",
+                  "inline-flex items-center gap-1.5!",
+                )}
+              >
+                Intake
+              </button>
+            )}
           </>
         }
       />

@@ -4,6 +4,7 @@ import { asProjectId, type OrganizationId, type ProjectId } from "../ids";
 
 import { bumpAuthEpoch } from "./access";
 import type { ControlDb } from "./db";
+import { revokeEmbassiesForProject } from "./embassies";
 import { DEFAULT_PROJECT_SLUG, provenanceSlug } from "./org-lifecycle";
 import { project } from "./schema/app";
 import { member, organization } from "./schema/better-auth";
@@ -30,7 +31,9 @@ export async function renameProject(
   await db.update(project).set({ name }).where(eq(project.id, projectId));
 }
 
-// Soft-delete: status flips + epoch bump → resolve denies immediately.
+// Soft-delete: status flips first so /s/:token fails closed even if the
+// revoke does not land, then embassy rows are revoked so a later status
+// repair cannot resurrect them, then the epoch bump denies members.
 export async function deleteProject(
   db: ControlDb,
   projectId: ProjectId,
@@ -39,6 +42,7 @@ export async function deleteProject(
     .update(project)
     .set({ status: "deleted" })
     .where(eq(project.id, projectId));
+  await revokeEmbassiesForProject(db, projectId);
   await bumpAuthEpoch(db, projectId);
 }
 

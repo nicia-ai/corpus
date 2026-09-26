@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  documentBody,
   documentWithStarterFrontmatter,
   hasFrontmatterFence,
   parseFrontmatter,
@@ -149,5 +150,26 @@ describe("hasFrontmatterFence (Add-metadata affordance gate)", () => {
 
   it("is true for a keyed fence", () => {
     expect(hasFrontmatterFence("---\ntitle: Hi\n---\nbody")).toBe(true);
+  });
+});
+
+describe("documentBody (copy / shared-page source)", () => {
+  it("drops the fence and the blank lines after it", () => {
+    expect(documentBody("---\ntitle: x\n---\n\n\n# Body\n\ntext\n")).toBe(
+      "# Body\n\ntext\n",
+    );
+  });
+
+  it("returns a fence-less document unchanged", () => {
+    expect(documentBody("# Body\n\ntext\n")).toBe("# Body\n\ntext\n");
+  });
+
+  it("keeps everything when the frontmatter does not parse", () => {
+    const raw = "---\n- not a mapping\n---\n# Body\n";
+    expect(documentBody(raw)).toBe(raw);
+  });
+
+  it("keeps indentation on the first body line", () => {
+    expect(documentBody("---\ntitle: x\n---\n\n    code\n")).toBe("    code\n");
   });
 });

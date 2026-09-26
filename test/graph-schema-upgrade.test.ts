@@ -31,9 +31,10 @@ import { docSlug, freshStore } from "./_helpers";
 const SEEDED = "seeded-under-previous-release";
 
 // TypeGraph's recorded-history relations. Projects first provisioned before
-// 0.33 never had them, and base-schema release 3 (0.57) adopts by indexing
-// them, so their absence is the shape of the boot failure that shipped with
-// the 0.56 -> 0.65 bump: "no such table: typegraph_recorded_nodes".
+// 0.33 never had them. Base-schema release 3 (0.57) originally adopted by
+// indexing them without CREATE TABLE; 0.66.1 creates the missing tables
+// during v3 adoption. This case is the production failure from the
+// 0.56 -> 0.65 bump: "no such table: typegraph_recorded_nodes".
 const RECORDED_RELATIONS = [
   "typegraph_recorded_nodes",
   "typegraph_recorded_edges",
@@ -107,34 +108,40 @@ describe("upgrade path: a project provisioned by the previous release", () => {
     expect(fresh).toEqual({ ok: true, docVersion: 1 });
   });
 
-  it("boots a project whose storage predates the recorded-history relations", async () => {
-    const store = freshStore("upgrade-legacy");
+  // v1: a project no release-3 boot has touched yet. v2: one that already
+  // failed the 0.56 -> 0.65 boot in production -- adoption stamps each step
+  // before the next runs, so the failed open leaves it at v2, and 0.56 then
+  // refuses it, which is why the fix has to roll forward.
+  it.each([1, 2])(
+    "boots a project at base-schema v%i whose storage predates the recorded-history relations",
+    async (stampedVersion) => {
+      const store = freshStore(`upgrade-legacy-v${String(stampedVersion)}`);
 
-    await runInDurableObject(store, async (_instance, state) => {
-      await migrate(drizzle(state.storage), ledgerMigrations);
-      await seedWithPreviousRelease(state);
-      for (const relation of RECORDED_RELATIONS) {
-        state.storage.sql.exec(`DROP TABLE ${relation}`);
-      }
-      // A DO that already failed this boot in production: adoption stamps
-      // each step before the next runs, so it is left at v2, not v1.
-      state.storage.sql.exec(
-        "UPDATE typegraph_base_schema_versions SET version = 2",
-      );
-    });
+      await runInDurableObject(store, async (_instance, state) => {
+        await migrate(drizzle(state.storage), ledgerMigrations);
+        await seedWithPreviousRelease(state);
+        for (const relation of RECORDED_RELATIONS) {
+          state.storage.sql.exec(`DROP TABLE ${relation}`);
+        }
+        state.storage.sql.exec(
+          "UPDATE typegraph_base_schema_versions SET version = ?",
+          stampedVersion,
+        );
+      });
 
-    const docs = await store.listDocuments();
-    expect(docs.map((d) => d.slug)).toContain(SEEDED);
+      const docs = await store.listDocuments();
+      expect(docs.map((d) => d.slug)).toContain(SEEDED);
 
-    await runInDurableObject(store, (_instance, state) => {
-      const present = state.storage.sql
-        .exec<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)",
-          ...RECORDED_RELATIONS,
-        )
-        .toArray()
-        .map((row) => row.name);
-      expect(new Set(present)).toEqual(new Set(RECORDED_RELATIONS));
-    });
-  });
+      await runInDurableObject(store, (_instance, state) => {
+        const present = state.storage.sql
+          .exec<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)",
+            ...RECORDED_RELATIONS,
+          )
+          .toArray()
+          .map((row) => row.name);
+        expect(new Set(present)).toEqual(new Set(RECORDED_RELATIONS));
+      });
+    },
+  );
 });

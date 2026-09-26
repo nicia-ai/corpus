@@ -23,6 +23,7 @@ import { ledgerMigrations } from "../drizzle-do/migrations";
 
 import type { AssembledCorpus } from "./corpus";
 import type { LedgerDb } from "./db";
+import { EMBASSY_ACTOR_LABEL } from "./embassy/actor";
 import { ConflictError, isUniqueViolation, RollbackProbe } from "./errors";
 import { canonicalGraph } from "./graph";
 import {
@@ -34,6 +35,7 @@ import {
   type FolderSlug,
   asProjectId,
   type CallerRef,
+  parseCallerRef,
   type ProjectId,
 } from "./ids";
 import {
@@ -139,6 +141,7 @@ import type {
   RenameFilenameResult,
   SaveDocumentInput,
   SaveResult,
+  SaveSharedDraftResult,
   SeedResult,
   EnsureDefaultCorpusResult,
   UpdateCorpusInput,
@@ -246,6 +249,8 @@ type RealtimeChangeResolver<T> = (
 
 export type DocumentReviewSnapshot = Readonly<{
   doc: DocumentSnapshot | undefined;
+  // Who wrote the head version; the document node itself does not record it.
+  headChange: Readonly<{ changedBy: string; changedAt: string }> | undefined;
   blocks: DocumentBlocksResult;
   comments: readonly CommentThreadView[];
   suggestions: readonly SuggestionView[];
@@ -507,6 +512,9 @@ export class ProjectStore extends DurableObject<Env> {
     ) {
       return change;
     }
+    if (parseCallerRef(change.actorId).kind === "embassy") {
+      return { ...change, actorName: EMBASSY_ACTOR_LABEL };
+    }
     for (const ws of this.ctx.getWebSockets()) {
       const m = SocketAttachment.safeParse(ws.deserializeAttachment());
       if (m.success && m.data.userId === change.actorId) {
@@ -641,16 +649,6 @@ export class ProjectStore extends DurableObject<Env> {
         drizzle(this.ctx.storage, { logger: graphStatementLogger }),
       );
       await this.migrateGraphSchemaIfNeeded(backend);
-      // Base-schema release 3 (TypeGraph 0.57+) adopts by running
-      // `CREATE INDEX ... ON typegraph_recorded_nodes`, assuming the recorded
-      // relations exist. A project first provisioned before 0.33 never got
-      // them (Corpus does not capture history, and `ensureSchema` only
-      // creates base tables on a fresh database), so that open fails with
-      // "no such table" -- after already stamping base schema v2, which
-      // makes the older release refuse the DO too. `bootstrapTables` is
-      // all `IF NOT EXISTS`, creates whatever is missing, and stamps the
-      // current base-schema version. Keeper: `test/graph-schema-upgrade.test.ts`.
-      await backend.bootstrapTables?.();
       const [store] = await createAdapterStoreWithSchema(
         canonicalGraph,
         backend,
@@ -730,6 +728,19 @@ export class ProjectStore extends DurableObject<Env> {
     return getDocumentProjection(await this.read(), slug);
   }
 
+  private async documentServed(u: Unit, slug: DocumentSlug): Promise<boolean> {
+    if ((await u.cols.collectionsIncluding(slug)).length > 0) return true;
+    const ancestors = await u.folders.documentFolderAncestorSlugs(slug);
+    return (
+      ancestors.length > 0 &&
+      (await u.cols.collectionsIncludingFolders(ancestors)).length > 0
+    );
+  }
+
+  async isDocumentServed(slug: DocumentSlug): Promise<boolean> {
+    return this.documentServed(await this.read(), slug);
+  }
+
   async documentReviewSnapshot(
     slug: DocumentSlug,
   ): Promise<DocumentReviewSnapshot> {
@@ -738,17 +749,23 @@ export class ProjectStore extends DurableObject<Env> {
     if (doc === undefined) {
       return {
         doc: undefined,
+        headChange: undefined,
         blocks: { found: false },
         comments: [],
         suggestions: [],
       };
     }
-    const [blocks, comments, suggestions] = await Promise.all([
+    const [head, blocks, comments, suggestions] = await Promise.all([
+      u.versions.documentVersion(slug, doc.docVersion),
       this.documentBlocksForHead(u, slug, doc.docVersion, doc.markdown),
       this.commentThreadViews(u, slug),
       this.suggestionViews(u, slug),
     ]);
-    return { doc, blocks, comments, suggestions };
+    const headChange =
+      head === undefined
+        ? undefined
+        : { changedBy: head.changedBy, changedAt: head.changedAt };
+    return { doc, headChange, blocks, comments, suggestions };
   }
 
   async documentHistoryPageSnapshot(
@@ -1070,6 +1087,36 @@ export class ProjectStore extends DurableObject<Env> {
         return { ...saved, changes: [...saved.changes, ...placed.changes] };
       });
       return { ok: true, docVersion: outcome.result.docVersion };
+    } catch (err) {
+      return this.saveError(err, input);
+    }
+  }
+
+  // A share link may draft directly only while the document is not served by
+  // any corpus. Check membership in the same graph transaction as the save:
+  // attaching the document concurrently cannot publish an unreviewed write.
+  async saveSharedDraft(
+    input: SaveDocumentInput,
+  ): Promise<SaveSharedDraftResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand<SaveSharedDraftResult>(
+        now,
+        async (ctx) => {
+          if (await this.documentServed(ctx.u, input.slug)) {
+            return {
+              result: { ok: false, served: true } as const,
+              changes: [],
+            };
+          }
+          const saved = await saveDocumentCommand(ctx, input);
+          return {
+            result: { ok: true, docVersion: saved.result.docVersion } as const,
+            changes: saved.changes,
+          };
+        },
+      );
+      return outcome.result;
     } catch (err) {
       return this.saveError(err, input);
     }

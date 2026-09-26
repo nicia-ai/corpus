@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { connectControlDb } from "@/control/db";
 import { resolveAuthorLabels, resolveUserNames } from "@/control/users";
-import { asDocumentSlug } from "@/ids";
+import { asDocumentSlug, parseCallerRef } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import type {
   CommentsResult,
@@ -19,8 +19,16 @@ import type { SuggestionsResult } from "@/lib/server/suggestions";
 import { assertServerContext as srv } from "@/lib/server-context";
 import { compact } from "@/util";
 
+// The head version was written through a share link. `docVersion` lets the
+// client ignore it once its own save has moved the head past it.
+export type SharedAgentEdit = Readonly<{
+  docVersion: number;
+  changedAt: string;
+}>;
+
 export type DocumentReviewResult = Readonly<{
   doc: DocSnapshot | undefined;
+  sharedAgentEdit: SharedAgentEdit | undefined;
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
   suggestions: SuggestionsResult;
@@ -88,6 +96,15 @@ export const getDocumentReview = createServerFn({ method: "GET" })
 
     return {
       doc: snapshot.doc === undefined ? undefined : docSnapshot(snapshot.doc),
+      sharedAgentEdit:
+        snapshot.doc !== undefined &&
+        snapshot.headChange !== undefined &&
+        parseCallerRef(snapshot.headChange.changedBy).kind === "embassy"
+          ? {
+              docVersion: snapshot.doc.docVersion,
+              changedAt: snapshot.headChange.changedAt,
+            }
+          : undefined,
       blocks: snapshot.blocks.found
         ? {
             found: true,

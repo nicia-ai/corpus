@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import { connectControlDb } from "@/control/db";
+import { revokeEmbassiesForDocuments } from "@/control/embassies";
 import { entitlementsOf } from "@/control/entitlements";
 import {
   asCorpusSlug,
@@ -134,7 +136,17 @@ export const deleteFolder = createServerFn({ method: "POST" })
   .validator(z.object({ slug: slugInput }))
   .handler(async ({ data, context }): Promise<DeleteFolderResult> => {
     const c = srv(context);
-    return storeOf(c).deleteFolder(asFolderSlug(data.slug), changedBy(c));
+    const result = await storeOf(c).deleteFolder(
+      asFolderSlug(data.slug),
+      changedBy(c),
+    );
+    if (result.ok && c.project !== undefined) {
+      await revokeEmbassiesForDocuments(connectControlDb(c.env.DB), {
+        projectId: c.project.projectId,
+        documentSlugs: result.documentSlugs,
+      });
+    }
+    return result;
   });
 
 // Place (or re-place) a document in a folder. `folderSlug: null` = root.

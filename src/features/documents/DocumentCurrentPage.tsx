@@ -14,6 +14,7 @@ import type {
   CommentsResult,
   DocumentBlocksResult,
 } from "@/lib/server/comments";
+import type { SharedAgentEdit } from "@/lib/server/document-review";
 import type { DocSnapshot } from "@/lib/server/documents";
 import type { SuggestionsResult } from "@/lib/server/suggestions";
 
@@ -38,20 +39,24 @@ type RemoteFlashRequest = Readonly<
 
 export function DocumentCurrentPage({
   doc,
+  sharedAgentEdit,
   projectId,
   blocks,
   comments,
   suggestions,
   viewerId,
   docRefs,
+  isOwner,
 }: Readonly<{
   doc: DocSnapshot | undefined;
+  sharedAgentEdit: SharedAgentEdit | undefined;
   projectId: ProjectId;
   blocks: DocumentBlocksResult;
   comments: CommentsResult;
   suggestions: SuggestionsResult;
   viewerId: string;
   docRefs: readonly DocRef[];
+  isOwner: boolean;
 }>): React.ReactElement | null {
   const nextFlashId = useRef(0);
   const [remoteFlashRequest, setRemoteFlashRequest] =
@@ -116,6 +121,7 @@ export function DocumentCurrentPage({
   return (
     <DocumentEditor
       doc={doc}
+      sharedAgentEdit={sharedAgentEdit}
       projectId={projectId}
       blocks={blocks}
       comments={comments}
@@ -125,6 +131,7 @@ export function DocumentCurrentPage({
       changeFlash={changeFlash}
       onRemoteContentChange={queueRemoteContentFlash}
       onRemoteSuggestionChange={queueRemoteSuggestionFlash}
+      isOwner={isOwner}
     />
   );
 }

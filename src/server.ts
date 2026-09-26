@@ -5,7 +5,11 @@ import {
 
 import { api } from "./api";
 import { reconcileControlPlane } from "./control/control-retention";
-import { entitlementsOf, QuotaExceededError } from "./control/entitlements";
+import {
+  bindRequestEntitlements,
+  entitlementsOf,
+  QuotaExceededError,
+} from "./control/entitlements";
 import { reconcileRetention } from "./control/project-reconciliation";
 import { storeFor } from "./control/store-for";
 import type {
@@ -41,6 +45,7 @@ const API_PREFIXES = [
   "/mcp",
   "/.well-known/",
   "/healthz",
+  "/s/",
 ];
 
 export type ServerRequestContextExtras = Readonly<
@@ -61,6 +66,7 @@ export function fetchWithContext(
   extraContext: ServerRequestContextExtras = {},
 ): Response | Promise<Response> {
   const path = new URL(request.url).pathname;
+  bindRequestEntitlements(request, extraContext.entitlements);
   if (API_PREFIXES.some((p) => path === p || path.startsWith(p))) {
     return api.fetch(request, env, executionContext);
   }

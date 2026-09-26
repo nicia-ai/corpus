@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import { connectControlDb } from "@/control/db";
+import { revokeEmbassiesForDocuments } from "@/control/embassies";
 import { entitlementsOf } from "@/control/entitlements";
 import { ValidationError } from "@/errors";
 import {
@@ -11,7 +13,10 @@ import {
 } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import { changedBy, storeOf } from "@/lib/server/shared";
-import { assertServerContext as srv } from "@/lib/server-context";
+import {
+  assertServerContext as srv,
+  type ServerRequestContext,
+} from "@/lib/server-context";
 import { parseFrontmatter } from "@/store/domain/frontmatter";
 import {
   compact,
@@ -285,7 +290,10 @@ export const archiveDocument = createServerFn({ method: "POST" })
   .validator(z.object({ slug: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
     const c = srv(context);
-    return storeOf(c).archiveDocument(asDocumentSlug(data.slug), changedBy(c));
+    const slug = asDocumentSlug(data.slug);
+    const result = await storeOf(c).archiveDocument(slug, changedBy(c));
+    await revokeShareLinks(c, [slug]);
+    return result;
   });
 
 // Bulk soft-delete (the documents-list multi-select action). Atomic;
@@ -295,8 +303,20 @@ export const archiveDocuments = createServerFn({ method: "POST" })
   .validator(z.object({ slugs: z.array(z.string().min(1)).min(1) }))
   .handler(async ({ data, context }): Promise<{ archived: number }> => {
     const c = srv(context);
-    return storeOf(c).archiveDocuments(
-      data.slugs.map((s) => asDocumentSlug(s)),
-      changedBy(c),
-    );
+    const slugs = data.slugs.map((s) => asDocumentSlug(s));
+    const result = await storeOf(c).archiveDocuments(slugs, changedBy(c));
+    await revokeShareLinks(c, slugs);
+    return result;
   });
+
+async function revokeShareLinks(
+  c: ServerRequestContext,
+  slugs: readonly DocumentSlug[],
+): Promise<void> {
+  const projectId = c.project?.projectId;
+  if (projectId === undefined) return;
+  await revokeEmbassiesForDocuments(connectControlDb(c.env.DB), {
+    projectId,
+    documentSlugs: slugs,
+  });
+}
