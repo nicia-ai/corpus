@@ -15,6 +15,7 @@ import { FolderHeader } from "@/components/documents/FolderHeader";
 import { MoveDialog } from "@/components/documents/MoveDialog";
 import { NewFolder } from "@/components/documents/NewFolder";
 import { buttonStyles } from "@/components/ui/Button";
+import { RelativeTime } from "@/components/ui/DateTime";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { listSurface } from "@/components/ui/Surface";
 import { textLinkClass } from "@/components/ui/text-link";
@@ -28,6 +29,7 @@ import {
   archiveDocuments,
   renameFilename,
   type DocListItem,
+  type RecentDocument,
 } from "@/lib/server/documents";
 import {
   createFolder,
@@ -69,6 +71,7 @@ const MIN_QUERY_CHARS = 2;
 export function DocumentsPage({
   projectId,
   documents,
+  recentDocuments,
   folders,
   corpora,
   proposals,
@@ -76,6 +79,7 @@ export function DocumentsPage({
 }: Readonly<{
   projectId: ProjectId;
   documents: readonly DocListItem[];
+  recentDocuments: readonly RecentDocument[];
   folders: readonly FolderRow[];
   corpora: readonly CorpusListItem[];
   proposals: readonly CreateProposalItem[];
@@ -506,6 +510,16 @@ export function DocumentsPage({
         </div>
       )}
 
+      {recentDocuments.length > 0 && !searchActive && (
+        <RecentDocuments projectId={projectId} documents={recentDocuments} />
+      )}
+
+      {!empty && (
+        <h2 className="mb-3 text-xl font-semibold text-slate-900">
+          Browse documents
+        </h2>
+      )}
+
       {!empty && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
           <Search className="size-4 shrink-0 text-slate-400" aria-hidden />
@@ -658,6 +672,46 @@ export function DocumentsPage({
         </div>
       )}
     </div>
+  );
+}
+
+function RecentDocuments({
+  projectId,
+  documents,
+}: Readonly<{
+  projectId: ProjectId;
+  documents: readonly RecentDocument[];
+}>): React.ReactElement {
+  return (
+    <section aria-labelledby="recent-documents-heading" className="mb-8">
+      <h2
+        id="recent-documents-heading"
+        className="mb-3 text-xl font-semibold text-slate-900"
+      >
+        Recently modified
+      </h2>
+      <ol className={listSurface("divide-y divide-slate-200")}>
+        {documents.map((document) => (
+          <li key={document.slug}>
+            <Link
+              to="/p/$projectId/documents/$slug"
+              params={{ projectId, slug: document.slug }}
+              className="flex min-h-14 items-center gap-4 px-4 py-2.5 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-600"
+            >
+              <div className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-slate-900">
+                  {document.title}
+                </span>
+              </div>
+              <RelativeTime
+                iso={document.updatedAt}
+                className="shrink-0 text-sm tabular-nums text-slate-500"
+              />
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
