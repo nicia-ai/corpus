@@ -54,6 +54,9 @@ export type LiveReviewConfig = Readonly<{
   onSelect: (selection: ReviewSelection | undefined) => void;
   onLayout: (layout: ReviewRailLayout) => void;
   initialMarks?: readonly ReviewMark[] | undefined;
+  // The editor may have controls above its text. Rail positions include that
+  // offset, while selection popovers still use the text view's own coordinates.
+  layoutRoot?: () => HTMLElement | null;
 }>;
 
 // Outlasts the CSS fade (corpus-line-flash); the host clears its flash request
@@ -251,7 +254,8 @@ function selectionHandlers(onSelect: LiveReviewConfig["onSelect"]): Extension {
     // mouseup/shift-keyup, so close the popover here instead of leaving it open
     // over a stale range.
     EditorView.updateListener.of((u) => {
-      if (u.selectionSet && u.state.selection.main.empty) onSelect(undefined);
+      if (u.docChanged || (u.selectionSet && u.state.selection.main.empty))
+        onSelect(undefined);
     }),
   ];
 }
@@ -262,9 +266,10 @@ function selectionHandlers(onSelect: LiveReviewConfig["onSelect"]): Extension {
 function measureLayout(
   view: EditorView,
   onLayout: LiveReviewConfig["onLayout"],
+  layoutRoot: LiveReviewConfig["layoutRoot"],
 ): void {
   const marks = view.state.field(marksField, false) ?? [];
-  const base = view.dom.getBoundingClientRect();
+  const base = (layoutRoot?.() ?? view.dom).getBoundingClientRect();
   const docLength = view.state.doc.length;
   const itemTops: Record<string, number> = {};
   for (const mark of marks) {
@@ -284,7 +289,10 @@ function measureLayout(
   onLayout({ itemTops, documentHeight: Math.round(base.height) });
 }
 
-function layoutPlugin(onLayout: LiveReviewConfig["onLayout"]): Extension {
+function layoutPlugin(
+  onLayout: LiveReviewConfig["onLayout"],
+  layoutRoot: LiveReviewConfig["layoutRoot"],
+): Extension {
   return ViewPlugin.fromClass(
     class {
       private readonly observer: ResizeObserver | undefined;
@@ -295,6 +303,8 @@ function layoutPlugin(onLayout: LiveReviewConfig["onLayout"]): Extension {
             ? undefined
             : new ResizeObserver(() => this.schedule());
         this.observer?.observe(view.dom);
+        const root = layoutRoot?.();
+        if (root != null) this.observer?.observe(root);
       }
       update(u: ViewUpdate): void {
         const didChangeMarks = u.transactions.some(marksChanged);
@@ -313,7 +323,7 @@ function layoutPlugin(onLayout: LiveReviewConfig["onLayout"]): Extension {
         this.view.requestMeasure({
           key: LAYOUT_MEASURE_KEY,
           read: (view) => {
-            measureLayout(view, onLayout);
+            measureLayout(view, onLayout, layoutRoot);
           },
         });
       }
@@ -330,6 +340,6 @@ export function liveReview(config: LiveReviewConfig): Extension {
     reviewDecorationsField,
     flashDecorationsField,
     selectionHandlers(config.onSelect),
-    layoutPlugin(config.onLayout),
+    layoutPlugin(config.onLayout, config.layoutRoot),
   ];
 }
