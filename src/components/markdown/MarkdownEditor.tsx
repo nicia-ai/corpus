@@ -2,6 +2,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   HighlightStyle,
+  indentUnit,
   syntaxHighlighting,
   syntaxTree,
 } from "@codemirror/language";
@@ -42,12 +43,26 @@ import {
 } from "@/store/domain/links";
 import { resolveWikiPath } from "@/store/domain/paths";
 
+import {
+  authoringKeymap,
+  indentMarkdown,
+  insertBlock,
+  insertLink,
+  outdentMarkdown,
+  setBlockStyle,
+  toggleBold,
+  toggleInlineCode,
+  toggleItalic,
+  toggleStrike,
+} from "./authoring-commands";
 import { frontmatter, OPEN_FENCE } from "./block-widgets";
+import { type AuthoringAction, EditorControls } from "./EditorControls";
 import { markdownEditorHostClass } from "./host-class";
 import type { WikiResolve } from "./inline-spans";
 import {
   inCodeContext,
   livePreview,
+  setEditorFocused,
   setReviewPopoverOpen,
 } from "./live-preview";
 import {
@@ -488,6 +503,16 @@ function seedFrontmatter(cm: EditorView, body: string): void {
 
 const NO_DOCS: readonly DocRef[] = [];
 
+// Reconfigure presentation only. History, review marks, selection, and the
+// canonical Markdown buffer remain in the same EditorState.
+export function editorPresentation(sourceMode: boolean): Extension {
+  return sourceMode
+    ? EditorView.theme({
+        ".cm-content": { fontFamily: "var(--font-mono)", fontSize: "1rem" },
+      })
+    : [syntaxHighlighting(mdHighlight), livePreview()];
+}
+
 type Props = Readonly<{
   value: string;
   // Editing props (omit for a read-only view): onChange fires on edits;
@@ -568,6 +593,7 @@ export function MarkdownEditor({
   renderReviewPopover,
 }: Props): React.ReactElement {
   const host = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>(null);
   const cleanDoc = useRef<Text | undefined>(undefined);
   // The active selection drives the inline Comment/Suggest popover (review mode).
@@ -576,6 +602,8 @@ export function MarkdownEditor({
   // replaces that fallback in a layout effect so the browser never paints two
   // different document geometries in succession.
   const [mounted, setMounted] = useState(false);
+  const [sourceMode, setSourceMode] = useState(false);
+  const previewC = useRef(new Compartment());
   // Linter inputs change with route data, not per keystroke; a compartment
   // lets us reconfigure the rule without tearing down the editor. The latest
   // callbacks live in refs so the one-time extension closures never go stale.
@@ -642,6 +670,46 @@ export function MarkdownEditor({
   const dismissReview = useCallback((): void => {
     setReviewSelection(undefined);
   }, []);
+
+  function author(action: AuthoringAction): void {
+    const cm = view.current;
+    if (cm === null || readOnly === true) return;
+    const commands = {
+      bold: toggleBold,
+      italic: toggleItalic,
+      strike: toggleStrike,
+      "inline-code": toggleInlineCode,
+      link: insertLink,
+      indent: indentMarkdown,
+      outdent: outdentMarkdown,
+      paragraph: setBlockStyle("paragraph"),
+      heading: setBlockStyle("heading"),
+      quote: setBlockStyle("quote"),
+      bullet: setBlockStyle("bullet"),
+      ordered: setBlockStyle("ordered"),
+      task: setBlockStyle("task"),
+      code: insertBlock("code"),
+      table: insertBlock("table"),
+    };
+    dismissReview();
+    commands[action](cm);
+    cm.focus();
+  }
+
+  function toggleSource(): void {
+    const cm = view.current;
+    if (cm === null || readOnly === true) return;
+    const next = !sourceMode;
+    dismissReview();
+    cm.dispatch({
+      effects: [
+        previewC.current.reconfigure(editorPresentation(next)),
+        cm.scrollSnapshot(),
+      ],
+    });
+    if (!next) cm.dispatch({ effects: setEditorFocused.of(cm.hasFocus) });
+    setSourceMode(next);
+  }
 
   function refLinter(
     refs: readonly DocRef[],
@@ -735,10 +803,12 @@ export function MarkdownEditor({
       doc: value,
       extensions: [
         ...(editing ? [history()] : []),
+        indentUnit.of("  "),
         // Save binding first so it wins over any default Mod-s mapping.
         keymap.of([
           ...(editing
             ? [
+                ...authoringKeymap,
                 {
                   key: "Mod-s",
                   preventDefault: true,
@@ -784,8 +854,7 @@ export function MarkdownEditor({
         // block highlights per its language (codeLanguages lazy-loads the
         // grammar; codeHighlight colors the tokens — editing-only, below).
         markdown({ base: markdownLanguage, codeLanguages: languages }),
-        syntaxHighlighting(mdHighlight),
-        livePreview(),
+        previewC.current.of(editorPresentation(false)),
         EditorView.lineWrapping,
         // Editing-only: keyboard-focus locus (active line is styled only when
         // focused — see designTheme), placeholder, the broken-link linter, and
@@ -838,6 +907,7 @@ export function MarkdownEditor({
               liveReview({
                 onSelect: setReviewSelection,
                 onLayout: (layout) => onReviewLayoutRef.current?.(layout),
+                layoutRoot: () => root.current,
                 initialMarks: reviewMarks,
               }),
             ]
@@ -946,42 +1016,55 @@ export function MarkdownEditor({
   }, [review, popoverOpen]);
 
   return (
-    <div className="relative">
-      <div
-        ref={host}
-        style={{ display: mounted ? undefined : "none" }}
-        className={markdownEditorHostClass}
-      />
-      {/* Same box class as the mounted host above (bare Markdown wrapped in
+    <div ref={root}>
+      {readOnly !== true && (
+        <EditorControls
+          disabled={!mounted}
+          sourceMode={sourceMode}
+          onAction={author}
+          onToggleSource={toggleSource}
+        />
+      )}
+      <div className="relative">
+        <div
+          ref={host}
+          style={{ display: mounted ? undefined : "none" }}
+          className={markdownEditorHostClass}
+        />
+        {/* Same box class as the mounted host above (bare Markdown wrapped in
           it) so first paint → live editor never jumps size; also shared with
           any lazy-loading caller's own Suspense fallback (see
           host-class.ts) so that placeholder can't drift out of sync either. */}
-      {!mounted && (
-        <div className={markdownEditorHostClass}>
-          <Markdown
-            source={value}
-            bare
-            wikiResolve={wikiResolverFor(docRefs, selfSlug)}
-          />
-        </div>
-      )}
-      {review === true &&
-        reviewSelection !== undefined &&
-        renderReviewPopover !== undefined && (
-          <div
-            // Key by the selection so a new selection remounts the composer with
-            // fresh state instead of carrying over a stale draft/mode.
-            key={`${reviewSelection.from}:${reviewSelection.to}`}
-            className="absolute z-20 max-w-[calc(100vw-2rem)]"
-            style={{ top: reviewSelection.top + 6, left: reviewSelection.left }}
-          >
-            {renderReviewPopover({
-              from: reviewSelection.from,
-              to: reviewSelection.to,
-              dismiss: dismissReview,
-            })}
+        {!mounted && (
+          <div className={markdownEditorHostClass}>
+            <Markdown
+              source={value}
+              bare
+              wikiResolve={wikiResolverFor(docRefs, selfSlug)}
+            />
           </div>
         )}
+        {review === true &&
+          reviewSelection !== undefined &&
+          renderReviewPopover !== undefined && (
+            <div
+              // Key by the selection so a new selection remounts the composer with
+              // fresh state instead of carrying over a stale draft/mode.
+              key={`${reviewSelection.from}:${reviewSelection.to}`}
+              className="absolute z-20 max-w-[calc(100vw-2rem)]"
+              style={{
+                top: reviewSelection.top + 6,
+                left: reviewSelection.left,
+              }}
+            >
+              {renderReviewPopover({
+                from: reviewSelection.from,
+                to: reviewSelection.to,
+                dismiss: dismissReview,
+              })}
+            </div>
+          )}
+      </div>
     </div>
   );
 }

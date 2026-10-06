@@ -24,12 +24,37 @@ title already exists."_ — pick a different title.
 
 ## Editing
 
-Open a document and click **Edit**. The editor has two tabs:
+Open a document and start writing. Markdown renders inline as you type;
+clicking formatted text reveals its syntax. Use **Source** to show all
+Markdown syntax. Switching views preserves your draft, selection, and undo
+history.
 
-- **Write** — a markdown editor.
-- **Preview** — the rendered result.
+The editing controls provide bold, italic, strikethrough, inline code, links,
+and indentation. **Insert / change…** adds a heading, quote, list, code block,
+or table, or converts selected lines to a different block type. Tables are
+inserted as editable Markdown; visual row and column editing is not available.
 
-Click **Save** to commit, or **Cancel** to discard the draft. Each save
+Use **Cmd** on macOS or **Ctrl** elsewhere:
+
+| Action                                          | Shortcut             |
+| ----------------------------------------------- | -------------------- |
+| Bold / italic / link                            | Cmd/Ctrl+B / I / K   |
+| Inline code / strikethrough                     | Cmd/Ctrl+Shift+C / X |
+| Indent / outdent                                | Cmd/Ctrl+] / [       |
+| Nest / unnest list items; indent / outdent code | Tab / Shift+Tab      |
+| Undo                                            | Cmd/Ctrl+Z           |
+
+Enter continues lists, tasks, and quotes; Enter on an empty item exits it.
+Tab moves a list item's nested children with it. Outside lists and code, Tab
+moves keyboard focus. Press **Escape**, then **Tab**, to leave the editor
+from a list or code block. **Keyboard shortcuts** below the controls shows
+these bindings while you write.
+
+The link action selects a destination placeholder after wrapping selected
+text, or selects the label placeholder when no text is selected. Within an
+existing inline link, it selects the destination for editing.
+
+Click **Save** to commit, or **Discard** to discard the draft. Each save
 creates a new version (see [Versioning &
 history](./versioning-and-history.md)).
 
