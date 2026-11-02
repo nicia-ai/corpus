@@ -12,7 +12,9 @@ import {
   authoringKeymap,
   indentMarkdown,
   insertBlock,
-  insertLink,
+  applyLink,
+  linkDraft,
+  linkInputSchema,
   outdentMarkdown,
   setBlockStyle,
   tabIndent,
@@ -129,24 +131,133 @@ describe("Markdown authoring: formatting and links", () => {
     }
   });
 
-  it("selects a link destination when a label was selected", () => {
+  it("opens link editing without changing the document or selection", () => {
     const cm = editor("some text", 5, 9);
-    cm.run(insertLink);
-    expect(cm.text()).toBe("some [text](https://)");
-    expect(cm.selected()).toBe("https://");
+    const selection = cm.state.selection;
+    const draft = linkDraft(cm.state);
+    expect(draft?.text).toBe("text");
+    expect(draft?.href).toBe("");
+    expect(cm.text()).toBe("some text");
+    expect(cm.state.selection).toBe(selection);
+    expect(cm.run(undo)).toBe(false);
   });
 
-  it("selects the label placeholder when inserting at a caret", () => {
+  it("inserts a complete link at a caret in one undo event", () => {
+    const cm = editor("Before ", 7);
+    const draft = linkDraft(cm.state);
+    if (draft === undefined) throw new Error("Expected a link draft");
+    expect(
+      cm.run(
+        applyLink(draft, { text: "Team guide", href: "https://example.com" }),
+      ),
+    ).toBe(true);
+    expect(cm.text()).toBe("Before [Team guide](https://example.com)");
+    expect(cm.state.selection.main.head).toBe(cm.state.doc.length);
+    cm.run(undo);
+    expect(cm.text()).toBe("Before ");
+    cm.run(redo);
+    expect(cm.text()).toBe("Before [Team guide](https://example.com)");
+  });
+
+  it("replaces selected text while preserving the surrounding source", () => {
+    const cm = editor("before text after", 7, 11);
+    const draft = linkDraft(cm.state);
+    if (draft === undefined) throw new Error("Expected a link draft");
+    cm.run(applyLink(draft, { text: "text", href: "/guide#intro" }));
+    expect(cm.text()).toBe("before [text](/guide#intro) after");
+  });
+
+  it("preserves whitespace in selected labels", () => {
+    const cm = editor("before text after", 6, 12);
+    const draft = linkDraft(cm.state);
+    if (draft === undefined) throw new Error("Expected a link draft");
+    cm.run(applyLink(draft, { text: draft.text, href: "/guide" }));
+    expect(cm.text()).toBe("before[ text ](/guide)after");
+  });
+
+  it.each(["", "   ", "first\nsecond"])(
+    "rejects an empty or multiline link label: %s",
+    (text) => {
+      expect(linkInputSchema.safeParse({ text, href: "/guide" }).success).toBe(
+        false,
+      );
+    },
+  );
+
+  it("edits an existing link destination without losing formatting or its title", () => {
+    const cm = editor('[**label**](<https://example.com> "Keep title")', 5);
+    const draft = linkDraft(cm.state);
+    if (draft === undefined) throw new Error("Expected a link draft");
+    expect(draft.text).toBe("**label**");
+    expect(draft.href).toBe("https://example.com");
+    cm.run(
+      applyLink(draft, { text: draft.text, href: "https://example.org/a(b)" }),
+    );
+    expect(cm.text()).toBe(
+      '[**label**](https://example.org/a%28b%29 "Keep title")',
+    );
+  });
+
+  it("preserves an unchanged destination's exact source when changing link text", () => {
+    const cm = editor('[label](<https://example.com> "Keep title")', 3);
+    const draft = linkDraft(cm.state);
+    if (draft === undefined) throw new Error("Expected a link draft");
+    cm.run(applyLink(draft, { text: "new [label]", href: draft.href }));
+    expect(cm.text()).toBe(
+      '[new \\[label\\]](<https://example.com> "Keep title")',
+    );
+  });
+
+  it("escapes brackets and URL syntax supplied through the link editor", () => {
     const cm = editor("", 0);
-    cm.run(insertLink);
-    expect(cm.selected()).toBe("link text");
+    const draft = linkDraft(cm.state);
+    if (draft === undefined) throw new Error("Expected a link draft");
+    cm.run(applyLink(draft, { text: "a [label]", href: "/a path/(section)" }));
+    expect(cm.text()).toBe("[a \\[label\\]](/a%20path/%28section%29)");
   });
 
-  it("edits an existing link instead of nesting links", () => {
-    const cm = editor("[label](https://example.com)", 3);
-    cm.run(insertLink);
-    expect(cm.selected()).toBe("https://example.com");
-    expect(cm.text()).toBe("[label](https://example.com)");
+  it.each(["", "https://", "javascript:alert(1)", "data:text/html,hello"])(
+    "rejects an incomplete or unsafe destination: %s",
+    (href) => {
+      const cm = editor("text", 0, 4);
+      const draft = linkDraft(cm.state);
+      if (draft === undefined) throw new Error("Expected a link draft");
+      expect(cm.run(applyLink(draft, { text: "text", href }))).toBe(false);
+      expect(cm.text()).toBe("text");
+    },
+  );
+
+  it.each([
+    "https://example.com",
+    "mailto:hello@example.com",
+    "tel:+123456",
+    "/guide",
+    "#section",
+  ])("accepts supported link destinations: %s", (href) => {
+    expect(linkInputSchema.safeParse({ text: "label", href }).success).toBe(
+      true,
+    );
+  });
+
+  it("does not apply a stale link draft over another edit", () => {
+    const cm = editor("text", 0, 4);
+    const draft = linkDraft(cm.state);
+    if (draft === undefined) throw new Error("Expected a link draft");
+    cm.run(toggleBold);
+    expect(cm.run(applyLink(draft, { text: "text", href: "/guide" }))).toBe(
+      false,
+    );
+    expect(cm.text()).toBe("**text**");
+  });
+
+  it("does not open a link editor in code, metadata, or a reference link", () => {
+    for (const [doc, pos] of [
+      ["`code`", 2],
+      ["---\ntitle: x\n---", 8],
+      ["[label][ref]", 3],
+    ] as const) {
+      expect(linkDraft(editor(doc, pos).state)).toBeUndefined();
+    }
   });
 
   it("makes each formatting command a separate undo event", () => {
@@ -279,7 +390,12 @@ describe("Markdown authoring: integration contracts", () => {
   it("does not change a read-only document", () => {
     for (const command of [
       toggleBold,
-      insertLink,
+      (target: Parameters<StateCommand>[0]) => {
+        const draft = linkDraft(target.state);
+        return draft === undefined
+          ? false
+          : applyLink(draft, { text: "label", href: "/guide" })(target);
+      },
       setBlockStyle("heading"),
       insertBlock("table"),
       tabIndent,
@@ -325,5 +441,42 @@ describe("Markdown authoring: integration contracts", () => {
     expect(mark.from).toBe(16);
     expect(mark.to).toBe(21);
     expect(state.sliceDoc(mark.from, mark.to)).toBe("after");
+  });
+});
+
+describe("Markdown authoring: review regressions", () => {
+  it.each(["heading", "quote", "bullet", "paragraph"] as const)(
+    "converts a line containing inline code to %s",
+    (style) => {
+      const cm = editor("Text with `code`", 0);
+      expect(cm.run(setBlockStyle(style))).toBe(true);
+      const prefixes = {
+        heading: "## ",
+        quote: "> ",
+        bullet: "- ",
+        paragraph: "",
+      };
+      expect(cm.text()).toBe(prefixes[style] + "Text with `code`");
+    },
+  );
+
+  it("indents code after metadata without changing metadata", () => {
+    const doc = "---\ntitle: Guide\n---\n\n```js\nhello\n```";
+    const cm = editor(doc, doc.indexOf("hello"));
+    expect(cm.run(tabIndent)).toBe(true);
+    expect(cm.text()).toBe(doc.replace("hello", "  hello"));
+    expect(cm.run(tabOutdent)).toBe(true);
+    expect(cm.text()).toBe(doc);
+    cm.select(doc.indexOf("Guide"));
+    expect(cm.run(tabIndent)).toBe(false);
+    expect(cm.text()).toBe(doc);
+  });
+
+  it("lifts a four-space nested item and its children by one level", () => {
+    const cm = editor("- parent\n    - child\n        - grandchild", 17);
+    expect(cm.run(tabOutdent)).toBe(true);
+    expect(cm.text()).toBe("- parent\n- child\n    - grandchild");
+    cm.run(undo);
+    expect(cm.text()).toBe("- parent\n    - child\n        - grandchild");
   });
 });

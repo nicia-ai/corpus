@@ -47,7 +47,10 @@ import {
   authoringKeymap,
   indentMarkdown,
   insertBlock,
-  insertLink,
+  applyLink,
+  linkDraft,
+  type LinkDraft,
+  type LinkInput,
   outdentMarkdown,
   setBlockStyle,
   toggleBold,
@@ -59,6 +62,7 @@ import { frontmatter, OPEN_FENCE } from "./block-widgets";
 import { type AuthoringAction, EditorControls } from "./EditorControls";
 import { markdownEditorHostClass } from "./host-class";
 import type { WikiResolve } from "./inline-spans";
+import { LinkEditor } from "./LinkEditor";
 import {
   inCodeContext,
   livePreview,
@@ -603,6 +607,7 @@ export function MarkdownEditor({
   // different document geometries in succession.
   const [mounted, setMounted] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
+  const [editingLink, setEditingLink] = useState<LinkDraft>();
   const previewC = useRef(new Compartment());
   // Linter inputs change with route data, not per keystroke; a compartment
   // lets us reconfigure the rule without tearing down the editor. The latest
@@ -671,15 +676,40 @@ export function MarkdownEditor({
     setReviewSelection(undefined);
   }, []);
 
+  const openLink = useCallback((): boolean => {
+    const cm = view.current;
+    if (cm === null) return false;
+    const draft = linkDraft(cm.state);
+    if (draft === undefined) return false;
+    setReviewSelection(undefined);
+    setEditingLink(draft);
+    return true;
+  }, []);
+
+  function closeLink(focusEditor: boolean): void {
+    setEditingLink(undefined);
+    if (focusEditor) view.current?.focus();
+  }
+
+  function saveLink(input: LinkInput): void {
+    const cm = view.current;
+    if (cm === null || editingLink === undefined) return;
+    applyLink(editingLink, input)(cm);
+    closeLink(true);
+  }
+
   function author(action: AuthoringAction): void {
     const cm = view.current;
     if (cm === null || readOnly === true) return;
+    if (action === "link") {
+      openLink();
+      return;
+    }
     const commands = {
       bold: toggleBold,
       italic: toggleItalic,
       strike: toggleStrike,
       "inline-code": toggleInlineCode,
-      link: insertLink,
       indent: indentMarkdown,
       outdent: outdentMarkdown,
       paragraph: setBlockStyle("paragraph"),
@@ -699,6 +729,7 @@ export function MarkdownEditor({
   function toggleSource(): void {
     const cm = view.current;
     if (cm === null || readOnly === true) return;
+    closeLink(false);
     const next = !sourceMode;
     dismissReview();
     cm.dispatch({
@@ -808,6 +839,7 @@ export function MarkdownEditor({
         keymap.of([
           ...(editing
             ? [
+                { key: "Mod-k", run: openLink, preventDefault: true },
                 ...authoringKeymap,
                 {
                   key: "Mod-s",
@@ -921,6 +953,7 @@ export function MarkdownEditor({
                 );
                 // Avoid allocating the whole document unless a controlled
                 // caller explicitly needs the new string.
+                setEditingLink(undefined);
                 onChangeRef.current?.(u.state.doc.toString());
                 reportFrontmatter(u.state);
               }),
@@ -1018,12 +1051,21 @@ export function MarkdownEditor({
   return (
     <div ref={root}>
       {readOnly !== true && (
-        <EditorControls
-          disabled={!mounted}
-          sourceMode={sourceMode}
-          onAction={author}
-          onToggleSource={toggleSource}
-        />
+        <div className="relative">
+          <EditorControls
+            disabled={!mounted}
+            sourceMode={sourceMode}
+            onAction={author}
+            onToggleSource={toggleSource}
+          />
+          {editingLink !== undefined && (
+            <LinkEditor
+              draft={editingLink}
+              onApply={saveLink}
+              onClose={closeLink}
+            />
+          )}
+        </div>
       )}
       <div className="relative">
         <div

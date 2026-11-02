@@ -50,9 +50,11 @@ moves keyboard focus. Press **Escape**, then **Tab**, to leave the editor
 from a list or code block. **Keyboard shortcuts** below the controls shows
 these bindings while you write.
 
-The link action selects a destination placeholder after wrapping selected
-text, or selects the label placeholder when no text is selected. Within an
-existing inline link, it selects the destination for editing.
+The link action opens a small editor for the link text and destination. Selected
+text fills the label; within an existing inline link, both fields are filled
+for editing. Choose **Insert link** or **Apply** to make the change, or press
+**Escape** or **Cancel** to leave the document unchanged. A destination is
+required: use a complete web address, document path, or `#section`.
 
 Click **Save** to commit, or **Discard** to discard the draft. Each save
 creates a new version (see [Versioning &

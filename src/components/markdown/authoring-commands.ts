@@ -5,8 +5,12 @@ import {
   EditorSelection,
   type EditorState,
   type StateCommand,
+  type Text,
 } from "@codemirror/state";
 import type { KeyBinding } from "@codemirror/view";
+import { z } from "zod";
+
+import { isExternalHref, isSafeExternalHref } from "@/lib/doc-href";
 
 import { frontmatter } from "./block-widgets";
 
@@ -133,48 +137,131 @@ export const toggleItalic: StateCommand = inlineCommand("*", "Emphasis");
 export const toggleStrike: StateCommand = inlineCommand("~~", "Strikethrough");
 export const toggleInlineCode: StateCommand = inlineCommand("`", "InlineCode");
 
-export const insertLink: StateCommand = (target) => {
-  const { state } = target;
-  if (state.readOnly) return false;
+export const linkInputSchema = z.object({
+  text: z
+    .string()
+    .refine(
+      (text) => text.trim() !== "" && !/[\r\n]/.test(text),
+      "Enter the text people will see.",
+    ),
+  href: z
+    .string()
+    .trim()
+    .min(1, "Enter a link destination.")
+    .refine((href) => {
+      if (/[\r\n]/.test(href)) return false;
+      if (!isExternalHref(href)) return true;
+      if (!isSafeExternalHref(href)) return false;
+      try {
+        const url = new URL(href.startsWith("//") ? `https:${href}` : href);
+        return url.protocol === "http:" || url.protocol === "https:"
+          ? url.hostname !== ""
+          : url.pathname !== "";
+      } catch {
+        return false;
+      }
+    }, "Enter a complete web address, document path, or #section."),
+});
+
+export type LinkInput = Readonly<z.infer<typeof linkInputSchema>>;
+export type LinkDraft = Readonly<{
+  doc: Text;
+  from: number;
+  to: number;
+  text: string;
+  href: string;
+  existing?: Readonly<{
+    textFrom: number;
+    textTo: number;
+    urlFrom: number;
+    urlTo: number;
+  }>;
+}>;
+
+// Capture the source without writing placeholders. Existing inline links retain
+// their title and delimiters; reference links stay in source rather than nesting.
+export function linkDraft(state: EditorState): LinkDraft | undefined {
   const range = state.selection.main;
   if (
+    state.readOnly ||
     state.selection.ranges.length !== 1 ||
     protectedRange(state, range.from, range.to, true)
   )
-    return false;
-  // Existing links select the destination for editing instead of nesting links.
+    return undefined;
   for (
     let node: MdNode | null = nodeAt(state, range.from);
     node !== null;
     node = node.parent
   ) {
-    if (node.name === "Link" && node.to >= range.to) {
-      const url = node.getChild("URL");
-      if (url !== null) {
-        target.dispatch(
-          state.update({
-            selection: EditorSelection.single(url.from, url.to),
-            scrollIntoView: true,
-          }),
-        );
-        return true;
-      }
-    }
+    if (node.name !== "Link" || node.to < range.to) continue;
+    const url = node.getChild("URL");
+    const marks = node.getChildren("LinkMark");
+    const open = marks[0];
+    const close = marks[1];
+    if (url === null || open === undefined || close === undefined)
+      return undefined;
+    const href = state.sliceDoc(url.from, url.to);
+    return {
+      doc: state.doc,
+      from: node.from,
+      to: node.to,
+      text: state.sliceDoc(open.to, close.from),
+      href:
+        href.startsWith("<") && href.endsWith(">") ? href.slice(1, -1) : href,
+      existing: {
+        textFrom: open.to,
+        textTo: close.from,
+        urlFrom: url.from,
+        urlTo: url.to,
+      },
+    };
   }
   const text = state.sliceDoc(range.from, range.to);
-  if (text.includes("\n") || /[[\]\\]/.test(text)) return false;
-  const label = text === "" ? "link text" : text;
-  const insert = `[${label}](https://)`;
-  const from = range.from + (range.empty ? 1 : label.length + 3);
-  return apply(
-    target,
-    { from: range.from, to: range.to, insert },
-    EditorSelection.single(
-      from,
-      from + (range.empty ? label.length : "https://".length),
-    ),
-  );
-};
+  if (text.includes("\n")) return undefined;
+  return { doc: state.doc, from: range.from, to: range.to, text, href: "" };
+}
+
+export function applyLink(draft: LinkDraft, input: LinkInput): StateCommand {
+  return (target) => {
+    const parsed = linkInputSchema.safeParse(input);
+    if (!parsed.success || target.state.doc !== draft.doc) return false;
+    const { text, href } = parsed.data;
+    // Escape syntax introduced by the form, preserving existing source verbatim
+    // when the user only changes the other field.
+    const label =
+      draft.existing !== undefined && text === draft.text
+        ? text
+        : text.replace(/[\\[\]]/g, "\\$&");
+    const destination = href.replace(/[\s<>()\\]/gu, (char) =>
+      encodeURIComponent(char).replace(/\(/g, "%28").replace(/\)/g, "%29"),
+    );
+    const existing = draft.existing;
+    const changes = target.state.changes(
+      existing === undefined
+        ? {
+            from: draft.from,
+            to: draft.to,
+            insert: `[${label}](${destination})`,
+          }
+        : [
+            { from: existing.textFrom, to: existing.textTo, insert: label },
+            {
+              from: existing.urlFrom,
+              to: existing.urlTo,
+              insert:
+                href === draft.href
+                  ? target.state.sliceDoc(existing.urlFrom, existing.urlTo)
+                  : destination,
+            },
+          ],
+    );
+    return apply(
+      target,
+      changes,
+      EditorSelection.single(changes.mapPos(draft.to, 1)),
+    );
+  };
+}
 
 export type BlockStyle =
   "paragraph" | "heading" | "quote" | "bullet" | "ordered" | "task";
@@ -188,7 +275,7 @@ export function setBlockStyle(style: BlockStyle): StateCommand {
     const last = state.doc.lineAt(
       range.empty ? range.to : Math.max(range.from, range.to - 1),
     );
-    if (protectedRange(state, first.from, last.to, true)) return false;
+    if (protectedRange(state, first.from, last.to)) return false;
     const changes: ChangeSpec[] = [];
     for (let number = first.number; number <= last.number; number += 1) {
       const line = state.doc.line(number);
@@ -240,8 +327,11 @@ function shiftList(target: Target, removing: boolean): boolean {
   const referenceLine = state.doc.lineAt(reference.from);
   const prefix = /^(\s*)(?:[-+*]|\d+[.)])\s+/.exec(referenceLine.text);
   if (prefix === null) return false;
-  const width = prefix[0].length - (prefix[1]?.length ?? 0);
   const first = state.doc.lineAt(item.from);
+  const width = removing
+    ? (/^ */.exec(first.text)?.[0].length ?? 0) - (prefix[1]?.length ?? 0)
+    : prefix[0].length - (prefix[1]?.length ?? 0);
+  if (width <= 0) return false;
   // An empty selection moves the whole item; a selection also includes the
   // remainder of the last selected item, including its nested children.
   let end = item.to;
@@ -287,7 +377,7 @@ export const tabIndent: StateCommand = (target) => {
       target.state.selection.main.from,
       target.state.selection.main.to,
     ) &&
-    frontmatter(target.state) === undefined &&
+    target.state.selection.main.from >= (frontmatter(target.state)?.to ?? 0) &&
     indentMore(target)
   );
 };
@@ -300,7 +390,7 @@ export const tabOutdent: StateCommand = (target) => {
       target.state.selection.main.from,
       target.state.selection.main.to,
     ) &&
-    frontmatter(target.state) === undefined &&
+    target.state.selection.main.from >= (frontmatter(target.state)?.to ?? 0) &&
     indentLess(target)
   );
 };
@@ -347,7 +437,6 @@ export function insertBlock(kind: "code" | "table"): StateCommand {
 export const authoringKeymap: readonly KeyBinding[] = [
   { key: "Mod-b", run: toggleBold, preventDefault: true },
   { key: "Mod-i", run: toggleItalic, preventDefault: true },
-  { key: "Mod-k", run: insertLink, preventDefault: true },
   { key: "Mod-Shift-x", run: toggleStrike, preventDefault: true },
   { key: "Mod-Shift-c", run: toggleInlineCode, preventDefault: true },
   { key: "Mod-]", run: indentMarkdown, preventDefault: true },
