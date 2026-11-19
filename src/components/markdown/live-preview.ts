@@ -795,7 +795,9 @@ export const livePreviewField = StateField.define<DecorationSet>({
   update(value, tr) {
     if (tr.docChanged) return updateForDocChange(value, tr);
     if (
-      tr.startState.field(revealGate) !== tr.state.field(revealGate) ||
+      // Source mode can remove and later re-add this presentation extension.
+      // Its previous state then has no reveal gate; rebuild from the new gate.
+      tr.startState.field(revealGate, false) !== tr.state.field(revealGate) ||
       tr.startState.readOnly !== tr.state.readOnly ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState)
     )

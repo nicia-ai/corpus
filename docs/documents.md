@@ -24,12 +24,39 @@ title already exists."_ — pick a different title.
 
 ## Editing
 
-Open a document and click **Edit**. The editor has two tabs:
+Open a document and start writing. Markdown renders inline as you type;
+clicking formatted text reveals its syntax. Use **Source** to show all
+Markdown syntax. Switching views preserves your draft, selection, and undo
+history.
 
-- **Write** — a markdown editor.
-- **Preview** — the rendered result.
+The editing controls provide bold, italic, strikethrough, inline code, links,
+and indentation. **Insert / change…** adds a heading, quote, list, code block,
+or table, or converts selected lines to a different block type. Tables are
+inserted as editable Markdown; visual row and column editing is not available.
 
-Click **Save** to commit, or **Cancel** to discard the draft. Each save
+Use **Cmd** on macOS or **Ctrl** elsewhere:
+
+| Action                                          | Shortcut             |
+| ----------------------------------------------- | -------------------- |
+| Bold / italic / link                            | Cmd/Ctrl+B / I / K   |
+| Inline code / strikethrough                     | Cmd/Ctrl+Shift+C / X |
+| Indent / outdent                                | Cmd/Ctrl+] / [       |
+| Nest / unnest list items; indent / outdent code | Tab / Shift+Tab      |
+| Undo                                            | Cmd/Ctrl+Z           |
+
+Enter continues lists, tasks, and quotes; Enter on an empty item exits it.
+Tab moves a list item's nested children with it. Outside lists and code, Tab
+moves keyboard focus. Press **Escape**, then **Tab**, to leave the editor
+from a list or code block. **Keyboard shortcuts** below the controls shows
+these bindings while you write.
+
+The link action opens a small editor for the link text and destination. Selected
+text fills the label; within an existing inline link, both fields are filled
+for editing. Choose **Insert link** or **Apply** to make the change, or press
+**Escape** or **Cancel** to leave the document unchanged. A destination is
+required: use a complete web address, document path, or `#section`.
+
+Click **Save** to commit, or **Discard** to discard the draft. Each save
 creates a new version (see [Versioning &
 history](./versioning-and-history.md)).
 
