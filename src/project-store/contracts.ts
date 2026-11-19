@@ -1,6 +1,7 @@
 import type { CorpusSlug, DocumentSlug, FolderSlug } from "../ids";
 import type { CollectionDelivery } from "../store/domain/collection-expand";
 import type { LinkKind } from "../store/domain/links";
+import type { SectionMatch, SectionTarget } from "../store/domain/sections";
 
 export type SaveDocumentInput = Readonly<{
   slug: DocumentSlug;
@@ -61,6 +62,28 @@ export type SaveResult = Readonly<
 
 export type SaveSharedDraftResult =
   SaveResult | Readonly<{ ok: false; served: true }>;
+
+export type SaveSharedSectionInput = Readonly<{
+  slug: DocumentSlug;
+  target: SectionTarget;
+  /** The section's new content, without its heading line. */
+  body: string;
+  /** Version the client last read. A newer head is accepted when the target
+   * section is byte-identical in both; otherwise 409. */
+  clientVersion: number;
+  changedBy: string;
+}>;
+
+export type SaveSharedSectionResult =
+  | Readonly<{ ok: true; docVersion: number; created: boolean }>
+  | Exclude<SaveSharedDraftResult, Readonly<{ ok: true }>>
+  | Readonly<{ ok: false; missing: true }>
+  | Readonly<{
+      ok: false;
+      ambiguous: true;
+      matches: readonly SectionMatch[];
+    }>
+  | Readonly<{ ok: false; invalidBody: true; error: string }>;
 
 // A scoped create either lands a new document or refuses because the slug
 // already exists outside the bound Corpus — another scope's document,

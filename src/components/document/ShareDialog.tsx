@@ -7,6 +7,13 @@ import { useDialogFocusTrap } from "@/components/ui/dialog-focus";
 import { DialogFrame } from "@/components/ui/DialogFrame";
 import { Segmented } from "@/components/ui/Segmented";
 import { showToast } from "@/components/ui/Toast";
+import {
+  DEFAULT_EMBASSY_EXPIRY,
+  EMBASSY_EXPIRIES,
+  EMBASSY_EXPIRY_LABELS,
+  neverExpires,
+  type EmbassyExpiry,
+} from "@/embassy/expiry";
 import type { EmbassyGrant } from "@/embassy/grant";
 import { isIntakeMarkdown } from "@/embassy/intake";
 import { embassyPrompt } from "@/embassy/prompt";
@@ -14,6 +21,7 @@ import { embassyUrl } from "@/embassy/url";
 import type { DocumentSlug, ProjectId } from "@/ids";
 import { useSubmit } from "@/lib/forms";
 import {
+  changeEmbassyExpiry,
   changeEmbassyGrant,
   createEmbassy,
   renameEmbassy,
@@ -74,11 +82,12 @@ export function ShareDialog({
   const [grant, setGrant] = useState<EmbassyGrant>(
     !served && isIntakeMarkdown(markdown) ? "edit" : "read",
   );
+  const [expiry, setExpiry] = useState<EmbassyExpiry>(DEFAULT_EMBASSY_EXPIRY);
   const shared = rows.length > 0;
 
   const { pending, error, run } = useSubmit(async () => {
     const created = await createEmbassy({
-      data: { projectId, slug, grant, label },
+      data: { projectId, slug, grant, label, expiry },
     });
     setRows((prev) => [created, ...prev]);
     setLabel("");
@@ -107,7 +116,7 @@ export function ShareDialog({
     >
       <p className="mt-1 text-base text-slate-500">
         {shared
-          ? "People with a link can read this page without joining the organization. Links expire in 7 days."
+          ? "People with a link can read this page without joining the organization. Make one link per person or agent."
           : "This page is not shared. Create a link to let someone outside the organization read it."}
       </p>
       {served && (
@@ -123,6 +132,10 @@ export function ShareDialog({
           onChange={setLabel}
           maxLength={80}
         />
+        <p className="mt-1 text-sm text-slate-500">
+          Name the person or agent using this link, for example “Dana’s Claude
+          Code”. Their edits appear under this name in history.
+        </p>
       </div>
       <fieldset className="mt-4">
         <legend>
@@ -158,6 +171,18 @@ export function ShareDialog({
           </label>
         )}
       </fieldset>
+      <div className="mt-4">
+        <FieldLabel>Link expires after</FieldLabel>
+        <Segmented
+          ariaLabel="Link expiry"
+          options={EMBASSY_EXPIRIES.map((value) => ({
+            value,
+            label: EMBASSY_EXPIRY_LABELS[value],
+          }))}
+          value={expiry}
+          onChange={setExpiry}
+        />
+      </div>
       {error !== undefined && (
         <p className="mt-2 text-sm text-red-600">{error}</p>
       )}
@@ -228,6 +253,17 @@ function EmbassyRow({
       );
     },
   );
+  const {
+    pending: extending,
+    error: expiryError,
+    run: runExpiry,
+  } = useSubmit(async (next: EmbassyExpiry) => {
+    onChanged(
+      await changeEmbassyExpiry({
+        data: { projectId, embassyId: row.id, expiry: next },
+      }),
+    );
+  });
   const [label, setLabel] = useState(row.label);
   const {
     pending: renaming,
@@ -277,11 +313,16 @@ function EmbassyRow({
           {row.fetchCount} fetch{row.fetchCount === 1 ? "" : "es"}
         </span>
         <span className="text-slate-500 tabular-nums">
-          until {new Date(row.expiresAt).toLocaleDateString()}
+          {neverExpires(row.expiresAt)
+            ? "no expiry"
+            : `until ${new Date(row.expiresAt).toLocaleDateString()}`}
         </span>
       </div>
       {grantError !== undefined && (
         <p className="mt-1 text-sm text-red-600">{grantError}</p>
+      )}
+      {expiryError !== undefined && (
+        <p className="mt-1 text-sm text-red-600">{expiryError}</p>
       )}
       <div className="mt-1 flex flex-wrap gap-2">
         <Button
@@ -308,6 +349,15 @@ function EmbassyRow({
         >
           Copy link
         </Button>
+        {!neverExpires(row.expiresAt) && (
+          <Button
+            variant="secondary"
+            disabled={extending}
+            onClick={() => void runExpiry("never")}
+          >
+            Keep open
+          </Button>
+        )}
         <Button variant="danger" disabled={pending} onClick={() => void run()}>
           Revoke
         </Button>

@@ -31,7 +31,6 @@ import { LiveRelativeTime } from "@/components/ui/DateTime";
 import { Card } from "@/components/ui/Surface";
 import { textLinkClass } from "@/components/ui/text-link";
 import { showToast } from "@/components/ui/Toast";
-import { EMBASSY_ACTOR_LABEL } from "@/embassy/actor";
 import type { ProjectId } from "@/ids";
 import {
   blockAnchorsToSourceRanges,
@@ -866,7 +865,7 @@ export function DocumentEditor({
       {!hasFrontmatter && <AddMetadataButton editorRef={editorRef} />}
       {sharedAgentEdit?.docVersion === head.docVersion && (
         <span>
-          · {EMBASSY_ACTOR_LABEL} edited{" "}
+          · {sharedAgentEdit.label} edited{" "}
           <LiveRelativeTime
             iso={sharedAgentEdit.changedAt}
             className="tabular-nums"

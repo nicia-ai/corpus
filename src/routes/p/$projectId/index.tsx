@@ -11,6 +11,7 @@ import { EXAMPLE_GRAPH } from "@/components/project-graph/layout";
 import { ProjectGraph } from "@/components/project-graph/ProjectGraph";
 import { Button, buttonStyles } from "@/components/ui/Button";
 import { showToast } from "@/components/ui/Toast";
+import { SharedPageExample } from "@/features/onboarding/SharedPageExample";
 import { asProjectId, type ProjectId } from "@/ids";
 import { TAGLINE, TAGLINE_LONG } from "@/lib/copy";
 import { useSubmit } from "@/lib/forms";
@@ -113,6 +114,7 @@ function SeedChooser(
         {error && <p className="mt-3 text-base text-red-600">{error}</p>}
       </div>
       <ProjectGraph {...EXAMPLE_GRAPH} />
+      <SharedPageExample projectId={props.projectId} />
     </div>
   );
 }

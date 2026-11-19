@@ -2,7 +2,7 @@
 title: FAQ & troubleshooting
 description: Common questions about how Corpus works and what to do when an agent can't see your corpus.
 sidebar:
-  order: 11
+  order: 12
 ---
 
 ## How is this different from a Git repo of markdown?

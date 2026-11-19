@@ -2,7 +2,7 @@
 title: Recipes & best practices
 description: Patterns that make Corpus pay off — designing corpora agents actually follow, keeping docs agent-readable, and wiring it into your workflow.
 sidebar:
-  order: 10
+  order: 11
 ---
 
 Corpus is simple on purpose. The leverage is in _how_ you structure
@@ -87,6 +87,20 @@ Nothing is lost: every save is a new version, concurrent edits get a
 the chain. Non-engineers should edit directly — that's the workflow
 Corpus exists to enable. Treat the [changes feed](./versioning-and-history.md)
 as the "what moved" check before a consequential agent run.
+
+## Co-write one page with several agents
+
+When two people each run their own agent against the same page — an event
+plan, a launch checklist — make one [share link](./share-a-page.md) per
+person and name it for them ("Dana's Claude Code"). Tell each agent which
+section is theirs and have it use the section write
+(`PUT /s/<token>/section?heading=…`) rather than rewriting the whole page:
+a section write lands even when someone else edited a different section
+since the agent last read. The prompt already tells the agent to save the
+link in its project instructions, so a page that changes over days (an RSVP
+list, a status table) stays editable from later sessions. Set the link to
+no expiry for a long-running page, and switch it to Suggest when you want to
+review changes before publishing.
 
 ## Separate stable from fast-moving
 

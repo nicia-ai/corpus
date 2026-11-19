@@ -18,8 +18,16 @@ import { embassyGoneHtml, embassyPageHtml } from "@/embassy/html";
 import { embassyPath } from "@/embassy/url";
 import { QuotaExceededError } from "@/errors";
 import { asEmbassyId, callerRefFromEmbassy } from "@/ids";
-import type { SaveSharedDraftResult } from "@/project-store/contracts";
+import type {
+  SaveSharedDraftResult,
+  SaveSharedSectionResult,
+} from "@/project-store/contracts";
 import { parseFrontmatter } from "@/store/domain/frontmatter";
+import {
+  parseSectionTarget,
+  type SectionMatch,
+  type SectionTarget,
+} from "@/store/domain/sections";
 import {
   isBlank,
   MARKDOWN_TOO_LARGE_MESSAGE,
@@ -252,6 +260,8 @@ export async function embassySuggest(c: EnvC): Promise<Response> {
 }
 
 const EDIT_BODY_REQUIRED = "body required";
+const SERVED_MESSAGE =
+  "This page is now served by a corpus. Propose changes with POST to this URL + /suggest instead.";
 
 export async function embassyEdit(c: EnvC): Promise<Response> {
   const prep = await prepareWrite(c, "edit");
@@ -269,10 +279,7 @@ export async function embassyEdit(c: EnvC): Promise<Response> {
   if (!r.ok) {
     await releaseClaim(prep);
     if ("served" in r) {
-      return c.text(
-        "This page is now served by a corpus. Propose changes with POST to this URL + /suggest instead.",
-        403,
-      );
+      return c.text(SERVED_MESSAGE, 403);
     }
     if ("conflict" in r) {
       return c.json(
@@ -284,6 +291,82 @@ export async function embassyEdit(c: EnvC): Promise<Response> {
     return c.json({ ok: false }, 409);
   }
   return c.json({ ok: true, docVersion: r.docVersion }, 200);
+}
+
+const SECTION_HEADING_PARAM = "heading";
+const SECTION_LEVEL_PARAM = "level";
+
+function ambiguousSectionMessage(
+  target: SectionTarget,
+  matches: readonly SectionMatch[],
+): string {
+  const where = matches
+    .map((m) => `level ${String(m.level)} at line ${String(m.line)}`)
+    .join(", ");
+  return `heading "${target.text}" matches ${String(matches.length)} sections (${where}). Add ?${SECTION_LEVEL_PARAM}=N to pick one depth; if they share a depth, rename one of them with PUT to this URL (without /section) first.`;
+}
+
+// PUT /s/:token/section?heading=<text>[&level=<1-6>]: replace one section's
+// content (the body is the section WITHOUT its heading line), or append the
+// section when no such heading exists. Same auth, version header, rate limit,
+// quota and DO save path as the whole-page PUT.
+export async function embassySection(c: EnvC): Promise<Response> {
+  const prep = await prepareWrite(c, "edit");
+  if (!prep.ok) return prep.response;
+  const parsed = parseSectionTarget({
+    heading: c.req.query(SECTION_HEADING_PARAM) ?? "",
+    level: c.req.query(SECTION_LEVEL_PARAM),
+  });
+  if (!parsed.ok) return c.text(parsed.error, 400);
+  const denied = await assertEditQuota(c, prep);
+  if (denied !== undefined) return denied;
+  const refused = await claimWrite(c, prep, "edit");
+  if (refused !== undefined) return refused;
+  const r = await saveSection(
+    storeFor(c.env, prep.row.projectId),
+    prep,
+    parsed.target,
+  );
+  if (r.ok) {
+    return c.json(
+      { ok: true, docVersion: r.docVersion, created: r.created },
+      200,
+    );
+  }
+  await releaseClaim(prep);
+  if ("served" in r) return c.text(SERVED_MESSAGE, 403);
+  if ("missing" in r) return c.text("not found", 404);
+  if ("ambiguous" in r) {
+    return c.text(ambiguousSectionMessage(parsed.target, r.matches), 422);
+  }
+  if ("invalidBody" in r) return c.text(r.error, 422);
+  if ("conflict" in r) {
+    return c.json(
+      { ok: false, conflict: true, currentVersion: r.currentVersion },
+      409,
+    );
+  }
+  if ("tooLarge" in r) return c.text(MARKDOWN_TOO_LARGE_MESSAGE, 413);
+  return c.json({ ok: false }, 409);
+}
+
+async function saveSection(
+  store: ReturnType<typeof storeFor>,
+  prep: Extract<WritePrep, { ok: true }>,
+  target: SectionTarget,
+): Promise<SaveSharedSectionResult> {
+  try {
+    return await store.saveSharedSection({
+      slug: prep.row.documentSlug,
+      target,
+      body: prep.body,
+      clientVersion: prep.clientVersion,
+      changedBy: callerRefFromEmbassy(prep.row.id),
+    });
+  } catch (err) {
+    await releaseClaim(prep);
+    throw err;
+  }
 }
 
 async function saveEdit(

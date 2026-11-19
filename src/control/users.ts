@@ -4,7 +4,7 @@ import { EMBASSY_ACTOR_LABEL } from "../embassy/actor";
 import { parseCallerRef } from "../ids";
 
 import type { ControlDb } from "./db";
-import { apiKey, user } from "./schema";
+import { apiKey, embassy, user } from "./schema";
 
 // Sentinel `changedBy` values from the data plane that are NOT user
 // ids — `""` is "no user" (system-applied edits, e.g. seed) and
@@ -29,12 +29,38 @@ export async function resolveUserNames(
     ...new Set(changedByValues.filter((b) => !NOT_A_USER_ID.has(b))),
   ];
   if (ids.length === 0) return new Map();
-  const rows = await db
-    .select({ id: user.id, name: user.name, email: user.email })
-    .from(user)
-    .where(inArray(user.id, ids));
-  const out = new Map<string, string>();
+  const embassyRefs = ids.filter((id) => parseCallerRef(id).kind === "embassy");
+  const [rows, embassyLabels] = await Promise.all([
+    db
+      .select({ id: user.id, name: user.name, email: user.email })
+      .from(user)
+      .where(inArray(user.id, ids)),
+    resolveEmbassyLabels(db, embassyRefs),
+  ]);
+  const out = new Map<string, string>(embassyLabels);
   for (const r of rows) out.set(r.id, r.name.trim() === "" ? r.email : r.name);
+  return out;
+}
+
+// `embassy:<id>` author → the owner-chosen link name, so "one link per
+// collaborator" reads as the collaborator in history, review, and activity.
+// Revoked and expired links keep their name; a link row that no longer exists
+// falls back to the generic label rather than the raw ref.
+async function resolveEmbassyLabels(
+  db: ControlDb,
+  refs: readonly string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (refs.length === 0) return out;
+  const idToRef = new Map(refs.map((ref) => [parseCallerRef(ref).id, ref]));
+  const rows = await db
+    .select({ id: embassy.id, label: embassy.label })
+    .from(embassy)
+    .where(inArray(embassy.id, [...idToRef.keys()]));
+  const labelById = new Map(rows.map((r) => [r.id, r.label]));
+  for (const [id, ref] of idToRef) {
+    out.set(ref, labelById.get(id) ?? EMBASSY_ACTOR_LABEL);
+  }
   return out;
 }
 
@@ -79,12 +105,18 @@ export async function resolveAuthorLabels(
       .map((p) => p.id),
     ...keyRows.map((r) => r.userId),
   ];
-  const names = await resolveUserNames(db, userIds);
+  const [names, embassyLabels] = await Promise.all([
+    resolveUserNames(db, userIds),
+    resolveEmbassyLabels(
+      db,
+      parsed.filter((p) => p.kind === "embassy").map((p) => p.ref),
+    ),
+  ]);
 
   const out = new Map<string, string>();
   for (const p of parsed) {
     if (p.kind === "embassy") {
-      out.set(p.ref, EMBASSY_ACTOR_LABEL);
+      out.set(p.ref, embassyLabels.get(p.ref) ?? EMBASSY_ACTOR_LABEL);
     } else if (p.kind === "apikey") {
       const key = keyById.get(p.id);
       const owner = key === undefined ? undefined : names.get(key.userId);

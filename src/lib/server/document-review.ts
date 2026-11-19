@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { connectControlDb } from "@/control/db";
 import { resolveAuthorLabels, resolveUserNames } from "@/control/users";
+import { EMBASSY_ACTOR_LABEL } from "@/embassy/actor";
 import { asDocumentSlug, parseCallerRef } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import type {
@@ -22,6 +23,8 @@ import { compact } from "@/util";
 // The head version was written through a share link. `docVersion` lets the
 // client ignore it once its own save has moved the head past it.
 export type SharedAgentEdit = Readonly<{
+  // The owner-chosen name of the link that wrote it.
+  label: string;
   docVersion: number;
   changedAt: string;
 }>;
@@ -86,12 +89,14 @@ export const getDocumentReview = createServerFn({ method: "GET" })
       }
     }
 
-    const [commentNames, suggestionNames] = await Promise.all([
+    const headAuthor = snapshot.headChange?.changedBy;
+    const [commentNames, suggestionNames, headAuthorNames] = await Promise.all([
       resolveUserNames(db, [...commentAuthorIds]),
       resolveAuthorLabels(
         db,
         snapshot.suggestions.map((s) => s.createdBy),
       ),
+      resolveUserNames(db, headAuthor === undefined ? [] : [headAuthor]),
     ]);
 
     return {
@@ -101,6 +106,9 @@ export const getDocumentReview = createServerFn({ method: "GET" })
         snapshot.headChange !== undefined &&
         parseCallerRef(snapshot.headChange.changedBy).kind === "embassy"
           ? {
+              label:
+                headAuthorNames.get(snapshot.headChange.changedBy) ??
+                EMBASSY_ACTOR_LABEL,
               docVersion: snapshot.doc.docVersion,
               changedAt: snapshot.headChange.changedAt,
             }
