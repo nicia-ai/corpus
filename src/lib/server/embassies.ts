@@ -8,11 +8,17 @@ import {
   resolveLiveEmbassy,
   revokeEmbassy as revokeEmbassyRow,
   revokeEmbassiesForDocument,
+  setEmbassyExpiry,
   setEmbassyGrant,
   setEmbassyLabel,
   type EmbassyView,
 } from "@/control/embassies";
 import { entitlementsOf } from "@/control/entitlements";
+import {
+  DEFAULT_EMBASSY_EXPIRY,
+  EMBASSY_EXPIRIES,
+  embassyExpiresAt,
+} from "@/embassy/expiry";
 import { EMBASSY_GRANTS, type EmbassyGrant } from "@/embassy/grant";
 import { ValidationError } from "@/errors";
 import { asDocumentSlug, asEmbassyId } from "@/ids";
@@ -69,6 +75,7 @@ export const createEmbassy = createServerFn({ method: "POST" })
       slug: z.string().min(1),
       label: z.string().trim().min(1).max(80),
       grant: z.enum(EMBASSY_GRANTS),
+      expiry: z.enum(EMBASSY_EXPIRIES).default(DEFAULT_EMBASSY_EXPIRY),
     }),
   )
   .handler(async ({ data, context }): Promise<EmbassyDto> => {
@@ -87,7 +94,29 @@ export const createEmbassy = createServerFn({ method: "POST" })
       documentSlug: slug,
       label: data.label,
       grant: data.grant,
+      expiresAt: embassyExpiresAt(data.expiry, Date.now()),
     });
+    return toDto(row);
+  });
+
+export const changeEmbassyExpiry = createServerFn({ method: "POST" })
+  .middleware([projectMiddleware])
+  .validator(
+    z.object({
+      embassyId: z.string().min(1),
+      expiry: z.enum(EMBASSY_EXPIRIES),
+    }),
+  )
+  .handler(async ({ data, context }): Promise<EmbassyDto> => {
+    const c = srv(context);
+    const ref = requireProjectOwner(c.project, EMBASSY_ADMIN_MSG);
+    const row = await setEmbassyExpiry(connectControlDb(c.env.DB), {
+      id: asEmbassyId(data.embassyId),
+      projectId: ref.projectId,
+      expiresAt: embassyExpiresAt(data.expiry, Date.now()),
+    });
+    if (row === undefined)
+      throw new ValidationError("This link was revoked or has expired");
     return toDto(row);
   });
 
@@ -215,6 +244,7 @@ export const createIntake = createServerFn({ method: "POST" })
           documentSlug: slug,
           label: "Intake draft",
           grant: "edit",
+          expiresAt: embassyExpiresAt(DEFAULT_EMBASSY_EXPIRY, Date.now()),
         });
         return { slug, embassy: toDto(embassy) };
       } catch {

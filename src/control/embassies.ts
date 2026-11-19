@@ -60,11 +60,10 @@ export async function mintEmbassy(
     documentSlug: DocumentSlug;
     label?: string;
     grant: EmbassyGrant;
-    ttlMs?: number;
+    expiresAt?: number;
   }>,
 ): Promise<EmbassyView> {
-  const now = new Date();
-  const ttl = input.ttlMs ?? EMBASSY_DEFAULT_TTL_MS;
+  const expiresAt = input.expiresAt ?? Date.now() + EMBASSY_DEFAULT_TTL_MS;
   const [row] = await db
     .insert(embassy)
     .values({
@@ -72,7 +71,7 @@ export async function mintEmbassy(
       documentSlug: input.documentSlug,
       label: input.label ?? "Shared link",
       grant: input.grant,
-      expiresAt: new Date(now.getTime() + ttl),
+      expiresAt: new Date(expiresAt),
     })
     .returning();
   if (row === undefined) throw new Error("embassy insert returned no row");
@@ -233,6 +232,27 @@ export async function setEmbassyLabel(
   const [row] = await db
     .update(embassy)
     .set({ label: input.label })
+    .where(
+      and(
+        eq(embassy.id, input.id),
+        eq(embassy.projectId, input.projectId),
+        isNull(embassy.revokedAt),
+        gt(embassy.expiresAt, new Date()),
+      ),
+    )
+    .returning();
+  return row === undefined ? undefined : toView(row);
+}
+
+// Only a live link can be extended: a revoked or already-expired link stays
+// dead, so an owner revoking is never undone by a late renewal.
+export async function setEmbassyExpiry(
+  db: ControlDb,
+  input: Readonly<{ id: EmbassyId; projectId: ProjectId; expiresAt: number }>,
+): Promise<EmbassyView | undefined> {
+  const [row] = await db
+    .update(embassy)
+    .set({ expiresAt: new Date(input.expiresAt) })
     .where(
       and(
         eq(embassy.id, input.id),

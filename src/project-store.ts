@@ -95,6 +95,7 @@ import {
   linkImportedDocumentsCommand,
   linkImportedFolderCommand,
 } from "./project-store/commands/import-link";
+import { saveSectionCommand } from "./project-store/commands/sections";
 import { seedExampleCommand } from "./project-store/commands/seed";
 import {
   addSuggestionMessageCommand,
@@ -142,6 +143,8 @@ import type {
   SaveDocumentInput,
   SaveResult,
   SaveSharedDraftResult,
+  SaveSharedSectionInput,
+  SaveSharedSectionResult,
   SeedResult,
   EnsureDefaultCorpusResult,
   UpdateCorpusInput,
@@ -1038,7 +1041,7 @@ export class ProjectStore extends DurableObject<Env> {
   // The 409 / rollback / racing-duplicate taxonomy → structured result.
   private async saveError(
     err: unknown,
-    input: SaveDocumentInput,
+    input: Pick<SaveDocumentInput, "slug" | "clientVersion">,
   ): Promise<SaveResult> {
     if (err instanceof RollbackProbe) return { ok: false, rolledBack: true };
     if (err instanceof FilenameCollision) {
@@ -1126,6 +1129,30 @@ export class ProjectStore extends DurableObject<Env> {
       return outcome.result;
     } catch (err) {
       return this.saveError(err, input);
+    }
+  }
+
+  // The section-scoped sibling of saveSharedDraft: same served guard, same
+  // transaction, but the write replaces one section of the current head.
+  async saveSharedSection(
+    input: SaveSharedSectionInput,
+  ): Promise<SaveSharedSectionResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand<SaveSharedSectionResult>(
+        now,
+        async (ctx) => {
+          if (await this.documentServed(ctx.u, input.slug)) {
+            return { result: { ok: false, served: true }, changes: [] };
+          }
+          return saveSectionCommand(ctx, input);
+        },
+      );
+      return outcome.result;
+    } catch (err) {
+      const failure = await this.saveError(err, input);
+      if (failure.ok) throw err;
+      return failure;
     }
   }
 
