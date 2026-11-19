@@ -69,6 +69,26 @@ function protectedRange(
   return protectedContent;
 }
 
+const BLOCK_CONTAINERS: ReadonlySet<string> = new Set([
+  "Blockquote",
+  "ListItem",
+]);
+
+function insideBlockContainer(state: EditorState, pos: number): boolean {
+  for (
+    let node: MdNode | null = nodeAt(state, pos);
+    node !== null;
+    node = node.parent
+  ) {
+    if (BLOCK_CONTAINERS.has(node.name)) return true;
+  }
+  return false;
+}
+
+function isBlank(text: string): boolean {
+  return text.trim() === "";
+}
+
 function inlineCommand(marker: string, nodeName: string): StateCommand {
   return (target) => {
     const { state } = target;
@@ -276,9 +296,15 @@ export function setBlockStyle(style: BlockStyle): StateCommand {
       range.empty ? range.to : Math.max(range.from, range.to - 1),
     );
     if (protectedRange(state, first.from, last.to)) return false;
+    // Blank lines between selected paragraphs are separators, not content. A
+    // lone blank line is the exception: styling it starts a new block there.
+    const skipBlank = first.number !== last.number;
     const changes: ChangeSpec[] = [];
+    let ordinal = 0;
     for (let number = first.number; number <= last.number; number += 1) {
       const line = state.doc.line(number);
+      if (skipBlank && isBlank(line.text)) continue;
+      ordinal += 1;
       // Change a single leading block marker, leaving indentation and body intact.
       const match =
         /^(\s*)(#{1,6}\s+|>\s?|(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/.exec(
@@ -291,7 +317,7 @@ export function setBlockStyle(style: BlockStyle): StateCommand {
         heading: "## ",
         quote: "> ",
         bullet: "- ",
-        ordered: `${number - first.number + 1}. `,
+        ordered: `${ordinal}. `,
         task: "- [ ] ",
       };
       changes.push({
@@ -350,6 +376,8 @@ function shiftList(target: Target, removing: boolean): boolean {
   const changes: ChangeSpec[] = [];
   for (let number = first.number; number <= lastLine.number; number += 1) {
     const line = state.doc.line(number);
+    // A blank line inside an item carries no indentation to move.
+    if (isBlank(line.text)) continue;
     const spaces = /^ */.exec(line.text)?.[0].length ?? 0;
     changes.push(
       removing
@@ -399,9 +427,14 @@ export function insertBlock(kind: "code" | "table"): StateCommand {
   return (target) => {
     const { state } = target;
     const range = state.selection.main;
+    // A block inserted inside a quote or list item would need that container's
+    // prefix on every line; without it the container ends and the rest of the
+    // line is orphaned. Refuse there.
     if (
       state.selection.ranges.length !== 1 ||
-      protectedRange(state, range.from, range.to)
+      protectedRange(state, range.from, range.to) ||
+      insideBlockContainer(state, range.from) ||
+      insideBlockContainer(state, range.to)
     )
       return false;
     const text = state.sliceDoc(range.from, range.to);

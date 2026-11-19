@@ -281,6 +281,35 @@ describe("Markdown authoring: blocks and indentation", () => {
     expect(cm.text()).toBe("1. one\n2. two\nthree");
   });
 
+  it("leaves blank separator lines untouched across selected paragraphs", () => {
+    const source = "para one\n\npara two\n\npara three";
+    for (const [style, expected] of [
+      ["bullet", "- para one\n\n- para two\n\n- para three"],
+      ["ordered", "1. para one\n\n2. para two\n\n3. para three"],
+      ["heading", "## para one\n\n## para two\n\n## para three"],
+      ["quote", "> para one\n\n> para two\n\n> para three"],
+    ] as const) {
+      const cm = editor(source, 0, source.length);
+      expect(cm.run(setBlockStyle(style))).toBe(true);
+      expect(cm.text()).toBe(expected);
+      cm.run(undo);
+      expect(cm.text()).toBe(source);
+    }
+  });
+
+  it("does not touch whitespace-only lines inside a multi-line selection", () => {
+    const source = "one\n  \ntwo";
+    const cm = editor(source, 0, source.length);
+    cm.run(setBlockStyle("bullet"));
+    expect(cm.text()).toBe("- one\n  \n- two");
+  });
+
+  it("starts a block on a lone blank line", () => {
+    const cm = editor("above\n\nbelow", 6);
+    expect(cm.run(setBlockStyle("bullet"))).toBe(true);
+    expect(cm.text()).toBe("above\n- \nbelow");
+  });
+
   it("changes list types without losing task text or indentation", () => {
     const cm = editor("  - [x] done", 8);
     cm.run(setBlockStyle("quote"));
@@ -318,6 +347,15 @@ describe("Markdown authoring: blocks and indentation", () => {
     expect(cm.text()).toBe("- a\n  - b\n  - c\n    - d");
   });
 
+  it("moves a multi-paragraph item without adding whitespace to its blank lines", () => {
+    const source = "- a\n- b\n\n  continued\n- c";
+    const cm = editor(source, 6);
+    expect(cm.run(indentMarkdown)).toBe(true);
+    expect(cm.text()).toBe("- a\n  - b\n\n    continued\n- c");
+    expect(cm.run(outdentMarkdown)).toBe(true);
+    expect(cm.text()).toBe(source);
+  });
+
   it("leaves Tab available for focus navigation outside structural editing", () => {
     const cm = editor("ordinary prose", 5);
     expect(cm.run(tabIndent)).toBe(false);
@@ -336,6 +374,30 @@ describe("Markdown authoring: blocks and indentation", () => {
     cm.run(insertBlock("code"));
     expect(cm.text()).toBe("````\nexample ``` value\n````");
     expect(cm.selected()).toBe("example ``` value");
+  });
+
+  it("does not insert a block inside a quote or list item", () => {
+    for (const source of [
+      "> quoted text here",
+      "- item text here",
+      "1. first\n   continued text",
+    ]) {
+      for (const kind of ["code", "table"] as const) {
+        const caret = editor(source, source.length - 5);
+        expect(caret.run(insertBlock(kind))).toBe(false);
+        expect(caret.text()).toBe(source);
+        const selection = editor(source, source.length - 9, source.length);
+        expect(selection.run(insertBlock(kind))).toBe(false);
+        expect(selection.text()).toBe(source);
+      }
+    }
+  });
+
+  it("still inserts a block in a paragraph that follows a list or quote", () => {
+    const source = "- item\n\nplain paragraph";
+    const cm = editor(source, source.length);
+    expect(cm.run(insertBlock("code"))).toBe(true);
+    expect(cm.text()).toBe("- item\n\nplain paragraph\n\n```\n\n```");
   });
 
   it("inserts a table without discarding selected text", () => {
