@@ -17,9 +17,11 @@ about X." Name them for the reader:
 - `release-reviewer` — the checklist a PR-review agent applies.
 - `support-bot` — product facts and tone for a customer-facing agent.
 
-A document (say `error-handling`) can live in several of these. Write it
-once, reuse it everywhere — that's the whole point. Don't fork a doc per
-audience; attach it to each corpus.
+Knowledge every agent needs (say `error-handling`) belongs in a corpus of
+its own — `company` or `engineering` — that agents connect to alongside
+their own. Many teams already work this way, with a company repository
+beside each project repository. Keep each document in one place; don't
+fork it per audience.
 
 ## Keep the always-include set lean
 
@@ -104,8 +106,7 @@ review changes before publishing.
 
 ## Separate stable from fast-moving
 
-Mix-and-match corpora let you keep a small, rarely-changing core
-(`engineering-principles`) attached to many corpora, while volatile
-specifics (`q3-migration-plan`) live in their own document you attach
-only where and when it's relevant — and detach when it's done, without
-deleting the history.
+Keep a small, rarely-changing core (`engineering-principles`) in a corpus
+of its own that many agents connect to, and put volatile specifics
+(`q3-migration-plan`) in the project corpus where they are relevant.
+Archive them when the work is done; the history stays.

@@ -13,7 +13,7 @@ maintain the shared truth their agents read. They already wrote these docs
 scattered across repos, gists, Notion, and laptops; every agent carries its
 own drifting copy and no one can see the full set. Their context is a
 browser, not a terminal — no Git, no markdown toolchain. The job: author,
-version, and curate markdown documents; group them into ordered corpora;
+version, and curate markdown documents; group them into corpora;
 hand agents a single live, approved source over MCP. They review agent
 proposals, never let an agent auto-write.
 
@@ -43,10 +43,14 @@ deterministic, content-addressed bundle that re-imports to the same hash.
 
 ## Positioning
 
-Documents are shared across corpora by reference, not copied. A curator edits
-one source document; every corpus and agent that reads it receives the
-approved change. Corpus makes this linkage visible while keeping authorship
-and agent consumption on separate sides of a human approval boundary.
+The hierarchy is Project → Corpus → Document. A corpus is a self-contained
+tree of markdown, like a drive or a repository, and a document lives in one
+corpus. A curator edits one source document; every agent that reads that
+corpus receives the approved change. Knowledge for more than one audience is
+shared by having an agent read more than one corpus (a company corpus beside a
+project corpus), not by placing one document in several. Corpus keeps
+authorship and agent consumption on separate sides of a human approval
+boundary.
 
 ## Operating Context
 
@@ -56,8 +60,9 @@ are visible before the folder browser. Search and folders support finding the
 rest; Activity remains available when a curator needs the event history.
 
 People write and review in the web app. Engineers can use the Git-free CLI,
-and agents consume an ordered corpus over MCP with a credential bound to one
-project and corpus. Documents may appear in several corpora without copies.
+and agents consume a corpus over MCP with a credential bound to one project
+and corpus. An agent that needs more than one body of knowledge connects to
+more than one corpus.
 
 ## Capabilities and Constraints
 
@@ -117,8 +122,8 @@ customer testimonials or performance claims.
    history, and require explicit conflict resolution.
 4. **Approve, then serve.** Agents can propose changes; people approve what
    becomes shared context. Review state does not leak into agent reads.
-5. **One source, many readers.** A document is shared by reference across
-   corpora, so one approved edit reaches every reader.
+5. **One source, many readers.** A corpus is the single approved source for
+   everyone who reads it, so one approved edit reaches every reader.
 
 ## Accessibility & Inclusion
 
