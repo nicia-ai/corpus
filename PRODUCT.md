@@ -35,7 +35,7 @@ source of truth instead of stale prompt files copied into every agent.
 
 Success: one approved version of every document, maintained by non-engineers,
 read live by agents over MCP with per-project OAuth/API-key isolation. One
-edit updates every corpus and every agent that reads it at once. Never a lost
+edit updates every agent that reads its corpus at once. Never a lost
 write — optimistic-concurrency conflict detection turns a racing save into a
 409, and a verifiable append-only version ledger lets any version be restored.
 Agents propose; only humans approve. The whole project is exportable as a
@@ -43,14 +43,12 @@ deterministic, content-addressed bundle that re-imports to the same hash.
 
 ## Positioning
 
-The hierarchy is Project → Corpus → Document. A corpus is a self-contained
-tree of markdown, like a drive or a repository, and a document lives in one
-corpus. A curator edits one source document; every agent that reads that
-corpus receives the approved change. Knowledge for more than one audience is
-shared by having an agent read more than one corpus (a company corpus beside a
-project corpus), not by placing one document in several. Corpus keeps
-authorship and agent consumption on separate sides of a human approval
-boundary.
+Every document belongs to exactly one corpus, and nothing lives outside a
+corpus. Knowledge for several audiences is shared by connecting an agent to
+several corpora, never by placing one document in two. A curator edits a
+document; every agent connected to its corpus receives the approved change.
+Corpus makes the corpus-to-agent linkage visible while keeping authorship
+and agent consumption on separate sides of a human approval boundary.
 
 ## Operating Context
 
@@ -61,9 +59,10 @@ rest; Activity remains available when a curator needs the event history.
 
 People write and review in the web app. Engineers can use the CLI (including
 `corpus pull --all`, which writes the approved files into a repository), and
-agents consume a corpus over MCP with a credential bound to one project and
-corpus. An agent that needs more than one body of knowledge connects to more
-than one corpus.
+agents consume corpora over MCP with a credential bound to one corpus. An
+agent that needs more than one body of knowledge connects to more than one
+corpus. Drafts, the built-in unpublished space, is never served. Moving a
+page into a corpus publishes it.
 
 ## Capabilities and Constraints
 
@@ -80,7 +79,7 @@ than one corpus.
 
 **Quiet, engineered, trustworthy.** A precise instrument, not a dashboard.
 Function-first; the system recedes so the product's one memorable moment —
-one document feeding many agents, no copies — is the loudest thing on screen.
+one corpus feeding many agents — is the loudest thing on screen.
 Voice is confident, plain, and expert: it states what is true without
 announcing itself. No marketing flourish, no performative delight. Closer to
 Linear than to a SaaS marketing site, but its own instrument — not a Linear
@@ -115,7 +114,7 @@ customer testimonials or performance claims.
 ## Product Principles
 
 1. **The system recedes so the graph speaks.** The distinctive product truth
-   is one document feeding many agents. Make that relationship legible.
+   is one corpus feeding many agents. Make that relationship legible.
 2. **Show the truth, not the tool.** Start from the documents people maintain
    and make recent work easy to find. Keep Git and markdown tooling out of the
    curator's path.
@@ -123,8 +122,9 @@ customer testimonials or performance claims.
    history, and require explicit conflict resolution.
 4. **Approve, then serve.** Agents can propose changes; people approve what
    becomes shared context. Review state does not leak into agent reads.
-5. **One source, many readers.** A corpus is the single approved source for
-   everyone who reads it, so one approved edit reaches every reader.
+5. **One source, many readers.** Each document lives in one corpus, and every
+   agent connected to that corpus reads the approved version. An audience
+   that needs several corpora connects to each one.
 
 ## Accessibility & Inclusion
 

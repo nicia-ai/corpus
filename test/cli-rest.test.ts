@@ -43,10 +43,9 @@ async function mintKey(): Promise<string> {
     clientVersion: 0,
     changedBy: ownerUserId,
   });
-  await store.attachDocument(
-    conn.corpusSlug,
+  await store.moveDocument(
     docSlug(MEMBER_SLUG),
-    0,
+    { corpusSlug: conn.corpusSlug, folderSlug: null },
     ownerUserId,
   );
   await store.saveDocument({
@@ -171,11 +170,25 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     );
   });
 
-  it("403s a write to a document outside the bound corpus", async () => {
+  it("404s an update of a document outside the bound corpus, like one that does not exist", async () => {
+    const token = await mintKey();
+    const outside = await call(`/api/v1/docs/${OUTSIDER_SLUG}`, token, {
+      markdown: "tamper",
+      clientVersion: 1,
+    });
+    const nowhere = await call("/api/v1/docs/never-existed", token, {
+      markdown: "tamper",
+      clientVersion: 1,
+    });
+    expect(outside.status).toBe(nowhere.status);
+    expect(outside.status).toBe(404);
+  });
+
+  it("403s a CREATE that names a slug already taken outside the bound corpus", async () => {
     const token = await mintKey();
     const r = await call(`/api/v1/docs/${OUTSIDER_SLUG}`, token, {
       markdown: "tamper",
-      clientVersion: 1,
+      clientVersion: 0,
     });
     expect(r.status).toBe(403);
   });

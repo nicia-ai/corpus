@@ -28,6 +28,7 @@ import { connectControlDb } from "../src/control/db";
 import { apiKey } from "../src/control/schema/app";
 import { storeFor } from "../src/control/store-for";
 import { asFolderSlug, type CorpusSlug, type ProjectId } from "../src/ids";
+import { DEFAULT_CORPUS_SLUG } from "../src/store/domain/default-corpus";
 
 import {
   createConnection,
@@ -140,8 +141,7 @@ function configFor(
   return { baseUrl: BASE_URL, apiKey: corpus.token, fetch, files };
 }
 
-// Create (or update) a document in `corpus`, optionally inside a top-level
-// folder, and attach it. Returns the document slug.
+// Create a document in `corpus`, optionally inside a top-level folder of it.
 async function seed(
   corpus: Corpus,
   slug: string,
@@ -149,25 +149,42 @@ async function seed(
   folder?: string,
 ): Promise<void> {
   const store = storeFor(env, corpus.projectId);
-  await store.saveDocument({
+  let folderSlug: ReturnType<typeof asFolderSlug> | null = null;
+  if (folder !== undefined) {
+    const location = { corpusSlug: corpus.corpusSlug, folderSlug: null };
+    const created = await store.createFolder(folder, location);
+    const existing = (await store.listFolders()).find(
+      (f) => f.name === folder && f.corpusSlug === corpus.corpusSlug,
+    );
+    folderSlug = asFolderSlug(
+      created.ok ? created.slug : (existing?.slug ?? ""),
+    );
+  }
+  const r = await store.saveDocument({
     slug: docSlug(slug),
     markdown,
+    location: { corpusSlug: corpus.corpusSlug, folderSlug },
     clientVersion: 0,
     changedBy: OWNER,
   });
-  if (folder !== undefined) {
-    const created = await store.createFolder(folder, null);
-    const folderSlug = created.ok
-      ? created.slug
-      : ((await store.listFolders()).find((f) => f.name === folder)?.slug ??
-        "");
-    await store.placeDocumentsInFolder(
-      [docSlug(slug)],
-      asFolderSlug(folderSlug),
-      OWNER,
-    );
-  }
-  await store.attachDocument(corpus.corpusSlug, docSlug(slug), 0, OWNER);
+  expect(r.ok, `seeding ${slug}`).toBe(true);
+}
+
+// Take a document out of `corpus`: to drafts (not served) or to another
+// corpus's top level.
+async function moveOut(
+  corpus: Corpus,
+  slug: string,
+  to: CorpusSlug = DEFAULT_CORPUS_SLUG,
+): Promise<void> {
+  const store = storeFor(env, corpus.projectId);
+  await store.ensureDefaultCorpus(OWNER);
+  const r = await store.moveDocument(
+    docSlug(slug),
+    { corpusSlug: to, folderSlug: null },
+    OWNER,
+  );
+  expect(r, `moving ${slug} out`).toMatchObject({ ok: true });
 }
 
 async function edit(
@@ -304,11 +321,7 @@ describe("corpus pull --all (whole-corpus sync)", () => {
     const cfg = configFor(corpus, files);
     await pullAll(cfg, DIR);
     files.map.set(at("notes.txt"), "mine");
-    await storeFor(env, corpus.projectId).detachDocument(
-      corpus.corpusSlug,
-      docSlug("drop"),
-      OWNER,
-    );
+    await moveOut(corpus, "drop");
 
     const report = await pullAll(cfg, DIR);
 
@@ -316,6 +329,54 @@ describe("corpus pull --all (whole-corpus sync)", () => {
     expect(files.map.has(at("drop.md"))).toBe(false);
     expect(files.map.get(at("keep.md"))).toBe("keep\n");
     expect(files.map.get(at("notes.txt"))).toBe("mine");
+    expect(stateOf(files).files.map((f) => f.path)).toEqual(["keep.md"]);
+  });
+
+  it("a document moved to another corpus disappears from the checkout; one moved in appears", async () => {
+    const corpus = await newCorpus();
+    const other = await siblingCorpus(corpus);
+    await seed(corpus, "stays", "stays\n");
+    await seed(corpus, "leaves", "leaves\n", "docs");
+    await seed(other, "arrives", "arrives\n");
+    const files = memoryTree();
+    const cfg = configFor(corpus, files);
+    await pullAll(cfg, DIR);
+    expect(files.map.get(at("docs/leaves.md"))).toBe("leaves\n");
+
+    await moveOut(corpus, "leaves", other.corpusSlug);
+    const store = storeFor(env, corpus.projectId);
+    await store.moveDocument(
+      docSlug("arrives"),
+      { corpusSlug: corpus.corpusSlug, folderSlug: null },
+      OWNER,
+    );
+    const report = await pullAll(cfg, DIR);
+
+    expect(report.removed).toEqual(["docs/leaves.md"]);
+    expect(paths(report.added)).toEqual(["arrives.md"]);
+    expect(files.map.has(at("docs/leaves.md"))).toBe(false);
+    expect(files.map.get(at("arrives.md"))).toBe("arrives\n");
+    expect(stateOf(files).files.map((f) => f.path)).toEqual([
+      "arrives.md",
+      "stays.md",
+    ]);
+  });
+
+  it("an archived document disappears from the checkout", async () => {
+    const corpus = await newCorpus();
+    await seed(corpus, "keep", "keep\n");
+    await seed(corpus, "bin", "bin\n");
+    const files = memoryTree();
+    const cfg = configFor(corpus, files);
+    await pullAll(cfg, DIR);
+    await storeFor(env, corpus.projectId).archiveDocument(
+      docSlug("bin"),
+      OWNER,
+    );
+
+    const report = await pullAll(cfg, DIR);
+
+    expect(report.removed).toEqual(["bin.md"]);
     expect(stateOf(files).files.map((f) => f.path)).toEqual(["keep.md"]);
   });
 
@@ -341,11 +402,14 @@ describe("corpus pull --all (whole-corpus sync)", () => {
       ["roadmap.md", "plan"],
     ]);
 
-    const folder = await store.createFolder("strategy", null);
+    const folder = await store.createFolder("strategy", {
+      corpusSlug: corpus.corpusSlug,
+      folderSlug: null,
+    });
     if (!folder.ok) throw new Error("folder");
-    await store.placeDocumentsInFolder(
-      [docSlug("plan")],
-      asFolderSlug(folder.slug),
+    await store.moveDocument(
+      docSlug("plan"),
+      { corpusSlug: corpus.corpusSlug, folderSlug: asFolderSlug(folder.slug) },
       OWNER,
     );
     const moved = await pullAll(cfg, DIR);
@@ -409,11 +473,7 @@ describe("corpus pull --all (whole-corpus sync)", () => {
     const cfg = configFor(corpus, files);
     await pullAll(cfg, DIR);
     files.map.set(at("gone.md"), "gone, but edited\n");
-    await storeFor(env, corpus.projectId).detachDocument(
-      corpus.corpusSlug,
-      docSlug("gone"),
-      OWNER,
-    );
+    await moveOut(corpus, "gone");
 
     const report = await pullAll(cfg, DIR);
 
@@ -455,11 +515,7 @@ describe("corpus pull --all (whole-corpus sync)", () => {
     files.map.set(at("mine.md"), "local edit\n");
     await edit(corpus, "mine", "mine v2\n", 1);
     files.map.set(at("gone.md"), "edited\n");
-    await storeFor(env, corpus.projectId).detachDocument(
-      corpus.corpusSlug,
-      docSlug("gone"),
-      OWNER,
-    );
+    await moveOut(corpus, "gone");
 
     const report = await pullAll(cfg, DIR, { overwrite: true });
 

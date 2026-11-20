@@ -2,85 +2,57 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import {
+  createCorpusClean,
+  deleteCorpusAndCredentials,
+} from "@/control/corpus-lifecycle";
+import { connectControlDb } from "@/control/db";
+import {
   asCorpusSlug,
   asDocumentSlug,
-  asFolderSlug,
+  asProjectId,
   type CorpusSlug,
   type DocumentSlug,
-  type FolderSlug,
 } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
-import { changedBy, storeOf } from "@/lib/server/shared";
+import { changedBy, requireProjectOwner, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
 import type { SeedResult } from "@/project-store";
-import {
-  corpusDelivery,
-  type CollectionDelivery,
-} from "@/store/domain/collection-expand";
-import { alwaysIncludeBudgetTokensZ, compact, slugify } from "@/util";
+import { CORPUS_DELETE_PAGE_MODES } from "@/project-store/contracts";
+import { corpusIsServed } from "@/store/domain/corpus-drive";
+import { compact, slugify } from "@/util";
 
 export type CorpusMeta = Readonly<{
   slug: CorpusSlug;
   name: string;
   description?: string;
 }>;
-// Corpora list row: CorpusMeta + how many documents are attached (the
-// "builder" needs this at a glance). One round trip, like getDocumentList.
+// Corpora list row: how many documents live in the corpus, and whether
+// agents can read it — the default corpus is the drafts space and is not
+// served. One round trip, like getDocumentList.
 export type CorpusListItem = Readonly<{
   slug: CorpusSlug;
   name: string;
   description?: string;
   documentCount: number;
+  served: boolean;
 }>;
-// A resolved (corpus, document) membership pair — the document is in
-// the corpus directly OR via a linked folder. Backs every
-// "how many documents" / "in how many corpora" count.
+// One live (corpus, document) pair — a document lives in exactly one
+// corpus. Backs every "how many documents" count.
 export type CorpusMember = Readonly<{
   corpusSlug: CorpusSlug;
   documentSlug: DocumentSlug;
 }>;
-// Provenance-aware builder view. `direct` members carry an `includes`
-// edge (detach/reorder individually); `viaFolder` members are pulled in
-// by a linked folder (manage them by detaching the folder).
-export type CorpusMemberRow = Readonly<{
-  slug: DocumentSlug;
-  title: string;
-  docVersion: number;
-  size: number;
-  updatedAt: string;
-  direct: boolean;
-  position: number;
-  delivery: CollectionDelivery;
-  viaFolder?: FolderSlug;
-}>;
-export type ColFolderLink = Readonly<{
-  slug: FolderSlug;
-  name: string;
-  position: number;
-  delivery: CollectionDelivery;
-}>;
-export type ColDetail = Readonly<
-  | { found: false }
-  | {
-      found: true;
-      name: string;
-      description?: string;
-      alwaysIncludeBudgetTokens: number;
-      folders: readonly ColFolderLink[];
-      members: readonly CorpusMemberRow[];
-    }
->;
 
-// Lightweight head-node lookup for callers that need name/description/
-// budget without the full member structure (e.g. the MCP setup page).
+// Lightweight head-node lookup for callers that need name/description
+// without the corpus's documents (e.g. the MCP setup page).
 export type CorpusMetaResult = Readonly<
   | { found: false }
-  | {
-      found: true;
-      name: string;
-      description?: string;
-      alwaysIncludeBudgetTokens: number;
-    }
+  | { found: true; name: string; description?: string; served: boolean }
+>;
+
+export type DeleteCorpusOutcome = Readonly<
+  | { ok: true; archived: number; moved: number }
+  | { ok: false; reason: "missing" | "default-corpus" }
 >;
 
 export const corpusMetas = (
@@ -112,18 +84,17 @@ export const getCorpusList = createServerFn({ method: "GET" })
       store.listCorpora(),
       store.listResolvedMembers(),
     ]);
-    // One member row per resolved (corpus, document), so counting
-    // rows per corpus yields the folder-aware document count.
     const countByCol = new Map<string, number>();
     for (const m of members) {
       countByCol.set(m.corpusSlug, (countByCol.get(m.corpusSlug) ?? 0) + 1);
     }
-    return corpora.map((c) =>
+    return corpora.map((corpus) =>
       compact({
-        slug: asCorpusSlug(c.slug),
-        name: c.name,
-        description: c.description,
-        documentCount: countByCol.get(c.slug) ?? 0,
+        slug: asCorpusSlug(corpus.slug),
+        name: corpus.name,
+        description: corpus.description,
+        documentCount: countByCol.get(corpus.slug) ?? 0,
+        served: corpusIsServed(asCorpusSlug(corpus.slug)),
       }),
     );
   });
@@ -135,20 +106,23 @@ export const createCorpus = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<{ slug: CorpusSlug }> => {
     const c = srv(context);
-    const r = await storeOf(c).createCorpus(
-      compact({
+    const r = await createCorpusClean({
+      db: connectControlDb(c.env.DB),
+      store: storeOf(c),
+      projectId: c.project?.projectId ?? asProjectId(""),
+      corpus: compact({
         slug: asCorpusSlug(slugify(data.name)),
         name: data.name,
         description: data.description,
         changedBy: changedBy(c),
       }),
-    );
+    });
     return { slug: asCorpusSlug(r.slug) };
   });
 
 // Edit a corpus's name/description. Slug is identity and is never
-// changed here (renaming the name does not re-slug). An empty
-// description clears it.
+// changed here (renaming the name does not re-slug, and no path changes).
+// An empty description clears it.
 export const updateCorpus = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
@@ -156,7 +130,6 @@ export const updateCorpus = createServerFn({ method: "POST" })
       slug: z.string().min(1),
       name: z.string().trim().min(1),
       description: z.string().trim().optional(),
-      alwaysIncludeBudgetTokens: alwaysIncludeBudgetTokensZ,
     }),
   )
   .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
@@ -166,141 +139,66 @@ export const updateCorpus = createServerFn({ method: "POST" })
         slug: asCorpusSlug(data.slug),
         name: data.name,
         description: data.description,
-        alwaysIncludeBudgetTokens: data.alwaysIncludeBudgetTokens,
         changedBy: changedBy(c),
       }),
     );
   });
 
-// One round trip for the corpus builder: resolved members with
-// direct-vs-folder provenance plus the linked-folder list. Replaces the
-// old readCorpus + getDocuments double call on the corpus route.
-export const getCorpusDetail = createServerFn({ method: "GET" })
+// Delete a corpus and say what becomes of its pages: archived with it
+// (recoverable, like any archived page) or moved to the default corpus as
+// drafts. Owner-only: it also deletes the Connections bound to the corpus
+// (and with them their OAuth grants and API keys), which is Connection
+// administration. Ordering and what a failed step leaves behind are in
+// `deleteCorpusAndCredentials`; the share links of archived pages go with
+// the pages.
+export const deleteCorpus = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ slug: z.string().min(1) }))
-  .handler(async ({ data, context }): Promise<ColDetail> => {
-    const r = await storeOf(srv(context)).corpusStructure(
-      asCorpusSlug(data.slug),
+  .validator(
+    z.object({
+      slug: z.string().min(1),
+      pages: z.enum(CORPUS_DELETE_PAGE_MODES),
+    }),
+  )
+  .handler(async ({ data, context }): Promise<DeleteCorpusOutcome> => {
+    const c = srv(context);
+    const project = requireProjectOwner(
+      c.project,
+      "Only a project owner can delete a corpus",
     );
-    if (!r.found) return { found: false };
-    return {
-      found: true,
-      ...compact({ description: r.description }),
-      name: r.name,
-      alwaysIncludeBudgetTokens: r.alwaysIncludeBudgetTokens,
-      folders: r.folders.map((f) => ({
-        slug: asFolderSlug(f.slug),
-        name: f.name,
-        position: f.position,
-        delivery: corpusDelivery(f.delivery),
-      })),
-      members: r.members.map((m) =>
-        compact({
-          slug: asDocumentSlug(m.slug),
-          title: m.title,
-          docVersion: m.docVersion,
-          size: m.size,
-          updatedAt: m.updatedAt,
-          direct: m.direct,
-          position: m.position,
-          delivery: corpusDelivery(m.delivery),
-          viaFolder:
-            m.viaFolder === undefined ? undefined : asFolderSlug(m.viaFolder),
-        }),
-      ),
-    };
+    const result = await deleteCorpusAndCredentials({
+      db: connectControlDb(c.env.DB),
+      store: storeOf(c),
+      projectId: project.projectId,
+      input: {
+        slug: asCorpusSlug(data.slug),
+        pages: data.pages,
+        changedBy: changedBy(c),
+      },
+    });
+    return result.ok
+      ? {
+          ok: true,
+          archived: result.archivedSlugs.length,
+          moved: result.moved,
+        }
+      : result;
   });
 
-// Sibling of getCorpusDetail for callers that only need head-node
-// metadata (name/description/budget). One DO read, no folder subtree
-// walk, no blob hydration — call this from pages whose feature surface
-// doesn't depend on the resolved member structure.
+// Sibling of getCorpusList for callers that only need one head node.
 export const getCorpusMeta = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .validator(z.object({ slug: z.string().min(1) }))
   .handler(async ({ data, context }): Promise<CorpusMetaResult> => {
-    return storeOf(srv(context)).corpusMeta(asCorpusSlug(data.slug));
-  });
-
-export const attachDocument = createServerFn({ method: "POST" })
-  .middleware([projectMiddleware])
-  .validator(
-    z.object({
-      corpusSlug: z.string().min(1),
-      documentSlug: z.string().min(1),
-      position: z.number().int().nonnegative(),
-      delivery: z.enum(["core", "reference"]).default("core"),
-    }),
-  )
-  .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
-    const c = srv(context);
-    const r = await storeOf(c).attachDocument(
-      asCorpusSlug(data.corpusSlug),
-      asDocumentSlug(data.documentSlug),
-      data.position,
-      changedBy(c),
-      data.delivery,
-    );
-    return { ok: r.ok };
-  });
-
-// Flip a member's delivery tier in place. Distinct from `attachDocument`
-// so the UI never has to round-trip a position it only knows as the
-// resolved index (which would reorder folder-linked members).
-export const setMemberDelivery = createServerFn({ method: "POST" })
-  .middleware([projectMiddleware])
-  .validator(
-    z.object({
-      corpusSlug: z.string().min(1),
-      documentSlug: z.string().min(1),
-      delivery: z.enum(["core", "reference"]),
-    }),
-  )
-  .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
-    const c = srv(context);
-    const r = await storeOf(c).setMemberDelivery(
-      asCorpusSlug(data.corpusSlug),
-      asDocumentSlug(data.documentSlug),
-      data.delivery,
-      changedBy(c),
-    );
-    return { ok: r.ok };
-  });
-
-export const detachDocument = createServerFn({ method: "POST" })
-  .middleware([projectMiddleware])
-  .validator(
-    z.object({
-      corpusSlug: z.string().min(1),
-      documentSlug: z.string().min(1),
-    }),
-  )
-  .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
-    const c = srv(context);
-    const r = await storeOf(c).detachDocument(
-      asCorpusSlug(data.corpusSlug),
-      asDocumentSlug(data.documentSlug),
-      changedBy(c),
-    );
-    return { ok: r.ok };
-  });
-
-export const reorderCorpusDocuments = createServerFn({ method: "POST" })
-  .middleware([projectMiddleware])
-  .validator(
-    z.object({
-      corpusSlug: z.string().min(1),
-      orderedDocumentSlugs: z.array(z.string().min(1)),
-    }),
-  )
-  .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
-    const c = srv(context);
-    const r = await storeOf(c).reorderCorpusDocuments(
-      asCorpusSlug(data.corpusSlug),
-      data.orderedDocumentSlugs.map(asDocumentSlug),
-      changedBy(c),
-    );
-    return { ok: r.ok };
+    const slug = asCorpusSlug(data.slug);
+    const meta = await storeOf(srv(context)).corpusMeta(slug);
+    return meta.found
+      ? compact({
+          found: true,
+          name: meta.name,
+          description: meta.description,
+          served: corpusIsServed(slug),
+        })
+      : { found: false };
   });
 
 // Atomic, guarded example seed — one round-trip, all-or-nothing, no-op if

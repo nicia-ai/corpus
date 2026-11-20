@@ -3,7 +3,14 @@
 // envelope through the scoped McpExecutor port.
 
 import type { McpExecutor } from "./mcp/executor";
-import { ERR, err, ok, RpcSchema, type Rpc } from "./mcp/protocol";
+import {
+  ERR,
+  err,
+  ok,
+  RpcSchema,
+  type Rpc,
+  SERVER_INSTRUCTIONS,
+} from "./mcp/protocol";
 import { listResources, readResource } from "./mcp/resources";
 import { handleToolCall, toolsListResponse } from "./mcp/tools";
 
@@ -20,6 +27,7 @@ export function handleMcp(body: Rpc, exec: McpExecutor): Promise<unknown> {
         protocolVersion: "2025-06-18",
         serverInfo: { name: "corpus", version: "0.1.0" },
         capabilities: { tools: {}, resources: {} },
+        instructions: SERVER_INSTRUCTIONS,
       }),
     "tools/list": () => toolsListResponse(id),
     "tools/call": () => handleToolCall(id, params, exec),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asFolderSlug } from "../src/ids";
+import { asFolderSlug, type CorpusSlug } from "../src/ids";
 import {
   type Bundle,
   type BundleFolder,
@@ -11,10 +11,17 @@ import {
   parseBundle,
   PRODUCT_VERSION,
 } from "../src/store/domain/bundle";
+import {
+  corpusOfRootFolderSlug,
+  corpusRootFolderSlug,
+} from "../src/store/domain/corpus-drive";
+import { DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS } from "../src/util";
 
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const SOURCE = { organization: "acme", project: "default" };
+const TEAM: CorpusSlug = colSlug("team");
+const MKT: CorpusSlug = colSlug("mkt");
 
 // Compare two bundles ignoring the only wall-clock field (exportedAt);
 // everything else — including integrity.rootHash — must be identical.
@@ -108,9 +115,16 @@ describe("bundle domain (pure)", () => {
 describe("bundle round-trip (the alignment contract)", () => {
   it("export → fresh project → import → export is byte-identical", async () => {
     const a = freshStore("bundle-a");
+    await a.createCorpus({
+      slug: TEAM,
+      name: "Team",
+      description: "shared",
+      changedBy: "u",
+    });
     await a.saveDocument({
       slug: docSlug("alpha"),
       markdown: "# Alpha\nv1",
+      location: { corpusSlug: TEAM, folderSlug: null },
       clientVersion: 0,
       changedBy: "u",
     });
@@ -123,17 +137,10 @@ describe("bundle round-trip (the alignment contract)", () => {
     await a.saveDocument({
       slug: docSlug("beta"),
       markdown: "# Beta",
+      location: { corpusSlug: TEAM, folderSlug: null },
       clientVersion: 0,
       changedBy: "u",
     });
-    await a.createCorpus({
-      slug: colSlug("team"),
-      name: "Team",
-      description: "shared",
-      changedBy: "u",
-    });
-    await a.attachDocument(colSlug("team"), docSlug("alpha"), 1, "u");
-    await a.attachDocument(colSlug("team"), docSlug("beta"), 2, "u");
 
     const b1 = await a.exportBundle(SOURCE);
 
@@ -151,141 +158,86 @@ describe("bundle round-trip (the alignment contract)", () => {
       "# Alpha\nv2 expanded",
     );
     expect(await b.verifyHistory()).toEqual({ ok: true });
-    const col = await b.readCorpus(colSlug("team"));
-    expect(col.found).toBe(true);
-    if (col.found) {
-      expect(col.documents.map((d) => d.slug)).toEqual(["alpha", "beta"]);
-    }
+    const outline = await b.corpusOutline(TEAM);
+    expect(outline.found && outline.documents.map((d) => d.slug)).toEqual([
+      "alpha",
+      "beta",
+    ]);
   });
 
-  it("round-trips alwaysIncludeBudgetTokens through export → import", async () => {
+  it("exports the corpus's contract-default alwaysIncludeBudgetTokens and round-trips it", async () => {
     const a = freshStore("bundle-budget");
+    await a.createCorpus({ slug: MKT, name: "Marketing", changedBy: "u" });
     await a.saveDocument({
       slug: docSlug("brand"),
       markdown: "# Brand",
+      location: { corpusSlug: MKT, folderSlug: null },
       clientVersion: 0,
       changedBy: "u",
     });
-    await a.createCorpus({
-      slug: colSlug("mkt"),
-      name: "Marketing",
-      alwaysIncludeBudgetTokens: 32_000,
-      changedBy: "u",
-    });
-    await a.attachDocument(colSlug("mkt"), docSlug("brand"), 1, "u");
 
     const b1 = await a.exportBundle(SOURCE);
-    expect(b1.collections["mkt"]?.alwaysIncludeBudgetTokens).toBe(32_000);
+    expect(b1.collections["mkt"]?.alwaysIncludeBudgetTokens).toBe(
+      DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS,
+    );
     expect(
       b1.manifest.collections.find((c) => c.slug === "mkt")
         ?.alwaysIncludeBudgetTokens,
-    ).toBe(32_000);
+    ).toBe(DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS);
 
     const b = freshStore("bundle-budget2");
     expect((await b.importBundle(b1)).ok).toBe(true);
 
-    // The value is live in the imported project, not merely re-exportable.
-    const live = await b.corpusStructure(colSlug("mkt"));
-    expect(live.found && live.alwaysIncludeBudgetTokens).toBe(32_000);
+    expect(await b.corpusMeta(MKT)).toEqual({
+      found: true,
+      name: "Marketing",
+    });
 
     const b2 = await b.exportBundle(SOURCE);
     expect(stable(b2)).toBe(stable(b1));
   });
 
-  it("round-trips Core/Reference membership delivery", async () => {
-    const a = freshStore("bundle-delivery-a");
-    await a.saveDocument({
-      slug: docSlug("core-doc"),
-      markdown: "# Core",
-      clientVersion: 0,
-      changedBy: "u",
-    });
-    await a.saveDocument({
-      slug: docSlug("reference-doc"),
-      markdown: "# Reference",
-      clientVersion: 0,
-      changedBy: "u",
-    });
-    await a.createCorpus({
-      slug: colSlug("agent"),
-      name: "Agent",
-      changedBy: "u",
-    });
-    await a.attachDocument(
-      colSlug("agent"),
-      docSlug("core-doc"),
-      1,
-      "u",
-      "core",
-    );
-    await a.attachDocument(
-      colSlug("agent"),
-      docSlug("reference-doc"),
-      2,
-      "u",
-      "reference",
-    );
-
-    const b1 = await a.exportBundle(SOURCE);
-    expect(
-      b1.collections["agent"]?.members.map((m) => [m.documentSlug, m.delivery]),
-    ).toEqual([
-      ["core-doc", "core"],
-      ["reference-doc", "reference"],
-    ]);
-
-    const b = freshStore("bundle-delivery-b");
-    expect((await b.importBundle(b1)).ok).toBe(true);
-    expect(stable(await b.exportBundle(SOURCE))).toBe(stable(b1));
-
-    const live = await b.readCorpus(colSlug("agent"));
-    expect(live.found).toBe(true);
-    if (live.found) {
-      expect(live.documents.map((d) => d.slug)).toEqual(["core-doc"]);
-    }
-  });
-
-  it("round-trips folders + filename + placement byte-identically", async () => {
+  it("round-trips folders, filenames and placement byte-identically", async () => {
     const a = freshStore("bundle-f");
+    await a.createCorpus({ slug: TEAM, name: "Team", changedBy: "u" });
     await a.importDocumentAtPath({
+      corpusSlug: TEAM,
       path: "a/b/zeta.md",
       markdown: "# Zeta",
       changedBy: "u",
     });
     await a.importDocumentAtPath({
+      corpusSlug: TEAM,
       path: "a/b/alpha.md",
       markdown: "# Alpha",
       changedBy: "u",
     });
     await a.importDocumentAtPath({
+      corpusSlug: TEAM,
       path: "top.md",
       markdown: "# Top",
       changedBy: "u",
     });
     const bFolder = (await a.listFolders()).find((f) => f.name === "b");
     if (bFolder === undefined) throw new Error("folder b missing");
-    await a.createCorpus({
-      slug: colSlug("team"),
-      name: "Team",
-      changedBy: "u",
-    });
-    await a.attachFolderToCorpus(
-      colSlug("team"),
-      asFolderSlug(bFolder.slug),
-      1,
-      "u",
-    );
 
     const b1 = await a.exportBundle(SOURCE);
 
-    // The delta is actually present in the manifest.
-    expect(b1.manifest.folders.map((f) => f.name).sort()).toEqual(["a", "b"]);
+    // The delta is actually present in the manifest: the two user folders
+    // plus the hidden root folder the corpus owns.
+    const userFolders = b1.manifest.folders.filter(
+      (f) => corpusOfRootFolderSlug(f.slug) === undefined,
+    );
+    expect(userFolders.map((f) => f.name).sort()).toEqual(["a", "b"]);
+    expect(
+      b1.manifest.folders.some((f) => f.slug === corpusRootFolderSlug(TEAM)),
+    ).toBe(true);
     const zetaMeta = b1.manifest.documents.find((d) => d.slug === "a-b-zeta");
     expect(zetaMeta?.filename).toBe("zeta.md");
     expect(zetaMeta?.folderSlug).toBe(bFolder.slug);
     expect(
       b1.manifest.documents.find((d) => d.slug === "top")?.folderSlug,
-    ).toBe(null);
+    ).toBe(corpusRootFolderSlug(TEAM));
 
     const b = freshStore("bundle-g");
     const imp = await b.importBundle(b1);
@@ -295,44 +247,28 @@ describe("bundle round-trip (the alignment contract)", () => {
     expect(stable(b2)).toBe(stable(b1));
     expect(b2.manifest.integrity.rootHash).toBe(b1.manifest.integrity.rootHash);
 
-    // Functional after import: chain verifies, the folder→corpus
-    // snapshot resolved to its pinned (expanded) members.
+    // Functional after import: chain verifies, and the imported corpus
+    // holds its documents at their corpus-relative paths.
     expect(await b.verifyHistory()).toEqual({ ok: true });
-    const col = await b.readCorpus(colSlug("team"));
-    expect(col.found).toBe(true);
-    if (col.found) {
-      expect(col.documents.map((d) => d.slug)).toEqual([
-        "a-b-alpha",
-        "a-b-zeta",
-      ]);
-    }
+    const outline = await b.corpusOutline(TEAM);
+    expect(outline.found && outline.documents.map((d) => d.path)).toEqual([
+      "a/b/alpha.md",
+      "a/b/zeta.md",
+      "top.md",
+    ]);
   });
 
-  it("exports the LIVE resolved expansion: docs added to a linked folder after attach are in the bundle", async () => {
+  it("exports the live corpus contents: a document added after creation is in the bundle", async () => {
     const a = freshStore("bundle-h");
+    await a.createCorpus({ slug: TEAM, name: "Team", changedBy: "u" });
     await a.importDocumentAtPath({
+      corpusSlug: TEAM,
       path: "a/first.md",
       markdown: "# First",
       changedBy: "u",
     });
-    await a.createCorpus({
-      slug: colSlug("team"),
-      name: "Team",
-      changedBy: "u",
-    });
-    const folderA = (await a.listFolders()).find((f) => f.name === "a");
-    if (folderA === undefined) throw new Error("folder a missing");
-    await a.attachFolderToCorpus(
-      colSlug("team"),
-      asFolderSlug(folderA.slug),
-      1,
-      "u",
-    );
-
-    // Added AFTER the folder→corpus link, with no explicit
-    // corpus action — readCorpus shows it, so the bundle must
-    // too.
     await a.importDocumentAtPath({
+      corpusSlug: TEAM,
       path: "a/second.md",
       markdown: "# Second",
       changedBy: "u",
@@ -350,36 +286,20 @@ describe("bundle round-trip (the alignment contract)", () => {
     expect((await b.importBundle(b1)).ok).toBe(true);
     const b2 = await b.exportBundle(SOURCE);
     expect(stable(b2)).toBe(stable(b1));
-    const imported = await b.readCorpus(colSlug("team"));
-    expect(imported.found).toBe(true);
-    if (imported.found) {
-      expect(imported.documents.map((d) => d.slug).sort()).toEqual([
-        "a-first",
-        "a-second",
-      ]);
-    }
+    expect(await b.corpusMembers(TEAM)).toEqual(["a-first", "a-second"]);
   });
 
-  it("deleting a linked folder re-snapshots: the bundle no longer serves the stale expansion", async () => {
+  it("deleting a folder archives its documents: the bundle no longer carries them", async () => {
     const a = freshStore("bundle-j");
+    await a.createCorpus({ slug: TEAM, name: "Team", changedBy: "u" });
     await a.importDocumentAtPath({
+      corpusSlug: TEAM,
       path: "a/doc.md",
       markdown: "# Doc",
       changedBy: "u",
     });
-    await a.createCorpus({
-      slug: colSlug("team"),
-      name: "Team",
-      changedBy: "u",
-    });
     const folderA = (await a.listFolders()).find((f) => f.name === "a");
     if (folderA === undefined) throw new Error("folder a missing");
-    await a.attachFolderToCorpus(
-      colSlug("team"),
-      asFolderSlug(folderA.slug),
-      1,
-      "u",
-    );
 
     const before = await a.exportBundle(SOURCE);
     expect(
@@ -390,9 +310,8 @@ describe("bundle round-trip (the alignment contract)", () => {
       true,
     );
 
-    // readCorpus and exportBundle must agree: the link is gone.
-    const live = await a.readCorpus(colSlug("team"));
-    expect(live.found && live.documents).toEqual([]);
+    // corpusMembers and exportBundle must agree: the document is gone.
+    expect(await a.corpusMembers(TEAM)).toEqual([]);
     const after = await a.exportBundle(SOURCE);
     expect(
       after.manifest.collections.find((c) => c.slug === "team")?.members,

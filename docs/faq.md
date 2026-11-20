@@ -31,34 +31,35 @@ silently rewritten by an agent.
 
 ## Is there search / RAG over my documents?
 
-No, by design. You decide what goes in a corpus; the agent reads
-its always-included documents on every call and browses the on-demand
-outline in your order. There's no similarity-ranked retrieval —
-corpus selection is an editorial decision, not a search result.
+No, by design. You decide what goes in a corpus; the agent lists the
+corpus's documents and reads the ones it needs. There's no
+similarity-ranked retrieval — corpus selection is an editorial decision,
+not a search result.
 
 ## Why is the agent ignoring part of my corpus?
 
-Most likely it's an on-demand document and the agent never decided to
-pull it. If it should always be loaded, toggle **Always include** on
-its row. If the always-included set is over the corpus's budget,
-the meter will show amber — split the corpus or trim what's
-always-included (see [Recipes](./recipes.md)). Also confirm the agent
-is actually instructed to read the corpus, not just connected to
-the endpoint.
+The agent only reads what it lists and then chooses to read. If a
+document matters for every task, say so in the agent's instructions and
+name its path (see [Recipes](./recipes.md)). Also confirm the agent is
+actually instructed to read the corpus, not just connected to the
+endpoint. And check that the document is in the corpus at all: a page in
+**Drafts** is never served.
 
 ## What's a Connection?
 
 A **Connection** is a named binding of one Project and exactly one
 Corpus — the agent-facing credential unit. OAuth grants and API keys
 hang off a Connection; the agent reads **only** the Connection's bound
-Corpus (no other Corpora, no other documents in the same project).
-Create one with **Connect this corpus** on the Corpus page.
+Corpus (no other Corpora, no documents in Drafts). Create one with
+**Connect this corpus** on the Corpus page. An agent that needs several
+corpora gets one Connection for each.
 
 ## My agent connected but can't see anything
 
-- Make sure the Connection's bound Corpus has documents attached and
-  you saved them. The agent sees **only** that Corpus — documents
-  elsewhere in the project are not reachable.
+- Make sure the Connection's bound Corpus contains documents and you
+  saved them. The agent sees **only** that Corpus — documents in other
+  corpora, and documents in Drafts, are not reachable. Move a page from
+  Drafts into the corpus to publish it.
 - Confirm the agent authenticated — for OAuth clients, complete the
   sign-in **and** the Connection-picker step (in Claude Code, run
   `/mcp`).

@@ -68,7 +68,7 @@ function FolderHeaderComponent({
       }}
       style={treeIndent(depth)}
       className={cn(
-        "group flex items-center gap-2 py-1 pr-3 text-base [contain-intrinsic-size:auto_3.5rem] [content-visibility:auto]",
+        "group flex flex-wrap items-center gap-x-2 py-1 pr-3 text-base [contain-intrinsic-size:auto_3.5rem] [content-visibility:auto]",
         highlighted ? "bg-blue-50" : "hover:bg-slate-50",
       )}
     >
@@ -108,7 +108,7 @@ function FolderHeaderComponent({
           />
         </form>
       ) : (
-        <span className="flex-1 truncate font-medium text-slate-900">
+        <span className="min-w-24 flex-1 truncate font-medium text-slate-900">
           {folder.name}
         </span>
       )}
@@ -137,7 +137,7 @@ function FolderHeaderComponent({
           </button>
         </span>
       ) : (
-        <span className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+        <span className="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
           <IconButton
             label="New document"
             onClick={() => onAddDocument(folder.slug)}

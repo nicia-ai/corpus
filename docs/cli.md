@@ -112,8 +112,9 @@ api-style-guide   v4   API Style Guide
 deploy-runbook    v2   Deploy Runbook
 ```
 
-Only the corpus's members appear — this is the same scope an agent sees
-over MCP.
+Only the documents in the corpus appear — this is the same scope an agent
+sees over MCP. A document that is moved to another corpus or to Drafts, or
+archived, drops out of the list.
 
 ### `pull <slug> [path]`
 
@@ -158,7 +159,8 @@ editing and pushing without a fresh `pull`.
 ### `pull --all [dir] [--overwrite]`
 
 Write the **whole corpus** into a directory (default: the current directory),
-one file per document, at the document's path in Corpus, creating folders as
+one file per document, at the document's path in the corpus (relative to the corpus root, the way an
+agent sees it), creating folders as
 needed and preserving each file's bytes exactly (including a missing trailing
 newline and CRLF line endings). The directory can be anywhere: Corpus assumes
 nothing about what surrounds it, and the files are an ordinary folder tree.
@@ -176,8 +178,8 @@ CI](#keep-a-repository-in-sync-from-ci)):
 
 - **Idempotent.** With nothing new upstream, a run writes nothing (not even the
   state file), prints `up to date: N files in <dir>`, and exits `0`.
-- **Tracks only what it wrote.** Documents removed from the corpus are deleted
-  locally, and renamed or moved documents are moved, but only files recorded in
+- **Tracks only what it wrote.** Documents that left the corpus (moved to another corpus or to
+  Drafts, or archived) are deleted locally, and renamed or moved documents are moved, but only files recorded in
   the [state file](#the-sync-state-file). Other files in the directory are never
   touched. Folders left empty by a removal or move are not deleted.
 - **Cheap.** Unchanged documents (same version, same path) are not downloaded.
@@ -268,9 +270,10 @@ artifact: leave it beside the markdown, and don't hand-edit it. A file with
 
 ## Creating documents
 
-Pushing a slug that doesn't exist yet **creates** it — and adds it to the
-corpus your key is bound to, so it shows up in `list` and is readable
-immediately:
+Pushing a slug that doesn't exist yet **creates** it — inside the corpus your
+key is bound to, at its top level, so it shows up in `list` and is readable
+immediately. (Move it into a folder afterwards from the web app. Over the
+[REST API](#rest-api) a create can also name a corpus-relative `path`.)
 
 ```sh
 $ printf '# Onboarding\n\nWelcome…\n' > onboarding.md
@@ -365,11 +368,11 @@ and Corpus does not mirror or write to git itself.
 The CLI is a thin client over three endpoints under `/api/v1/docs`. Each
 takes the API key as a bearer token and is scoped to the key's corpus:
 
-| Method & path            | Does                                                                                                                  |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/docs`       | List the corpus's documents (`slug`, `title`, `docVersion`, `path`) plus the `corpus` identity (`projectId`, `slug`). |
-| `GET /api/v1/docs/:slug` | Fetch one document's `markdown` + metadata. `404` if not a member.                                                    |
-| `PUT /api/v1/docs/:slug` | Write a new version. Body: `{ markdown, clientVersion, title? }`.                                                     |
+| Method & path            | Does                                                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/docs`       | List the corpus's documents (`slug`, `title`, `docVersion`, `path`) plus the `corpus` identity (`projectId`, `slug`).         |
+| `GET /api/v1/docs/:slug` | Fetch one document's `markdown` + metadata. `404` if it is not in the corpus.                                                 |
+| `PUT /api/v1/docs/:slug` | Write a new version. Body: `{ markdown, clientVersion, title?, path? }`; `path` (corpus-relative) only places a NEW document. |
 
 ```sh
 curl -H "Authorization: Bearer $CORPUS_API_KEY" \
@@ -377,8 +380,12 @@ curl -H "Authorization: Bearer $CORPUS_API_KEY" \
 ```
 
 A `PUT` whose `clientVersion` is behind the server returns `409` with the
-`currentVersion`; a `PUT` to a slug that exists outside the bound corpus
-returns `403`. These are exactly the conflict and scope rules the CLI
+`currentVersion`. An update (`clientVersion` above 0) of a document that is not
+in the bound corpus — including one that was moved out — returns `404`, the
+same as a slug that does not exist. Creating a slug already taken outside the
+corpus returns `403`, and a `path` that leaves the corpus (`..`, an absolute
+path, `\`) returns `400`. A key can never read or write a document outside its
+corpus, Drafts included. These are the conflict and scope rules the CLI
 surfaces above.
 
 ## Portability

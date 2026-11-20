@@ -1,68 +1,73 @@
 import type { Node } from "@nicia-ai/typegraph";
 
+import { type Collection, FOLDER_SLUG_INDEX } from "../../graph";
 import {
-  type Collection,
-  type CollectionFields,
-  DOCUMENT_SLUG_INDEX,
-  FOLDER_SLUG_INDEX,
-} from "../../graph";
-import type { CorpusSlug, DocumentSlug, FolderSlug } from "../../ids";
-import { type Compact, compact } from "../../util";
+  asCorpusSlug,
+  asDocumentSlug,
+  asFolderSlug,
+  type CorpusSlug,
+  type DocumentSlug,
+  type FolderSlug,
+} from "../../ids";
+import { compact } from "../../util";
 import {
+  type CollectionDelivery,
   corpusDelivery,
   DEFAULT_COLLECTION_DELIVERY,
-  type CollectionDelivery,
-} from "../domain/collection-expand";
+} from "../domain/collection-delivery";
+import { corpusRootFolderSlug } from "../domain/corpus-drive";
 import type { GraphHandle } from "../handle";
 
-import type { DocumentNode } from "./document-repo";
+import type { FolderNode } from "./folder-repo";
 import { findAll } from "./paginate";
 
 export type CorpusNode = Node<typeof Collection>;
 
-// A corpus member as resolved from the graph: the document head
-// pinned by content hash + version, in attach order. The DO hydrates
-// `markdown` from the blob store (corpus) or snapshots this directly
-// (CorpusVersion).
+// A corpus document as resolved from the graph: the head pinned by content
+// hash + version, at its corpus-relative path. `position` is its 1-based
+// rank in path order — what a CorpusVersion snapshot records.
 export type CorpusDocView = Readonly<{
   slug: string;
+  path: string;
   title: string;
   docVersion: number;
   contentHash: string;
   updatedAt: string;
   position: number;
+}>;
+
+export type CorpusMeta = Readonly<{
+  slug: string;
+  name: string;
+  description?: string;
+}>;
+
+export type LegacyEntry = Readonly<{
+  slug: string;
+  position: number;
   delivery: CollectionDelivery;
 }>;
 
-// Direct-document + folder-include membership. Document heads are
-// hydrated; folders stay slug + position for the shared expander.
-export type CorpusEntries = Readonly<{
-  documents: readonly CorpusDocView[];
-  folders: readonly Readonly<{
-    slug: string;
-    position: number;
-    delivery: CollectionDelivery;
-  }>[];
+export type LegacyCorpusEntries = Readonly<{
+  corpusSlug: CorpusSlug;
+  documents: readonly LegacyEntry[];
+  folders: readonly LegacyEntry[];
 }>;
 
-export type CorpusMeta = Readonly<Compact<CollectionFields>>;
+export type CorpusFolderLink = Readonly<{
+  corpusSlug: CorpusSlug;
+  folderSlug: FolderSlug;
+}>;
 
-// What happened to the includes edge — the DO turns this into the change
-// event so the attached-vs-reordered rule lives in one place. `unchanged`
-// means the call was a true no-op (an existing edge already at the
-// requested `position` + `delivery`): the DO skips snapshot + event
-// emission so a double-click / retry / scripted reconciliation can't
-// grow the audit log or cut a byte-equal CorpusVersion.
-export type AttachResult = Readonly<
-  | { ok: false }
-  | { ok: true; change: "attached" }
-  | { ok: true; change: "reordered"; previousPosition: number }
-  | { ok: true; change: "unchanged" }
->;
+export type CorpusDocumentLink = Readonly<{
+  corpusSlug: CorpusSlug;
+  documentSlug: DocumentSlug;
+}>;
 
-// Corpus nodes + the `includes` edge (the dedup/organizer graph:
-// one doc, many corpora). Owns all graph traversal so the DO never
-// touches edges directly.
+// Corpus nodes and the one `includes_folder` link each has to its root
+// folder. Owns all corpus-side graph traversal so the DO never touches
+// edges directly. There is deliberately no way to link a single document
+// or a second folder: membership is "under the root" and nothing else.
 export class CorpusGraph {
   constructor(private readonly g: GraphHandle) {}
 
@@ -74,52 +79,35 @@ export class CorpusGraph {
     return col;
   }
 
-  private async findDoc(slug: DocumentSlug): Promise<DocumentNode | undefined> {
-    const [doc] = await this.g.nodes.Document.find({
-      where: (d) => d.slug.eq(slug),
-      limit: 1,
-    });
-    return doc;
-  }
-
-  async createCorpus(
+  createCorpus(
     fields: Readonly<{
       slug: CorpusSlug;
       name: string;
       description: string | undefined;
-      alwaysIncludeBudgetTokens: number;
     }>,
-  ): Promise<void> {
-    await this.g.nodes.Collection.create(
+  ): Promise<CorpusNode> {
+    return this.g.nodes.Collection.create(
       compact({
         slug: fields.slug,
         name: fields.name,
         description: fields.description,
-        alwaysIncludeBudgetTokens: fields.alwaysIncludeBudgetTokens,
       }),
     );
   }
 
   // Edit a corpus's name/description. Slug is identity (pinned in every
-  // CorpusVersion, the bundle sort key) so it is never touched, and
-  // membership is unchanged so no CorpusVersion is cut — this is a
-  // head-node-only partial-merge update. `description: ""` is a present
-  // value that overwrites (empty = "no description" for display).
-  // Returns undefined when the corpus does not exist.
+  // CorpusVersion, the bundle sort key, and the root folder's name) so it
+  // is never touched — which is why a rename can never change a path.
+  // `description: ""` is a present value that overwrites.
   async updateCorpus(
     slug: CorpusSlug,
-    fields: Readonly<{
-      name: string;
-      description: string;
-      alwaysIncludeBudgetTokens: number;
-    }>,
+    fields: Readonly<{ name: string; description: string }>,
   ): Promise<CorpusNode | undefined> {
     const col = await this.findCorpus(slug);
     if (col === undefined) return undefined;
     return this.g.nodes.Collection.update(col.id, {
       name: fields.name,
       description: fields.description,
-      alwaysIncludeBudgetTokens: fields.alwaysIncludeBudgetTokens,
     });
   }
 
@@ -134,401 +122,76 @@ export class CorpusGraph {
   // Every corpus, paginated (bundle export); `list(limit)` is the bounded
   // UI variant.
   async listAll(): Promise<readonly CorpusMeta[]> {
-    return this.toMetas(await findAll((w) => this.g.nodes.Collection.find(w)));
+    return this.toMetas(await this.allNodes());
+  }
+
+  async listByCreation(): Promise<
+    readonly Readonly<{ slug: CorpusSlug; createdAt: string }>[]
+  > {
+    return (await this.allNodes()).map((c) => ({
+      slug: asCorpusSlug(c.slug),
+      createdAt: c.meta.createdAt,
+    }));
+  }
+
+  private allNodes(): Promise<readonly CorpusNode[]> {
+    return findAll((w) => this.g.nodes.Collection.find(w));
   }
 
   private toMetas(cols: readonly CorpusNode[]): readonly CorpusMeta[] {
     return cols.map((c) =>
-      compact({
-        slug: c.slug,
-        name: c.name,
-        description: c.description,
-        alwaysIncludeBudgetTokens: c.alwaysIncludeBudgetTokens,
-      }),
+      compact({ slug: c.slug, name: c.name, description: c.description }),
     );
   }
 
-  // Attach a new edge or re-position an existing one; the return tells
-  // the caller which happened (and the prior position, for the event).
-  // An idempotent re-attach (same position + delivery as the existing
-  // edge) returns `unchanged` so the DO can skip the snapshot + event:
-  // a double-click, retried POST, or scripted reconciliation must not
-  // grow the audit log or cut a byte-equal CorpusVersion.
-  async attach(
-    corpusSlug: CorpusSlug,
-    documentSlug: DocumentSlug,
-    position: number,
-    delivery: CollectionDelivery = DEFAULT_COLLECTION_DELIVERY,
-  ): Promise<AttachResult> {
-    const [col, doc] = await Promise.all([
-      this.findCorpus(corpusSlug),
-      this.findDoc(documentSlug),
-    ]);
-    if (
-      col === undefined ||
-      doc === undefined ||
-      doc.archivedAt !== undefined
-    ) {
-      return { ok: false };
-    }
-    const edges = await this.g.edges.includes.findFrom({
-      kind: "Collection",
-      id: col.id,
-    });
-    const current = edges.find((e) => e.toId === doc.id);
-    if (current === undefined) {
-      await this.g.edges.includes.create(
-        { kind: "Collection", id: col.id },
-        { kind: "Document", id: doc.id },
-        { position, delivery },
-      );
-      return { ok: true, change: "attached" };
-    }
-    const previousPosition = current.position;
-    if (
-      previousPosition === position &&
-      corpusDelivery(current.delivery) === delivery
-    ) {
-      return { ok: true, change: "unchanged" };
-    }
-    await this.g.edges.includes.update(current.id, { position, delivery });
-    return { ok: true, change: "reordered", previousPosition };
-  }
+  // — The root link ——————————————————————————————————————————
 
-  // Append many documents in one pass: a single corpus + edge read,
-  // then one edge create per document not already linked (archived or
-  // missing documents are skipped, mirroring `attach`'s rules). Amortizes
-  // the per-call reads `attach` repeats, so a bulk upload link is O(N)
-  // not O(N·members). Positions continue after the current max across the
-  // shared document+folder space, computed by reduce (no arg-spread cap).
-  // Returns the slugs actually added with their positions, in input
-  // order, for the caller's change events.
-  async attachMany(
-    corpusSlug: CorpusSlug,
-    documentSlugs: readonly DocumentSlug[],
-    delivery: CollectionDelivery,
-  ): Promise<readonly Readonly<{ slug: DocumentSlug; position: number }>[]> {
-    const col = await this.findCorpus(corpusSlug);
-    if (col === undefined) return [];
-    const [documentEdges, folderEdges] = await Promise.all([
-      this.g.edges.includes.findFrom({ kind: "Collection", id: col.id }),
-      this.g.edges.includes_folder.findFrom({ kind: "Collection", id: col.id }),
-    ]);
-    const presentDocIds = new Set(documentEdges.map((e) => e.toId));
-    let position = [...documentEdges, ...folderEdges].reduce(
-      (max, e) => Math.max(max, e.position),
-      -1,
-    );
-    const docs = await this.g.nodes.Document.bulkFindByIndex(
-      DOCUMENT_SLUG_INDEX,
-      documentSlugs.map((slug) => ({ props: { slug } })),
-      { limitPerInput: 1 },
-    );
-    const attached: { slug: DocumentSlug; position: number }[] = [];
-    for (const [i, slug] of documentSlugs.entries()) {
-      const doc = docs[i]?.[0];
-      if (doc === undefined || doc.archivedAt !== undefined) continue;
-      if (presentDocIds.has(doc.id)) continue;
-      position += 1;
-      await this.g.edges.includes.create(
-        { kind: "Collection", id: col.id },
-        { kind: "Document", id: doc.id },
-        { position, delivery },
-      );
-      presentDocIds.add(doc.id);
-      attached.push({ slug, position });
-    }
-    return attached;
-  }
-
-  // Flip a document member's delivery tier WITHOUT touching its position.
-  // The edge update merges props, so `position` is preserved (same
-  // guarantee `setOrder` relies on) — this is why the caller must NOT
-  // route a tier change through `attach`, whose position argument would
-  // overwrite the stored edge position. `undefined` = no such edge;
-  // `{ changed: false }` = already that tier (a no-op the DO turns into
-  // "nothing happened," so a double-click can't double-snapshot).
-  async setDelivery(
-    corpusSlug: CorpusSlug,
-    documentSlug: DocumentSlug,
-    delivery: CollectionDelivery,
-  ): Promise<{ changed: boolean } | undefined> {
-    const [col, doc] = await Promise.all([
-      this.findCorpus(corpusSlug),
-      this.findDoc(documentSlug),
-    ]);
-    if (col === undefined || doc === undefined) return undefined;
-    const edges = await this.g.edges.includes.findFrom({
-      kind: "Collection",
-      id: col.id,
-    });
-    const current = edges.find((e) => e.toId === doc.id);
-    if (current === undefined) return undefined;
-    if (corpusDelivery(current.delivery) === delivery)
-      return { changed: false };
-    await this.g.edges.includes.update(current.id, { delivery });
-    return { changed: true };
-  }
-
-  // Remove the includes edge for (corpus, document). Returns the
-  // position it held (for the change event), or undefined when there was
-  // no such edge — a no-op the DO turns into "nothing happened".
-  async detach(
-    corpusSlug: CorpusSlug,
-    documentSlug: DocumentSlug,
-  ): Promise<number | undefined> {
-    const [col, doc] = await Promise.all([
-      this.findCorpus(corpusSlug),
-      this.findDoc(documentSlug),
-    ]);
-    if (col === undefined || doc === undefined) return undefined;
-    const edges = await this.g.edges.includes.findFrom({
-      kind: "Collection",
-      id: col.id,
-    });
-    const edge = edges.find((e) => e.toId === doc.id);
-    if (edge === undefined) return undefined;
-    await this.g.edges.includes.hardDelete(edge.id);
-    return edge.position;
-  }
-
-  // Rewrite direct-document edge positions following `orderedDocumentSlugs`.
-  // Folder links share the same position space, so reordering direct docs
-  // must reuse the current direct-document slots instead of normalizing to
-  // 1..n; otherwise a folder-linked corpus can have its folder anchors
-  // crossed by a direct-only drag from the UI. Slugs not currently attached
-  // are skipped. false only when the corpus itself is missing.
-  async setOrder(
-    corpusSlug: CorpusSlug,
-    orderedDocumentSlugs: readonly DocumentSlug[],
-  ): Promise<boolean> {
-    const col = await this.findCorpus(corpusSlug);
-    if (col === undefined) return false;
-    const edges = await this.g.edges.includes.findFrom({
-      kind: "Collection",
-      id: col.id,
-    });
-    const edgeBySlug = new Map<
-      string,
-      Readonly<{ id: (typeof edges)[number]["id"]; position: number }>
-    >();
-    const docs = await this.g.nodes.Document.getByIds(
-      edges.map((edge) => edge.toId),
-    );
-    for (const [i, edge] of edges.entries()) {
-      const doc = docs[i];
-      if (doc !== undefined) edgeBySlug.set(doc.slug, edge);
-    }
-    const orderedEdges = orderedDocumentSlugs.flatMap((slug) => {
-      const edge = edgeBySlug.get(slug);
-      return edge === undefined ? [] : [edge];
-    });
-    if (orderedEdges.length === 0) return false;
-    const positions = orderedEdges
-      .map((edge) => edge.position)
-      .sort((a, b) => a - b);
-    // No edge actually moves when the supplied order already matches the
-    // current position order — skip the writes + signal no-op so the DO
-    // can elide the snapshot + reorder event (same churn-elimination
-    // contract as `attach`'s `unchanged` branch).
-    let changed = false;
-    for (let i = 0; i < orderedEdges.length; i += 1) {
-      const edge = orderedEdges[i];
-      const position = positions[i];
-      if (edge !== undefined && position !== undefined) {
-        if (edge.position !== position) {
-          await this.g.edges.includes.update(edge.id, { position });
-          changed = true;
-        }
-      }
-    }
-    return changed;
-  }
-
-  // Position-ordered document heads of a corpus (each pinned by
-  // contentHash + docVersion), or undefined if the corpus does not
-  // exist. The DO hydrates bytes / builds the snapshot from this.
-  async ordered(
-    corpusSlug: CorpusSlug,
-  ): Promise<readonly CorpusDocView[] | undefined> {
-    const e = await this.entries(corpusSlug);
-    if (e === undefined) return undefined;
-    return [...e.documents].sort(
-      (a, b) => a.position - b.position || a.slug.localeCompare(b.slug),
+  async linkRoot(corpus: CorpusNode, folder: FolderNode): Promise<void> {
+    await this.g.edges.includes_folder.create(
+      { kind: "Collection", id: corpus.id },
+      { kind: "Folder", id: folder.id },
+      { position: 0, delivery: DEFAULT_COLLECTION_DELIVERY },
     );
   }
 
-  // Corpora whose assembled corpus changes when this document changes.
-  async collectionsIncluding(
-    documentSlug: DocumentSlug,
-  ): Promise<readonly string[]> {
+  // Every corpus → folder link in the project. In a project laid out as
+  // drives that is exactly one per corpus, to its root.
+  async folderLinks(): Promise<readonly CorpusFolderLink[]> {
     const rows = await this.g
       .query()
-      .from("Document", "d")
-      .whereNode("d", (d) => d.slug.eq(documentSlug))
-      .traverse("includes", "e", { direction: "in" })
-      .to("Collection", "c")
-      .project((e) => ({ slug: e.c.slug }))
+      .from("Collection", "c")
+      .traverse("includes_folder", "e")
+      .to("Folder", "f")
+      .project((e) => ({ corpusSlug: e.c.slug, folderSlug: e.f.slug }))
       .execute();
-    return rows.map((row) => row.slug);
+    return rows.map((row) => ({
+      corpusSlug: asCorpusSlug(row.corpusSlug),
+      folderSlug: asFolderSlug(row.folderSlug),
+    }));
   }
 
-  // — Folder→corpus links ————————————————————————————————————
-
-  private async findFolder(slug: string) {
-    const [f] = await this.g.nodes.Folder.find({
-      where: (n) => n.slug.eq(slug),
-      limit: 1,
-    });
-    return f;
-  }
-
-  // Raw direct-document + folder-include edges (slug + position), the
-  // shared resolver's input. undefined when the corpus is missing.
-  async entries(corpusSlug: CorpusSlug): Promise<CorpusEntries | undefined> {
-    const [cols, documents, folders] = await this.g.batchOnce(() => [
-      this.g
-        .query()
-        .from("Collection", "c")
-        .whereNode("c", (c) => c.slug.eq(corpusSlug))
-        .select((ctx) => ctx.c.id)
-        .limit(1),
-      this.g
-        .query()
-        .from("Collection", "c")
-        .whereNode("c", (c) => c.slug.eq(corpusSlug))
-        .traverse("includes", "e")
-        .to("Document", "d")
-        .project((e) => ({
-          slug: e.d.slug,
-          title: e.d.title,
-          docVersion: e.d.docVersion,
-          contentHash: e.d.contentHash,
-          updatedAt: e.d.updatedAt,
-          position: e.e.position,
-          delivery: e.e.delivery,
-        })),
-      this.g
-        .query()
-        .from("Collection", "c")
-        .whereNode("c", (c) => c.slug.eq(corpusSlug))
-        .traverse("includes_folder", "e")
-        .to("Folder", "f")
-        .project((e) => ({
-          slug: e.f.slug,
-          position: e.e.position,
-          delivery: e.e.delivery,
-        })),
-    ]);
-    if (cols[0] === undefined) return undefined;
-    return {
-      documents: documents.map((row) => ({
-        slug: row.slug,
-        title: row.title,
-        docVersion: row.docVersion,
-        contentHash: row.contentHash,
-        updatedAt: row.updatedAt,
-        position: row.position,
-        delivery: corpusDelivery(row.delivery),
-      })),
-      folders: folders.map((row) => ({
-        slug: row.slug,
-        position: row.position,
-        delivery: corpusDelivery(row.delivery),
-      })),
-    };
-  }
-
-  // Attach a new folder→corpus link or re-position an existing one
-  // (mirrors `attach` for documents; shares the position space). An
-  // idempotent re-attach returns `unchanged` for the same reason
-  // documented on `attach` above.
-  async attachFolder(
+  async rootFolderSlug(
     corpusSlug: CorpusSlug,
-    folderSlug: FolderSlug,
-    position: number,
-    delivery: CollectionDelivery = DEFAULT_COLLECTION_DELIVERY,
-  ): Promise<AttachResult> {
-    const [col, folder] = await Promise.all([
-      this.findCorpus(corpusSlug),
-      this.findFolder(folderSlug),
-    ]);
-    if (col === undefined || folder === undefined) return { ok: false };
-    const edges = await this.g.edges.includes_folder.findFrom({
-      kind: "Collection",
-      id: col.id,
-    });
-    const current = edges.find((e) => e.toId === folder.id);
-    if (current === undefined) {
-      await this.g.edges.includes_folder.create(
-        { kind: "Collection", id: col.id },
-        { kind: "Folder", id: folder.id },
-        { position, delivery },
-      );
-      return { ok: true, change: "attached" };
-    }
-    const previousPosition = current.position;
-    if (
-      previousPosition === position &&
-      corpusDelivery(current.delivery) === delivery
-    ) {
-      return { ok: true, change: "unchanged" };
-    }
-    await this.g.edges.includes_folder.update(current.id, {
-      position,
-      delivery,
-    });
-    return { ok: true, change: "reordered", previousPosition };
+  ): Promise<FolderSlug | undefined> {
+    const rows = await this.g
+      .query()
+      .from("Collection", "c")
+      .whereNode("c", (c) => c.slug.eq(corpusSlug))
+      .traverse("includes_folder", "e")
+      .to("Folder", "f")
+      .project((e) => ({ folderSlug: e.f.slug }))
+      .execute();
+    const expected = corpusRootFolderSlug(corpusSlug);
+    return rows.some((row) => row.folderSlug === expected)
+      ? expected
+      : undefined;
   }
 
-  // Position-preserving delivery-tier flip for a folder link (mirrors
-  // `setDelivery` for documents). Same merge guarantee keeps `position`.
-  async setFolderDelivery(
-    corpusSlug: CorpusSlug,
-    folderSlug: FolderSlug,
-    delivery: CollectionDelivery,
-  ): Promise<{ changed: boolean } | undefined> {
-    const [col, folder] = await Promise.all([
-      this.findCorpus(corpusSlug),
-      this.findFolder(folderSlug),
-    ]);
-    if (col === undefined || folder === undefined) return undefined;
-    const edges = await this.g.edges.includes_folder.findFrom({
-      kind: "Collection",
-      id: col.id,
-    });
-    const current = edges.find((e) => e.toId === folder.id);
-    if (current === undefined) return undefined;
-    if (corpusDelivery(current.delivery) === delivery)
-      return { changed: false };
-    await this.g.edges.includes_folder.update(current.id, { delivery });
-    return { changed: true };
-  }
-
-  async detachFolder(
-    corpusSlug: CorpusSlug,
-    folderSlug: FolderSlug,
-  ): Promise<number | undefined> {
-    const [col, folder] = await Promise.all([
-      this.findCorpus(corpusSlug),
-      this.findFolder(folderSlug),
-    ]);
-    if (col === undefined || folder === undefined) return undefined;
-    const edges = await this.g.edges.includes_folder.findFrom({
-      kind: "Collection",
-      id: col.id,
-    });
-    const edge = edges.find((e) => e.toId === folder.id);
-    if (edge === undefined) return undefined;
-    await this.g.edges.includes_folder.hardDelete(edge.id);
-    return edge.position;
-  }
-
-  // Reverse fan-out: corpora that link ANY of these folders directly
-  // (the DO passes a document's folder + its ancestors).
+  // The corpora that link ANY of these folders. Given a document's folder
+  // chain this is the corpus it is in: only a root is ever linked.
   async collectionsIncludingFolders(
     folderSlugs: readonly string[],
-  ): Promise<readonly string[]> {
+  ): Promise<readonly CorpusSlug[]> {
     const uniqueSlugs = [...new Set(folderSlugs)];
     const folderMatches = await this.g.nodes.Folder.bulkFindByIndex(
       FOLDER_SLUG_INDEX,
@@ -539,29 +202,134 @@ export class CorpusGraph {
       folder === undefined ? [] : [folder],
     );
     // One `to_id IN (...)` read for the whole ancestor chain, not one per
-    // folder — this runs on every document archive.
+    // folder — this runs on every shared-link write and document archive.
     const grouped = await this.g.edges.includes_folder.bulkFindTo(
       folders.map((f) => ({ kind: "Folder" as const, id: f.id })),
     );
-    // Ids are deduped before hydration, so the surviving slugs are too:
-    // a corpus linking both a folder and its ancestor appears once.
     const cols = await this.g.nodes.Collection.getByIds([
       ...new Set(grouped.flat().map((e) => e.fromId)),
     ]);
-    return cols.filter((c) => c !== undefined).map((c) => c.slug);
+    return cols.filter((c) => c !== undefined).map((c) => asCorpusSlug(c.slug));
   }
 
-  // Every corpus with at least one folder link — the coarse v1
-  // path-map-mutation fan-out set (a folder rename/move can only change
-  // the expansion of a corpus that links some folder).
-  async collectionsWithFolderLinks(): Promise<readonly string[]> {
+  // — The pre-drive shape (read and removed by the layout migration) ——
+
+  // Direct corpus → document `includes` edges. Nothing creates these any
+  // more; a project written before drives still carries them until its
+  // one-time layout migration runs.
+  async legacyDocumentLinks(): Promise<readonly CorpusDocumentLink[]> {
     const rows = await this.g
       .query()
       .from("Collection", "c")
-      .traverse("includes_folder", "e")
-      .to("Folder", "f")
-      .project((e) => ({ slug: e.c.slug }))
+      .traverse("includes", "e")
+      .to("Document", "d")
+      .project((e) => ({ corpusSlug: e.c.slug, documentSlug: e.d.slug }))
       .execute();
-    return [...new Set(rows.map((row) => row.slug))];
+    return rows.map((row) => ({
+      corpusSlug: asCorpusSlug(row.corpusSlug),
+      documentSlug: asDocumentSlug(row.documentSlug),
+    }));
+  }
+
+  // The stored pre-drive entries of every corpus, with their position and
+  // tier — what the operator stats read to describe an un-migrated project.
+  // A corpus's own root link is not an entry.
+  async legacyEntries(): Promise<readonly LegacyCorpusEntries[]> {
+    const [documentRows, folderRows] = await Promise.all([
+      this.g
+        .query()
+        .from("Collection", "c")
+        .traverse("includes", "e")
+        .to("Document", "d")
+        .select((ctx) => ({
+          corpusSlug: ctx.c.slug,
+          slug: ctx.d.slug,
+          position: ctx.e.position,
+          delivery: ctx.e.delivery,
+        }))
+        .execute(),
+      this.g
+        .query()
+        .from("Collection", "c")
+        .traverse("includes_folder", "e")
+        .to("Folder", "f")
+        .select((ctx) => ({
+          corpusSlug: ctx.c.slug,
+          slug: ctx.f.slug,
+          position: ctx.e.position,
+          delivery: ctx.e.delivery,
+        }))
+        .execute(),
+    ]);
+    const corpora = await this.allNodes();
+    const entry = (row: (typeof documentRows)[number]): LegacyEntry => ({
+      slug: row.slug,
+      position: row.position,
+      delivery: corpusDelivery(row.delivery),
+    });
+    return corpora.map((c) => ({
+      corpusSlug: asCorpusSlug(c.slug),
+      documents: documentRows.filter((r) => r.corpusSlug === c.slug).map(entry),
+      folders: folderRows
+        .filter(
+          (r) =>
+            r.corpusSlug === c.slug &&
+            r.slug !== corpusRootFolderSlug(asCorpusSlug(c.slug)),
+        )
+        .map(entry),
+    }));
+  }
+
+  // Remove every direct document link and every folder link that is not a
+  // corpus's own root, leaving the single-root shape. Returns how many
+  // edges went, so a second run reports nothing to do.
+  async dropLegacyLinks(): Promise<number> {
+    const corpora = await this.allNodes();
+    const refs = corpora.map((c) => ({
+      kind: "Collection" as const,
+      id: c.id,
+    }));
+    const [documentEdges, folderEdges] = await Promise.all([
+      this.g.edges.includes.bulkFindFrom(refs),
+      this.g.edges.includes_folder.bulkFindFrom(refs),
+    ]);
+    let dropped = 0;
+    for (const edge of documentEdges.flat()) {
+      await this.g.edges.includes.hardDelete(edge.id);
+      dropped += 1;
+    }
+    for (const [i, corpus] of corpora.entries()) {
+      const edges = folderEdges[i] ?? [];
+      const folders = await this.g.nodes.Folder.getByIds(
+        edges.map((edge) => edge.toId),
+      );
+      const rootSlug = corpusRootFolderSlug(asCorpusSlug(corpus.slug));
+      for (const [j, edge] of edges.entries()) {
+        if (folders[j]?.slug === rootSlug) continue;
+        await this.g.edges.includes_folder.hardDelete(edge.id);
+        dropped += 1;
+      }
+    }
+    return dropped;
+  }
+
+  // Remove a corpus outright: its root link, every membership snapshot
+  // (a deleted corpus must stop pinning document versions against
+  // retention, and must leave the bundle), then the node. The caller has
+  // already dealt with the root folder's contents.
+  async deleteCorpus(corpus: CorpusNode): Promise<void> {
+    const from = { kind: "Collection" as const, id: corpus.id };
+    const [folderEdges, versionEdges] = await Promise.all([
+      this.g.edges.includes_folder.findFrom(from),
+      this.g.edges.version_of_collection.findFrom(from),
+    ]);
+    for (const edge of folderEdges) {
+      await this.g.edges.includes_folder.hardDelete(edge.id);
+    }
+    for (const edge of versionEdges) {
+      await this.g.edges.version_of_collection.hardDelete(edge.id);
+      await this.g.nodes.CollectionVersion.hardDelete(edge.toId);
+    }
+    await this.g.nodes.Collection.hardDelete(corpus.id);
   }
 }

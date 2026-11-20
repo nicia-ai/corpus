@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { asFolderSlug } from "../src/ids";
+import { asFolderSlug, type DocumentSlug } from "../src/ids";
 import type { ProjectStore } from "../src/project-store";
 import { setGraphStatementSinkForTest } from "../src/store/statement-log";
 
 import { colSlug, docSlug, freshStore } from "./_helpers";
+
+const TEAM = colSlug("team");
+const INBOX = colSlug("inbox");
 
 // The set-oriented reads (`query` traversals, `bulkFindFrom` /
 // `bulkFindTo`, `getByIds`) are invisible in results — a `findFrom` per
@@ -34,16 +37,21 @@ async function measure<T>(
   }
 }
 
-// A statement's shape: whitespace collapsed, and the bind list of an
-// `IN (…)` collapsed too, so the SAME set read over 3 and over 12 rows
-// compares equal. Sorted, because independent reads inside one operation
-// are dispatched concurrently and their order is not a guarantee.
+// A statement's shape: whitespace collapsed, and the N-dependent parts of a
+// set read collapsed too, so the SAME set read over 3 and over 12 rows
+// compares equal: the bind list of an `IN (…)`, and the per-key arms of the
+// probe query (`CASE WHEN … THEN i` and the `OR` chain of key matches), which
+// grow with the key count inside one statement. Sorted, because independent
+// reads inside one operation are dispatched concurrently and their order is
+// not a guarantee.
 function shapes(statements: readonly string[]): string[] {
   return statements
     .map((sql) =>
       sql
         .replace(/\s+/gu, " ")
         .replace(/IN \(\?(?:, \?)*\)/gu, "IN (…)")
+        .replace(/(?:WHEN \(.+? IS \?\) THEN \d+ )+/gu, "WHEN … ")
+        .replace(/(?: OR \(\(json_extract\(.+?\) IS \?\)\))+/gu, " OR …")
         .trim(),
     )
     .sort();
@@ -57,43 +65,50 @@ function expectSameCost(few: readonly string[], many: readonly string[]): void {
   expect(shapes(many)).toEqual(shapes(few));
 }
 
+// The statements that are set reads: SELECTs, minus the by-id edge lookup
+// `hardDelete` issues once per deleted edge.
+const HARDDELETE_EDGE_LOOKUP = /FROM "typegraph_edges" WHERE .*"id" = \?$/u;
+function reads(statements: readonly string[]): readonly string[] {
+  return statements.filter(
+    (sql) => sql.startsWith("SELECT") && !HARDDELETE_EDGE_LOOKUP.test(sql),
+  );
+}
+
 describe("set-oriented graph reads (statement count is independent of N)", () => {
   async function withCorpusMembers(
     count: number,
-  ): Promise<
-    Readonly<{ store: Store; slugs: readonly ReturnType<typeof docSlug>[] }>
-  > {
+  ): Promise<Readonly<{ store: Store; slugs: readonly DocumentSlug[] }>> {
     const store = freshStore("bulk-members");
     const slugs = Array.from({ length: count }, (_, i) =>
       docSlug(`m-${String(i)}`),
     );
-    await store.createCorpus({
-      slug: colSlug("team"),
-      name: "Team",
-      changedBy: "u",
-    });
+    await store.createCorpus({ slug: TEAM, name: "Team", changedBy: "u" });
     for (const [i, slug] of slugs.entries()) {
       await store.saveDocument({
         slug,
         markdown: `# Member ${String(i)}\nbody`,
+        location: { corpusSlug: TEAM, folderSlug: null },
         clientVersion: 0,
         changedBy: "u",
       });
-      await store.attachDocument(colSlug("team"), slug, i + 1, "u");
     }
-    await store.readCorpus(colSlug("team"));
+    await store.corpusOutline(TEAM);
     return { store, slugs };
   }
 
   async function withChildFolders(count: number): Promise<Store> {
     const store = freshStore("bulk-folders");
-    const root = await store.createFolder("root", null);
+    await store.createCorpus({ slug: TEAM, name: "Team", changedBy: "u" });
+    const root = await store.createFolder("root", {
+      corpusSlug: TEAM,
+      folderSlug: null,
+    });
     if (!root.ok) throw new Error("fixture: root folder was not created");
     for (let i = 0; i < count; i += 1) {
-      const child = await store.createFolder(
-        `child-${String(i)}`,
-        asFolderSlug(root.slug),
-      );
+      const child = await store.createFolder(`child-${String(i)}`, {
+        corpusSlug: TEAM,
+        folderSlug: asFolderSlug(root.slug),
+      });
       if (!child.ok) throw new Error(`fixture: child ${String(i)}`);
     }
     // Init (schema reconcile, index materialization) must not land inside
@@ -115,33 +130,33 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     expectSameCost(forFew.statements, forMany.statements);
   });
 
-  it("scans the root's documents in one read when placing a document there", async () => {
+  it("scans the corpus root's documents in one read when a document moves there", async () => {
     async function withRootDocuments(count: number): Promise<Store> {
       const store = freshStore("bulk-root-docs");
+      await store.createCorpus({ slug: TEAM, name: "Team", changedBy: "u" });
       for (let i = 0; i < count; i += 1) {
         await store.saveDocument({
           slug: docSlug(`root-${String(i)}`),
           markdown: `# Root ${String(i)}`,
+          location: { corpusSlug: TEAM, folderSlug: null },
           clientVersion: 0,
           changedBy: "u",
         });
       }
       // The document that moves back to the root under measurement — the
       // sibling-namespace check there reads every root document.
-      const shelf = await store.createFolder("shelf", null);
+      const shelf = await store.createFolder("shelf", {
+        corpusSlug: TEAM,
+        folderSlug: null,
+      });
       if (!shelf.ok) throw new Error("fixture: shelf folder");
       await store.saveDocument({
         slug: docSlug("mover"),
         markdown: "# Mover",
+        location: { corpusSlug: TEAM, folderSlug: asFolderSlug(shelf.slug) },
         clientVersion: 0,
         changedBy: "u",
       });
-      const placed = await store.placeDocumentInFolder(
-        docSlug("mover"),
-        asFolderSlug(shelf.slug),
-        "u",
-      );
-      if (!placed.ok) throw new Error("fixture: place into shelf");
       return store;
     }
 
@@ -151,52 +166,19 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     ]);
     // The async wrapper normalizes the DO stub's generated union thenables to
     // one Promise result type for `measure`.
-    const move = (store: Store) =>
+    const moveToRoot = (store: Store) =>
       measure(
         async () =>
-          await store.placeDocumentInFolder(docSlug("mover"), null, "u"),
+          await store.moveDocument(
+            docSlug("mover"),
+            { corpusSlug: TEAM, folderSlug: null },
+            "u",
+          ),
       );
-    const forFew = await move(few);
-    const forMany = await move(many);
+    const forFew = await moveToRoot(few);
+    const forMany = await moveToRoot(many);
 
     // Equal counts are only meaningful if the move actually happened.
-    expect(forFew.result).toEqual({ ok: true, changed: true });
-    expect(forMany.result).toEqual({ ok: true, changed: true });
-    expectSameCost(forFew.statements, forMany.statements);
-  });
-
-  it("checks every corpus's folder links in one read on a folder rename", async () => {
-    async function withCorpuss(count: number): Promise<
-      Readonly<{
-        store: Store;
-        folderSlug: ReturnType<typeof asFolderSlug>;
-      }>
-    > {
-      const store = freshStore("bulk-cols");
-      const folder = await store.createFolder("docs", null);
-      if (!folder.ok) throw new Error("fixture: folder");
-      for (let i = 0; i < count; i += 1) {
-        await store.createCorpus({
-          slug: colSlug(`c-${String(i)}`),
-          name: `C ${String(i)}`,
-          changedBy: "u",
-        });
-      }
-      return { store, folderSlug: asFolderSlug(folder.slug) };
-    }
-
-    const [few, many] = await Promise.all([
-      withCorpuss(SMALL),
-      withCorpuss(LARGE),
-    ]);
-    const forFew = await measure(
-      async () => await few.store.renameFolder(few.folderSlug, "renamed", "u"),
-    );
-    const forMany = await measure(
-      async () =>
-        await many.store.renameFolder(many.folderSlug, "renamed", "u"),
-    );
-
     expect(forFew.result).toEqual({ ok: true, changed: true });
     expect(forMany.result).toEqual({ ok: true, changed: true });
     expectSameCost(forFew.statements, forMany.statements);
@@ -210,26 +192,31 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
       }>
     > {
       const store = freshStore("bulk-siblings");
-      const parent = await store.createFolder("parent", null);
+      await store.createCorpus({ slug: TEAM, name: "Team", changedBy: "u" });
+      const parent = await store.createFolder("parent", {
+        corpusSlug: TEAM,
+        folderSlug: null,
+      });
       if (!parent.ok) throw new Error("fixture: parent folder");
-      const parentSlug = asFolderSlug(parent.slug);
-      const target = await store.createFolder("target", parentSlug);
+      const parentLocation = {
+        corpusSlug: TEAM,
+        folderSlug: asFolderSlug(parent.slug),
+      };
+      const target = await store.createFolder("target", parentLocation);
       if (!target.ok) throw new Error("fixture: target folder");
       for (let i = 0; i < count; i += 1) {
         const sibling = await store.createFolder(
           `sibling-${String(i)}`,
-          parentSlug,
+          parentLocation,
         );
         if (!sibling.ok) throw new Error(`fixture: sibling ${String(i)}`);
-        const slug = docSlug(`nested-${String(i)}`);
         await store.saveDocument({
-          slug,
+          slug: docSlug(`nested-${String(i)}`),
           markdown: `# Nested ${String(i)}`,
+          location: parentLocation,
           clientVersion: 0,
           changedBy: "u",
         });
-        const placed = await store.placeDocumentInFolder(slug, parentSlug, "u");
-        if (!placed.ok) throw new Error(`fixture: nested doc ${String(i)}`);
       }
       return { store, target: asFolderSlug(target.slug) };
     }
@@ -256,10 +243,10 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
       withCorpusMembers(LARGE),
     ]);
     const forFew = await measure(
-      async () => await few.store.readCorpus(colSlug("team")),
+      async () => await few.store.corpusOutline(TEAM),
     );
     const forMany = await measure(
-      async () => await many.store.readCorpus(colSlug("team")),
+      async () => await many.store.corpusOutline(TEAM),
     );
 
     expect(forFew.result.found).toBe(true);
@@ -270,32 +257,48 @@ describe("set-oriented graph reads (statement count is independent of N)", () =>
     expectSameCost(forFew.statements, forMany.statements);
   });
 
-  it("hydrates corpus members once when reordering", async () => {
-    const [few, many] = await Promise.all([
-      withCorpusMembers(SMALL),
-      withCorpusMembers(LARGE),
-    ]);
-    const reorder = (
-      fixture: Awaited<ReturnType<typeof withCorpusMembers>>,
-    ) => {
-      const [first, second, ...rest] = fixture.slugs;
-      if (first === undefined || second === undefined) {
-        throw new Error("fixture: at least two corpus members");
+  it("hydrates the source corpus once when a batch of documents moves out", async () => {
+    async function withInbox(
+      count: number,
+    ): Promise<Readonly<{ store: Store; slugs: readonly DocumentSlug[] }>> {
+      const store = freshStore("bulk-move");
+      await store.createCorpus({ slug: TEAM, name: "Team", changedBy: "u" });
+      await store.createCorpus({ slug: INBOX, name: "Inbox", changedBy: "u" });
+      const slugs = Array.from({ length: count }, (_, i) =>
+        docSlug(`inbox-${String(i)}`),
+      );
+      for (const [i, slug] of slugs.entries()) {
+        await store.saveDocument({
+          slug,
+          markdown: `# Inbox ${String(i)}`,
+          location: { corpusSlug: INBOX, folderSlug: null },
+          clientVersion: 0,
+          changedBy: "u",
+        });
       }
-      return measure(
+      await store.listDocuments();
+      return { store, slugs };
+    }
+
+    const [few, many] = await Promise.all([withInbox(SMALL), withInbox(LARGE)]);
+    const moveBatch = (fixture: Awaited<ReturnType<typeof withInbox>>) =>
+      measure(
         async () =>
-          await fixture.store.reorderCorpusDocuments(
-            colSlug("team"),
-            [second, first, ...rest],
+          await fixture.store.moveDocuments(
+            fixture.slugs,
+            { corpusSlug: TEAM, folderSlug: null },
             "u",
           ),
       );
-    };
-    const forFew = await reorder(few);
-    const forMany = await reorder(many);
+    const forFew = await moveBatch(few);
+    const forMany = await moveBatch(many);
 
-    expect(forFew.result).toEqual({ ok: true });
-    expect(forMany.result).toEqual({ ok: true });
-    expectSameCost(forFew.statements, forMany.statements);
+    expect(forFew.result).toEqual({ moved: SMALL, failed: 0 });
+    expect(forMany.result).toEqual({ moved: LARGE, failed: 0 });
+    // Moving an edge is a per-document write (a hard delete and an insert,
+    // plus the lookup `hardDelete` makes by edge id) and legitimately costs
+    // a few statements per document — AGENTS.md: per-node hardDelete is
+    // correct. What must not grow is every READ that decides the move.
+    expectSameCost(reads(forFew.statements), reads(forMany.statements));
   });
 });

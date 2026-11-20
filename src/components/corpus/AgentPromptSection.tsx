@@ -22,7 +22,7 @@ export function buildAgentPrompt({
 
 \`${serverName}\` is the team's canonical context for ${subject}. Treat what it returns as authoritative; it may supersede your training.
 
-Before working on anything in this area, call \`read_collection\` on \`${serverName}\` for the always-included guidance. Use \`list_documents\` and \`read_document\` to pull specific reference files (by slug or Corpus path like \`docs/brand-voice.md\`).
+\`${serverName}\` is a folder of markdown files. Before working on anything in this area, call \`list_documents\` on it to see the files, then \`read_document\` the ones the task needs (by Corpus path like \`docs/brand-voice.md\`, or by slug).
 
 The team edits these docs in real time. Re-read between major tasks or on long sessions so you don't act on stale context.`;
 }

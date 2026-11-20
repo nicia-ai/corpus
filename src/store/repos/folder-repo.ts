@@ -2,13 +2,11 @@ import type { Node } from "@nicia-ai/typegraph";
 
 import type { Folder } from "../../graph";
 import {
-  asCorpusSlug,
   asDocumentSlug,
-  type CorpusSlug,
+  asFolderSlug,
   type DocumentSlug,
   type FolderSlug,
 } from "../../ids";
-import type { FolderTreeNode } from "../domain/collection-expand";
 import {
   appendPosition,
   type SiblingSegment,
@@ -23,11 +21,28 @@ export type FolderNode = Node<typeof Folder>;
 
 const FOLDER_WALK_MAX_HOPS = 100;
 
+// A folder's documents are ordered by file name; the stored `in_folder`
+// position is a retired field nothing reads. New edges write this constant
+// instead of counting the folder's children, which cost a read of every
+// document already in it for each document placed.
+const IN_FOLDER_POSITION = 0;
+
+// A document with its folder chain, project root → its own folder. In a
+// project laid out as drives the first entry is the corpus root.
 export type DocumentPathRow = Readonly<{
   slug: string;
   filename: string;
   folderSlug: string | null;
   ancestorNames: readonly string[];
+  ancestorSlugs: readonly string[];
+}>;
+
+// A folder as plain data for a subtree walk: its child folders and the
+// documents directly in it (archived ones included).
+export type FolderTreeNode = Readonly<{
+  slug: string;
+  childFolders: readonly Readonly<{ slug: string; position: number }>[];
+  documents: readonly Readonly<{ slug: string; filename: string }>[];
 }>;
 
 export type FolderView = Readonly<{
@@ -60,10 +75,6 @@ export type DeleteFolderResult = Readonly<
       // Documents that were in the deleted subtree — the DO archives
       // each (folder delete is a cascade, never a re-home).
       documentSlugs: readonly DocumentSlug[];
-      // Corpora whose `includes_folder` edge to this folder was
-      // released — the DO must re-snapshot them so their latest
-      // CorpusVersion (and the bundle) no longer lists the gone tree.
-      unlinkedCollections: readonly CorpusSlug[];
     }
   | { ok: false; reason: "missing" }
 >;
@@ -78,7 +89,8 @@ export type PlaceDocumentResult = Readonly<
 // `(parent, segment)` sibling namespace are enforced HERE inside the
 // DO's write() tx — race-free because the DO serializes per-Project and
 // the tx is atomic. Pure tree rules live in domain/folders.ts; this
-// loads and applies them. `null` parent = project root throughout.
+// loads and applies them. `null` parent = the project root, where only
+// corpus roots live.
 //
 // Helpers take nodes (not ids) and return inferred edges so TypeGraph's
 // branded NodeId/EdgeId flow through unbroken (mirrors the other repos).
@@ -175,11 +187,10 @@ export class FolderRepo {
   ): Promise<void> {
     const folder = await this.nodeBySlug(folderSlug);
     if (folder === undefined) return;
-    const count = (await this.documentsIn(folderSlug)).length;
     await this.g.edges.in_folder.create(
       { kind: "Document", id: doc.id },
       { kind: "Folder", id: folder.id },
-      { position: count + 1 },
+      { position: IN_FOLDER_POSITION },
     );
   }
 
@@ -314,24 +325,54 @@ export class FolderRepo {
     return (await this.g.nodes.Folder.getById(edge.toId)) ?? null;
   }
 
-  // The doc's folder + every ancestor folder, as slugs (leaf → root).
-  // Empty when the doc is at the root or doesn't exist. Used by
-  // `archiveDocument` to fan a folder-tree-changed snapshot out to every
-  // corpus whose `includes_folder` link surfaces this doc via folder
-  // expansion (a link to either the doc's folder OR any ancestor).
-  async documentFolderAncestorSlugs(
+  // The document's folder chain, corpus root → its own folder. Empty when
+  // the document doesn't exist or holds no folder (an archived document
+  // whose folder was deleted). The first entry is the root, which is how
+  // every "which corpus is this in" question is answered.
+  async documentFolderChain(
     documentSlug: DocumentSlug,
-  ): Promise<readonly string[]> {
+  ): Promise<readonly FolderNode[]> {
     const folder = await this.documentFolder(documentSlug);
     if (folder === null) return [];
-    return (await this.ancestorChain(folder)).map((n) => n.slug);
+    return (await this.ancestorChain(folder)).reverse();
+  }
+
+  // A folder's own chain, corpus root → itself. Empty when it is missing.
+  async folderChain(slug: FolderSlug): Promise<readonly FolderNode[]> {
+    const node = await this.find(slug);
+    return node === undefined ? [] : (await this.ancestorChain(node)).reverse();
+  }
+
+  // A corpus root: a top-level folder under a reserved slug. No sibling
+  // check — the slug is unforgeable and the name is the corpus's own
+  // unique slug; while a project is being laid out as drives an old
+  // top-level folder may briefly share that name.
+  createRoot(
+    args: Readonly<{ slug: FolderSlug; name: string; createdAt: string }>,
+  ): Promise<FolderNode> {
+    return this.g.nodes.Folder.create(args);
   }
 
   async liveDocumentPaths(): Promise<readonly DocumentPathRow[]> {
+    return (await this.documentPaths())
+      .filter((row) => !row.archived)
+      .map((row) => row.path);
+  }
+
+  // Archived documents included: they keep their folder, so a pass that
+  // re-homes every document (the drive layout) must see them too.
+  allDocumentPaths(): Promise<
+    readonly Readonly<{ path: DocumentPathRow; archived: boolean }>[]
+  > {
+    return this.documentPaths();
+  }
+
+  private async documentPaths(): Promise<
+    readonly Readonly<{ path: DocumentPathRow; archived: boolean }>[]
+  > {
     const rows = await this.g
       .query()
       .from("Document", "d")
-      .whereNode("d", (d) => d.archivedAt.isNull())
       .optionalTraverse("in_folder", "home")
       .to("Folder", "folder")
       .optionalTraverse("folder_child", "up", {
@@ -343,8 +384,10 @@ export class FolderRepo {
       .select((ctx) => ({
         slug: ctx.d.slug,
         filename: ctx.d.filename,
+        archived: ctx.d.archivedAt !== undefined,
         folderSlug: ctx.folder?.slug,
         ancestorName: ctx.ancestor?.name,
+        ancestorSlug: ctx.ancestor?.slug,
         depth: ctx.depth,
       }))
       .execute();
@@ -352,8 +395,9 @@ export class FolderRepo {
       string,
       {
         filename: string;
+        archived: boolean;
         folderSlug: string | null;
-        ancestors: { name: string; depth: number }[];
+        ancestors: { name: string; slug: string; depth: number }[];
       }
     >();
     for (const row of rows) {
@@ -361,23 +405,37 @@ export class FolderRepo {
       if (entry === undefined) {
         entry = {
           filename: row.filename,
+          archived: row.archived,
           folderSlug: row.folderSlug ?? null,
           ancestors: [],
         };
         bySlug.set(row.slug, entry);
       }
-      if (row.ancestorName !== undefined && row.depth !== undefined) {
-        entry.ancestors.push({ name: row.ancestorName, depth: row.depth });
+      if (
+        row.ancestorName !== undefined &&
+        row.ancestorSlug !== undefined &&
+        row.depth !== undefined
+      ) {
+        entry.ancestors.push({
+          name: row.ancestorName,
+          slug: row.ancestorSlug,
+          depth: row.depth,
+        });
       }
     }
-    return [...bySlug.entries()].map(([slug, entry]) => ({
-      slug,
-      filename: entry.filename,
-      folderSlug: entry.folderSlug,
-      ancestorNames: [...entry.ancestors]
-        .sort((a, b) => b.depth - a.depth)
-        .map((ancestor) => ancestor.name),
-    }));
+    return [...bySlug.entries()].map(([slug, entry]) => {
+      const rootFirst = [...entry.ancestors].sort((a, b) => b.depth - a.depth);
+      return {
+        archived: entry.archived,
+        path: {
+          slug,
+          filename: entry.filename,
+          folderSlug: entry.folderSlug,
+          ancestorNames: rootFirst.map((ancestor) => ancestor.name),
+          ancestorSlugs: rootFirst.map((ancestor) => ancestor.slug),
+        },
+      };
+    });
   }
 
   // Whether `filename` is free for `documentSlug` under its CURRENT
@@ -474,14 +532,16 @@ export class FolderRepo {
   // longer occupy the slot, so a re-upload at the same path creates a
   // fresh document rather than silently writing a new version onto a
   // hidden (archived) head.
-  // Resolve an EXISTING folder chain by directory names (root → leaf),
-  // creating nothing: the leaf folder's slug, null for an empty chain
-  // (project root), or undefined when any segment is missing — the path
-  // cannot be occupied by a document if its folder doesn't exist yet.
+  // Resolve an EXISTING folder chain by directory names below `baseSlug`
+  // (a corpus root), creating nothing: the leaf folder's slug (the base
+  // itself for an empty chain), or undefined when any segment is missing
+  // — the path cannot be occupied by a document if its folder doesn't
+  // exist yet.
   async folderAt(
+    baseSlug: FolderSlug,
     dirSegments: readonly string[],
-  ): Promise<string | null | undefined> {
-    let parentSlug: string | null = null;
+  ): Promise<string | undefined> {
+    let parentSlug: string = baseSlug;
     for (const name of dirSegments) {
       const children = await this.childFolders(parentSlug);
       const match = children.find((c) => c.node.name === name);
@@ -515,29 +575,27 @@ export class FolderRepo {
   }
 
   // Resolve an ancestor folder chain by NAME (the original directory
-  // basenames), creating only the missing suffix, and return the leaf
-  // folder slug (null = no dir segments → project root). Existing
+  // basenames) below `baseSlug` (a corpus root), creating only the missing
+  // suffix, and return the leaf folder slug (the base itself when there
+  // are no dir segments). Existing
   // folders are reused by name so a re-upload is idempotent. Plan first
   // (find the deepest existing prefix + detect a folder/document
   // segment collision) and only then create — so the failure path
   // makes no writes; the success path's creates are still inside the
   // caller's single write() tx.
   async ensureFolderPath(
+    baseSlug: FolderSlug,
     dirSegments: readonly string[],
     now: string,
     makeFolderSlug: (name: string, taken: ReadonlySet<string>) => FolderSlug,
   ): Promise<
     Readonly<
-      | { ok: true; folderSlug: string | null; created: readonly string[] }
+      | { ok: true; folderSlug: FolderSlug; created: readonly string[] }
       | { ok: false; reason: "segment-collision" }
     >
   > {
-    if (dirSegments.length === 0) {
-      return { ok: true, folderSlug: null, created: [] };
-    }
-
     // Walk the deepest existing prefix (match child folders by name).
-    let parentSlug: string | null = null;
+    let parentSlug: FolderSlug = baseSlug;
     let i = 0;
     for (; i < dirSegments.length; i += 1) {
       const seg = dirSegments[i];
@@ -545,7 +603,7 @@ export class FolderRepo {
       const children = await this.childFolders(parentSlug);
       const hit = children.find((c) => c.node.name === seg);
       if (hit === undefined) break;
-      parentSlug = hit.node.slug;
+      parentSlug = asFolderSlug(hit.node.slug);
     }
     const remaining = dirSegments.slice(i);
     if (remaining.length === 0) {
@@ -583,7 +641,7 @@ export class FolderRepo {
         parentSlug,
       });
       if (!outcome.ok) return { ok: false, reason: outcome.reason };
-      parentSlug = outcome.node.slug;
+      parentSlug = asFolderSlug(outcome.node.slug);
       created.push(outcome.node.slug);
     }
     return { ok: true, folderSlug: parentSlug, created };
@@ -677,14 +735,11 @@ export class FolderRepo {
 
   async move(
     slug: FolderSlug,
-    newParentSlug: string | null,
+    newParentSlug: FolderSlug,
   ): Promise<MoveFolderResult> {
     const node = await this.find(slug);
     if (node === undefined) return { ok: false, reason: "missing" };
-    if (
-      newParentSlug !== null &&
-      (await this.nodeBySlug(newParentSlug)) === undefined
-    ) {
+    if ((await this.nodeBySlug(newParentSlug)) === undefined) {
       return { ok: false, reason: "missing" };
     }
     if ((await this.parentSlugOf(node)) === newParentSlug) {
@@ -701,13 +756,13 @@ export class FolderRepo {
     if (existing !== undefined) {
       await this.g.edges.folder_child.hardDelete(existing.id);
     }
-    if (newParentSlug !== null) {
-      await this.linkChildFolder(newParentSlug, node);
-    }
+    await this.linkChildFolder(newParentSlug, node);
     return { ok: true, changed: true };
   }
 
-  // Cascade delete: the folder and its whole subtree are removed.
+  // Cascade delete: the folder and its whole subtree are removed. Used on
+  // an ordinary folder, and on a corpus root once its corpus (and so the
+  // link to it) is gone.
   // Descendant folders are hard-deleted (they carry no version history);
   // documents are detached and returned for the DO to archive (the
   // soft-delete documents get everywhere). No re-home, so no name-clash
@@ -716,7 +771,6 @@ export class FolderRepo {
     const node = await this.find(slug);
     if (node === undefined) return { ok: false, reason: "missing" };
     const documentSlugs: DocumentSlug[] = [];
-    const unlinked = new Set<CorpusSlug>();
     // Deepest-first: a folder node is hard-deleted only after its children
     // are gone, so it is never still connected by a `folder_child` edge.
     // Read every relationship before mutating. The loop only consumes each
@@ -726,10 +780,9 @@ export class FolderRepo {
       kind: "Folder" as const,
       id: folder.id,
     }));
-    const [parents, documentEdgeGroups, corpusEdgeGroups] = await Promise.all([
+    const [parents, documentEdgeGroups] = await Promise.all([
       this.parentEdgesOf(subtree),
       this.g.edges.in_folder.bulkFindTo(folderRefs),
-      this.g.edges.includes_folder.bulkFindTo(folderRefs),
     ]);
     const documentEdges = documentEdgeGroups.flat();
     const documents = await this.g.nodes.Document.getByIds(
@@ -742,24 +795,12 @@ export class FolderRepo {
         documentSlugs.push(asDocumentSlug(document.slug));
       }
     }
-    const corpusEdges = corpusEdgeGroups.flat();
-    const corpora = await this.g.nodes.Collection.getByIds([
-      ...new Set(corpusEdges.map((edge) => edge.fromId)),
-    ]);
-    for (const corpus of corpora) {
-      if (corpus !== undefined) {
-        unlinked.add(asCorpusSlug(corpus.slug));
-      }
-    }
-    for (const edge of corpusEdges) {
-      await this.g.edges.includes_folder.hardDelete(edge.id);
-    }
     for (const f of subtree) {
       const own = parents.get(f.id);
       if (own !== undefined) await this.g.edges.folder_child.hardDelete(own.id);
       await this.g.nodes.Folder.hardDelete(f.id);
     }
-    return { ok: true, documentSlugs, unlinkedCollections: [...unlinked] };
+    return { ok: true, documentSlugs };
   }
 
   // The folder plus every descendant folder, deepest-first: a parent is
@@ -788,27 +829,21 @@ export class FolderRepo {
       .map((row) => row.folder);
   }
 
-  // Place (or re-place) a document in a folder (null = root). Replaces
-  // the single `in_folder` edge; enforces the sibling namespace by the
-  // document's `filename`.
+  // Place (or re-place) a document in a folder. Replaces the single
+  // `in_folder` edge; enforces the sibling namespace by the document's
+  // `filename`. There is no "no folder": every document lives under a
+  // corpus root.
   async placeDocument(
     documentSlug: DocumentSlug,
-    folderSlug: string | null,
+    folderSlug: FolderSlug,
   ): Promise<PlaceDocumentResult> {
     const doc = await this.docBySlug(documentSlug);
     if (doc === undefined) return { ok: false, reason: "missing" };
-    if (
-      folderSlug !== null &&
-      (await this.nodeBySlug(folderSlug)) === undefined
-    ) {
+    if ((await this.nodeBySlug(folderSlug)) === undefined) {
       return { ok: false, reason: "missing" };
     }
-    // A true no-op only when an edge ALREADY points at the requested
-    // folder (re-place to the identical folder). A doc with no edge is
-    // "at root" but UNVALIDATED — placing it (even to root) must still
-    // run the sibling-namespace check, so it is never a no-op here.
     const existing = await this.docFolderEdge(doc);
-    if (existing !== undefined && folderSlug !== null) {
+    if (existing !== undefined) {
       const current = await this.g.nodes.Folder.getById(existing.toId);
       if (current?.slug === folderSlug) return { ok: true, changed: false };
     }
@@ -821,12 +856,111 @@ export class FolderRepo {
     ) {
       return { ok: false, reason: "segment-collision" };
     }
+    await this.rehomeDocument(documentSlug, folderSlug);
+    return { ok: true, changed: true };
+  }
+
+  // `placeDocument` for a SET of documents into one folder, best-effort:
+  // each outcome is parallel to the input, a collision or a missing
+  // document leaves only that one in place. The reads are set reads — the
+  // current edges of every document in one `bulkFindFrom`, the
+  // destination's sibling namespace once — so the statement count of the
+  // reads does not grow with the number of documents; only the per-document
+  // edge writes do. Documents moved earlier in the batch occupy their
+  // filename, so two documents of the same name cannot both land.
+  async placeDocuments(
+    docs: readonly (DocumentNode | undefined)[],
+    folderSlug: FolderSlug,
+  ): Promise<readonly PlaceDocumentResult[]> {
+    const folder = await this.nodeBySlug(folderSlug);
+    const present = docs.filter((doc) => doc !== undefined);
+    if (folder === undefined || present.length === 0) {
+      return docs.map(() => ({ ok: false, reason: "missing" }));
+    }
+    const [edgeGroups, siblings] = await Promise.all([
+      this.g.edges.in_folder.bulkFindFrom(
+        present.map((doc) => ({ kind: "Document" as const, id: doc.id })),
+        { limitPerInput: 1 },
+      ),
+      this.siblingSegments(folderSlug),
+    ]);
+    const existingByDocument = new Map(
+      present.map((doc, i) => [doc.id, edgeGroups[i]?.[0]] as const),
+    );
+    const segments = [...siblings];
+    const results: PlaceDocumentResult[] = [];
+    for (const doc of docs) {
+      if (doc === undefined) {
+        results.push({ ok: false, reason: "missing" });
+        continue;
+      }
+      const existing = existingByDocument.get(doc.id);
+      if (existing?.toId === folder.id) {
+        results.push({ ok: true, changed: false });
+        continue;
+      }
+      const self = { kind: "document" as const, slug: doc.slug };
+      if (segmentCollides(segments, doc.filename, self)) {
+        results.push({ ok: false, reason: "segment-collision" });
+        continue;
+      }
+      if (existing !== undefined) {
+        await this.g.edges.in_folder.hardDelete(existing.id);
+      }
+      await this.g.edges.in_folder.create(
+        { kind: "Document", id: doc.id },
+        { kind: "Folder", id: folder.id },
+        { position: IN_FOLDER_POSITION },
+      );
+      segments.push({ ...self, segment: doc.filename });
+      results.push({ ok: true, changed: true });
+    }
+    return results;
+  }
+
+  // Move a document's single `in_folder` edge with NO sibling-namespace
+  // check. For reconstruction only (the drive layout, bundle import),
+  // where the placement is known collision-free and an archived document
+  // — which holds no filename slot — must still travel with its folder.
+  async rehomeDocument(
+    documentSlug: DocumentSlug,
+    folderSlug: FolderSlug,
+  ): Promise<void> {
+    const doc = await this.docBySlug(documentSlug);
+    if (doc === undefined) return;
+    const existing = await this.docFolderEdge(doc);
     if (existing !== undefined) {
       await this.g.edges.in_folder.hardDelete(existing.id);
     }
-    if (folderSlug !== null) {
-      await this.linkDocument(folderSlug, doc);
+    await this.linkDocument(folderSlug, doc);
+  }
+
+  // `rehomeDocument` for a SET of documents into one folder: the current
+  // edges of all of them in one `bulkFindFrom`, then one hard delete and one
+  // insert per document that is not already there. For reconstruction only
+  // (no sibling-namespace check), like `rehomeDocument`.
+  async rehomeDocuments(
+    folderSlug: FolderSlug,
+    docs: readonly (DocumentNode | undefined)[],
+  ): Promise<void> {
+    const folder = await this.nodeBySlug(folderSlug);
+    const present = docs.filter((doc) => doc !== undefined);
+    if (folder === undefined || present.length === 0) return;
+    const groups = await this.g.edges.in_folder.bulkFindFrom(
+      present.map((doc) => ({ kind: "Document" as const, id: doc.id })),
+      { limitPerInput: 1 },
+    );
+    for (const [i, doc] of present.entries()) {
+      const existing = groups[i]?.[0];
+      if (existing?.toId === folder.id) continue;
+      if (existing !== undefined) {
+        await this.g.edges.in_folder.hardDelete(existing.id);
+      }
+      await this.g.edges.in_folder.create(
+        { kind: "Document", id: doc.id },
+        { kind: "Folder", id: folder.id },
+        { position: IN_FOLDER_POSITION },
+      );
     }
-    return { ok: true, changed: true };
   }
 }

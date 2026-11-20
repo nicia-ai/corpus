@@ -69,65 +69,75 @@ describe("retention domain (pure)", () => {
 describe("reapExpired (DO end-to-end, clock-seamed)", () => {
   it("reaps old non-head, non-pinned versions; head + pinned + verify survive", async () => {
     const store = freshStore("reap");
-    for (const [v, body] of [
-      [0, "v1"],
-      [1, "v2"],
-      [2, "v3"],
-    ] as const) {
-      await store.saveDocument({
-        slug: docSlug("a"),
-        markdown: body,
-        clientVersion: v,
-        changedBy: "u",
-      });
-    }
-    // Pin v2 by attaching before v3 would be ideal, but attach snapshots
-    // the current head — so attach now pins v3 (the head). v1 + v2 are
-    // unpinned non-head and older than the (future-clocked) window.
     await store.createCorpus({
       slug: colSlug("c"),
       name: "C",
       changedBy: "u",
     });
-    await store.attachDocument(colSlug("c"), docSlug("a"), 1, "u");
+    // Creating the document in a corpus cuts a CorpusVersion that pins v1.
+    // v2 is unpinned and non-head; v3 is the head. Only v2 may be reaped.
+    await store.saveDocument({
+      slug: docSlug("a"),
+      markdown: "v1",
+      location: { corpusSlug: colSlug("c"), folderSlug: null },
+      clientVersion: 0,
+      changedBy: "u",
+    });
+    await store.saveDocument({
+      slug: docSlug("a"),
+      markdown: "v2",
+      clientVersion: 1,
+      changedBy: "u",
+    });
+    await store.saveDocument({
+      slug: docSlug("a"),
+      markdown: "v3",
+      clientVersion: 2,
+      changedBy: "u",
+    });
     expect(await store.versionCount(docSlug("a"))).toBe(3);
 
     const r = await store.reapExpired(
       { documentVersionDays: 1 },
       Date.now() + 5 * DAY,
     );
-    expect(r.versionsDeleted).toBe(2);
-    expect(await store.versionCount(docSlug("a"))).toBe(1); // head v3
+    expect(r.versionsDeleted).toBe(1);
+    expect(await store.versionCount(docSlug("a"))).toBe(2); // pinned v1 + head v3
     expect((await store.getDocument(docSlug("a")))?.markdown).toBe("v3");
     expect(await store.verifyHistory()).toEqual({ ok: true });
   });
 
   it("reaps change events and unreferenced blobs past their windows", async () => {
     const store = freshStore("reap");
-    await store.saveDocument({
-      slug: docSlug("d"),
-      markdown: "one",
-      clientVersion: 0,
-      changedBy: "u",
-    });
-    await store.saveDocument({
-      slug: docSlug("d"),
-      markdown: "two",
-      clientVersion: 1,
-      changedBy: "u",
-    });
+    // v1 is pinned by its creation snapshot; v2 is the only unpinned non-head
+    // version, so its bytes are the blob that becomes an orphan.
+    for (const [v, body] of [
+      [0, "one"],
+      [1, "two"],
+      [2, "three"],
+    ] as const) {
+      await store.saveDocument({
+        slug: docSlug("d"),
+        markdown: body,
+        clientVersion: v,
+        changedBy: "u",
+      });
+    }
     const future = Date.now() + 5 * DAY;
 
-    // Drop old versions first so v1's blob becomes unreferenced.
-    await store.reapExpired({ documentVersionDays: 1 }, future);
+    const versions = await store.reapExpired(
+      { documentVersionDays: 1 },
+      future,
+    );
+    expect(versions.versionsDeleted).toBe(1);
     const r = await store.reapExpired(
       { changeEventDays: 1, blobDays: 1 },
       future,
     );
     expect(r.eventsDeleted).toBeGreaterThanOrEqual(1);
-    expect(r.blobsDeleted).toBeGreaterThanOrEqual(1); // v1 bytes, now orphan
+    expect(r.blobsDeleted).toBeGreaterThanOrEqual(1); // v2 bytes, now orphan
     // Head still resolves (its blob is referenced, never reaped).
-    expect((await store.getDocument(docSlug("d")))?.markdown).toBe("two");
+    expect((await store.getDocument(docSlug("d")))?.markdown).toBe("three");
     expect(await store.verifyHistory()).toEqual({ ok: true });
   });
 

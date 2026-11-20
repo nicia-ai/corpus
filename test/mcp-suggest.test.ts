@@ -51,7 +51,11 @@ async function setup(): Promise<{
     name: "A",
     changedBy: "alice",
   });
-  await store.attachDocument(colSlug("col-a"), docSlug("doc-a"), 1, "alice");
+  await store.moveDocument(
+    docSlug("doc-a"),
+    { corpusSlug: colSlug("col-a"), folderSlug: null },
+    "alice",
+  );
 
   await store.saveDocument({
     slug: docSlug("doc-b"),
@@ -64,7 +68,11 @@ async function setup(): Promise<{
     name: "B",
     changedBy: "bob",
   });
-  await store.attachDocument(colSlug("col-b"), docSlug("doc-b"), 1, "bob");
+  await store.moveDocument(
+    docSlug("doc-b"),
+    { corpusSlug: colSlug("col-b"), folderSlug: null },
+    "bob",
+  );
 
   const members = (await store.corpusMembers(colSlug("col-a"))) ?? [];
   const exec = scopedExecutor(
@@ -662,18 +670,39 @@ describe("suggest_edit MCP tool (DO + D1 integration)", () => {
     expect(proposals[0]?.path).toBe("wiki/answer-x.md");
   });
 
-  it("CRITICAL: baseDocVersion 0 against a slug that exists OUTSIDE the bound Corpus writes nothing", async () => {
+  it("CRITICAL: baseDocVersion 0 against a slug that exists OUTSIDE the bound Corpus is filed like any other create — no existence oracle — and never touches that document", async () => {
     const { store, exec } = await setup();
-    const res = await call(exec, {
+    const outside = await call(exec, {
       slug: "doc-b",
       proposedMarkdown: "intruder create",
       baseDocVersion: 0,
     });
-    // Same existence grade the REST create path exposes via its 403: the
-    // identifier is unavailable, and no proposal row is written.
-    expect(res.error?.code).toBe(ERR.CONFLICT);
-    expect(await store.listCreateProposals()).toHaveLength(0);
+    const fresh = await call(exec, {
+      slug: "brand-new",
+      proposedMarkdown: "ordinary create",
+      baseDocVersion: 0,
+    });
+    // Same shape either way: nothing tells the agent that `doc-b` exists in
+    // another corpus.
+    expect(outside.error).toBeUndefined();
+    expect(Object.keys(resultJson(outside)).sort()).toEqual(
+      Object.keys(resultJson(fresh)).sort(),
+    );
+    // It is a create proposal, not an edit of the other corpus's document.
     expect(await store.listSuggestions(docSlug("doc-b"))).toHaveLength(0);
+    const head = await store.getDocument(docSlug("doc-b"));
+    expect(head?.markdown).toBe(DOC_B);
+    // A person settles the clash when applying: the slug is taken, the
+    // proposal goes stale, and doc-b is still untouched.
+    const proposals = await store.listCreateProposals();
+    const mine = proposals.find((p) => p.slug === "doc-b");
+    expect(mine).toBeDefined();
+    const applied = await store.applyCreateProposal({
+      suggestionId: mine?.id ?? 0,
+      appliedBy: "alice",
+    });
+    expect(applied).toMatchObject({ ok: false, reason: "taken" });
+    expect((await store.getDocument(docSlug("doc-b")))?.markdown).toBe(DOC_B);
   });
 
   it("baseDocVersion 0 with a malformed slug → INVALID_PARAMS", async () => {

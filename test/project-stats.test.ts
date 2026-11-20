@@ -1,15 +1,26 @@
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import { asFolderSlug, asDocumentSlug, type DocumentSlug } from "../src/ids";
-import type { CollectionDelivery } from "../src/store/domain/collection-expand";
+import type { CollectionDelivery } from "../src/store/domain/collection-delivery";
+import { DEFAULT_CORPUS_SLUG } from "../src/store/domain/default-corpus";
 import {
   computeProjectStats,
   type StatsCorpus,
   type StatsDocument,
   type StatsFolder,
+  type StatsLayout,
 } from "../src/store/domain/project-stats";
+import type { CorpusStore } from "../src/store/handle";
 
-import { colSlug, freshStore } from "./_helpers";
+import { colSlug, docSlug, freshStore } from "./_helpers";
+import { MARKER_KEY, seedLegacyProject } from "./_legacy-shape";
+
+const NO_LAYOUT: StatsLayout = {
+  corporaWithRoot: 0,
+  documentsOutsideRoots: 0,
+  legacyDirectLinks: 0,
+  legacyFolderLinks: 0,
+};
 
 function doc(path: string, folderSlug: string | null): StatsDocument {
   const filename = path.split("/").at(-1) ?? path;
@@ -80,6 +91,7 @@ describe("computeProjectStats (pure)", () => {
       { sourceSlug: d.slug, targetSlug: g.slug }, // g in no corpus
       { sourceSlug: a.slug, targetSlug: a.slug }, // self link ignored
     ],
+    layout: NO_LAYOUT,
   });
 
   it("counts documents by resolved corpus membership", () => {
@@ -180,6 +192,7 @@ describe("computeProjectStats (pure)", () => {
       corpora: [],
       folders: [],
       links: [],
+      layout: NO_LAYOUT,
     });
     expect(empty.corpora.defaultPresent).toBe(false);
     expect(empty.folders.maxDepth).toBe(0);
@@ -188,76 +201,43 @@ describe("computeProjectStats (pure)", () => {
 });
 
 describe("ProjectStore.statsSnapshot (DO)", () => {
-  it("returns the right counts for a seeded project", async () => {
-    const store = freshStore("stats");
-    const by = "u";
-    await store.importDocumentAtPath({
-      path: "guides/alpha.md",
-      markdown: "alpha",
-      changedBy: by,
+  const BY = "u";
+  const place = async (
+    store: ReturnType<typeof freshStore>,
+    corpus: string,
+    path: string,
+    markdown: string,
+  ) => {
+    const r = await store.importDocumentAtPath({
+      corpusSlug: colSlug(corpus),
+      path,
+      markdown,
+      changedBy: BY,
     });
-    await store.importDocumentAtPath({
-      path: "beta.md",
-      markdown: "see [alpha](guides/alpha.md)",
-      changedBy: by,
-    });
-    await store.importDocumentAtPath({
-      path: "orphan.md",
-      markdown: "nobody includes me",
-      changedBy: by,
-    });
-    await store.importDocumentAtPath({
-      path: "solo.md",
-      markdown: "[beta](beta.md)",
-      changedBy: by,
-    });
-    await store.importDocumentAtPath({
-      path: "gone.md",
-      markdown: "archived",
-      changedBy: by,
-    });
-    const slugOf = async (path: string): Promise<DocumentSlug> => {
-      const row = (await store.listDocuments()).find((x) => x.path === path);
-      if (row === undefined) throw new Error(`no document at ${path}`);
-      return asDocumentSlug(row.slug);
-    };
-    await store.archiveDocument(await slugOf("gone.md"), by);
+    expect(r.ok, `importing ${path}`).toBe(true);
+  };
 
-    const guides = (await store.listFolders()).find((x) => x.name === "guides");
-    if (guides === undefined) throw new Error("guides folder missing");
-    for (const slug of ["one", "two", "three"]) {
+  it("describes a project laid out as drives", async () => {
+    const store = freshStore("stats");
+    await store.ensureDefaultCorpus(BY);
+    for (const slug of ["one", "two"]) {
       await store.createCorpus({
         slug: colSlug(slug),
         name: slug,
-        changedBy: by,
+        changedBy: BY,
       });
     }
-    // one: alpha directly AND via its folder; two: beta + alpha; three: solo.
-    await store.attachDocument(
-      colSlug("one"),
-      await slugOf("guides/alpha.md"),
-      1,
-      by,
+    await place(store, "one", "guides/alpha.md", "alpha");
+    await place(store, "one", "beta.md", "see [alpha](guides/alpha.md)");
+    // Same file name as `one`'s alpha, in another corpus; links across corpora.
+    await place(store, "two", "alpha.md", "[beta](beta.md)");
+    await place(store, DEFAULT_CORPUS_SLUG, "draft.md", "a draft");
+    await place(store, "one", "gone.md", "archived");
+    const gone = (await store.listDocuments()).find(
+      (x) => x.path === "gone.md",
     );
-    await store.attachFolderToCorpus(
-      colSlug("one"),
-      asFolderSlug(guides.slug),
-      2,
-      by,
-    );
-    await store.attachDocument(colSlug("two"), await slugOf("beta.md"), 1, by);
-    await store.attachDocument(
-      colSlug("two"),
-      await slugOf("guides/alpha.md"),
-      2,
-      by,
-    );
-    await store.attachDocument(
-      colSlug("three"),
-      await slugOf("solo.md"),
-      1,
-      by,
-    );
+    if (gone === undefined) throw new Error("gone.md missing");
+    await store.archiveDocument(docSlug(gone.slug), BY);
 
     const stats = await store.statsSnapshot();
 
@@ -265,28 +245,85 @@ describe("ProjectStore.statsSnapshot (DO)", () => {
       total: 5,
       live: 4,
       archived: 1,
-      inNoCorpus: 1, // orphan
-      inOneCorpus: 2, // beta, solo
-      inTwoOrMoreCorpora: 1, // alpha
+      inNoCorpus: 0,
+      inOneCorpus: 4,
+      inTwoOrMoreCorpora: 0,
     });
     expect(stats.corpora).toMatchObject({
       total: 3,
-      withDirectDocuments: 3,
-      withFolderInclusions: 1,
-      withBothInclusionKinds: 1,
-      withDocumentViaBoth: 1,
-      defaultPresent: false,
+      defaultPresent: true,
+      defaultMembers: 1,
       maxMembers: 2,
       totalMembers: 4,
+      withDirectDocuments: 0,
+      withFolderInclusions: 0,
     });
+    // Roots are hidden: only the `guides` folder counts, and it is top-level.
     expect(stats.folders).toEqual({
       total: 1,
       maxDepth: 1,
       topLevel: 1,
       includedByTwoOrMoreCorpora: 0,
     });
-    // beta -> alpha share "two"; solo -> beta share nothing.
+    // Resolution is per corpus: `[beta](beta.md)` from corpus two falls
+    // through to one's beta.md (a cross-corpus link); beta -> alpha stays in one.
     expect(stats.links).toEqual({ resolved: 2, crossCorpus: 1 });
-    expect(stats.perCorpus).toHaveLength(3);
+    expect(stats.sameFilenamePairsAcrossCorpora).toBe(1);
+    expect(stats.layout).toEqual({
+      corporaWithRoot: 3,
+      documentsOutsideRoots: 0,
+      legacyDirectLinks: 0,
+      legacyFolderLinks: 0,
+    });
+  });
+
+  it("describes a project still in the pre-drive shape, and does not migrate it", async () => {
+    const store = freshStore("stats-legacy");
+    await seedLegacyProject(store);
+
+    const stats = await store.statsSnapshot();
+
+    expect(stats.documents).toMatchObject({
+      live: 5,
+      inNoCorpus: 1, // loose
+      inOneCorpus: 3, // guide, handbook-a, handbook-b (beta only)
+      inTwoOrMoreCorpora: 1, // shared: alpha directly, beta via `docs`
+    });
+    expect(stats.corpora).toMatchObject({
+      withDirectDocuments: 1,
+      withFolderInclusions: 1,
+      withDocumentViaBoth: 0,
+    });
+    expect(stats.layout).toMatchObject({
+      documentsOutsideRoots: 5,
+      legacyDirectLinks: 1,
+      legacyFolderLinks: 2,
+    });
+    // beta's second folder link was written `reference`.
+    expect(stats.perCorpus.reduce((n, c) => n + c.referenceMembers, 0)).toBe(2);
+
+    // The diagnostic is read-only: the layout marker is still unset, the old
+    // links are still in the graph, and no folder was recreated.
+    await runInDurableObject(store, async (instance, state) => {
+      expect(await state.storage.get(MARKER_KEY)).toBeUndefined();
+      const s = await (
+        instance as unknown as {
+          ensureStore(): Promise<CorpusStore>;
+        }
+      ).ensureStore();
+      expect(await s.edges.includes.find({ limit: 100 })).toHaveLength(1);
+      expect(await s.edges.includes_folder.find({ limit: 100 })).toHaveLength(
+        2,
+      );
+      expect(await s.nodes.Folder.find({ limit: 100 })).toHaveLength(3);
+    });
+    // A second snapshot is identical, and an ordinary read afterwards still migrates.
+    expect(await store.statsSnapshot()).toEqual(stats);
+    await store.listDocuments();
+    expect((await store.statsSnapshot()).layout).toMatchObject({
+      documentsOutsideRoots: 0,
+      legacyDirectLinks: 0,
+      legacyFolderLinks: 0,
+    });
   });
 });

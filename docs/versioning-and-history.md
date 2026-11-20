@@ -43,7 +43,7 @@ There is no lost write and no forced merge — you decide.
 ## The changes feed
 
 **Recent changes** shows the latest document and corpus activity —
-creates, saves, attaches — with who and when. It's the quick answer to
+creates, saves, moves between corpora — with who and when. It's the quick answer to
 _"did the canonical corpus move, and who moved it?"_ before you point
 an agent at it.
 

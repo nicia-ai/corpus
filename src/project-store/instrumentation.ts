@@ -85,7 +85,21 @@ export function corpusInstrumentationEvent(
       ? rawDelivery
       : undefined;
 
+  const otherCorpus = (key: "movedFrom" | "movedTo"): string | undefined => {
+    const value = change.after?.[key];
+    return typeof value === "string" ? value : undefined;
+  };
+
   switch (change.kind) {
+    case "collection.deleted":
+      return buildEvent.corpusDeleted({
+        corpusSlug: change.collectionSlug,
+        pages:
+          change.after?.pages === "move-to-default"
+            ? "move-to-default"
+            : "archive",
+        changedBy: change.changedBy,
+      });
     case "collection.created":
       return buildEvent.corpusCreated({
         corpusSlug: change.collectionSlug,
@@ -110,6 +124,7 @@ export function corpusInstrumentationEvent(
             typeof change.after?.position === "number"
               ? change.after.position
               : 0,
+          movedFrom: otherCorpus("movedFrom"),
           changedBy: change.changedBy,
         }),
       );
@@ -119,6 +134,7 @@ export function corpusInstrumentationEvent(
           corpusSlug: change.collectionSlug,
           documentSlug: change.documentSlug,
           folderSlug,
+          movedTo: otherCorpus("movedTo"),
           changedBy: change.changedBy,
         }),
       );

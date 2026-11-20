@@ -121,8 +121,8 @@ export function ShareDialog({
       </p>
       {served && (
         <p className="mt-2 text-sm text-slate-600">
-          This page is served by a corpus. Shared links can propose edits for
-          review; direct editing is available while a draft is unserved.
+          This page is published in a corpus. Shared links can propose edits for
+          review; direct editing is only available while the page is a draft.
         </p>
       )}
       <div className="mt-4">
@@ -167,7 +167,8 @@ export function ShareDialog({
               checked={grant === "edit"}
               onChange={() => setGrant("edit")}
             />
-            Edit directly while unserved — switch to Suggest for review
+            Edit directly while this page is a draft — switch to Suggest for
+            review
           </label>
         )}
       </fieldset>

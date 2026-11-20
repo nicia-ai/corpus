@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_CORPUS_SLUG } from "../src/store/domain/default-corpus";
+
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const ws = () => freshStore("seed");
 
+const COMPANY = "company";
+const SUPPORT_DESK = "support-desk";
+const EXAMPLE_DOCUMENT_COUNT = 4;
+const EXAMPLE_CORPUS_COUNT = 2;
+
 describe("seedExample (atomic, guarded)", () => {
-  it("seeds the shared-document example on an empty project", async () => {
+  it("seeds two corpora and four documents, each document in exactly one corpus", async () => {
     const w = ws();
     expect(await w.seedExample("u")).toEqual({ seeded: true });
 
@@ -17,30 +24,19 @@ describe("seedExample (atomic, guarded)", () => {
       "brand-voice",
       "product",
       "refund-policy",
+      "support-playbook",
     ]);
-    expect(cols.map((c) => c.slug).sort()).toEqual([
-      "sales-agent",
-      "support-agent",
-    ]);
-    // The whole point: ONE document, in BOTH corpora.
-    expect(
+    expect(cols.map((c) => c.slug).sort()).toEqual([COMPANY, SUPPORT_DESK]);
+
+    const corporaOf = (documentSlug: string): readonly string[] =>
       members
-        .filter((m) => m.documentSlug === "refund-policy")
+        .filter((m) => m.documentSlug === documentSlug)
         .map((m) => m.corpusSlug)
-        .sort(),
-    ).toEqual(["sales-agent", "support-agent"]);
-    // product is present in Sales only (not stranded).
-    expect(
-      members
-        .filter((m) => m.documentSlug === "product")
-        .map((m) => m.corpusSlug),
-    ).toEqual(["sales-agent"]);
-    // brand-voice is present in Sales only (not stranded).
-    expect(
-      members
-        .filter((m) => m.documentSlug === "brand-voice")
-        .map((m) => m.corpusSlug),
-    ).toEqual(["sales-agent"]);
+        .sort();
+    expect(corporaOf("refund-policy")).toEqual([COMPANY]);
+    expect(corporaOf("product")).toEqual([COMPANY]);
+    expect(corporaOf("brand-voice")).toEqual([COMPANY]);
+    expect(corporaOf("support-playbook")).toEqual([SUPPORT_DESK]);
   });
 
   it("is a no-op on a project that already has data (double-click safe)", async () => {
@@ -51,10 +47,10 @@ describe("seedExample (atomic, guarded)", () => {
       seeded: false,
       reason: "not_empty",
     });
-    expect((await w.listDocuments()).length).toBe(3);
-    expect((await w.listCorpora()).length).toBe(2);
-    // 4 resolved memberships: refund-policy ×2 + product + brand-voice.
-    expect((await w.listResolvedMembers()).length).toBe(4);
+    expect((await w.listDocuments()).length).toBe(EXAMPLE_DOCUMENT_COUNT);
+    expect((await w.listCorpora()).length).toBe(EXAMPLE_CORPUS_COUNT);
+    // One membership per document: no page sits in two corpora.
+    expect((await w.listResolvedMembers()).length).toBe(EXAMPLE_DOCUMENT_COUNT);
   });
 
   it("refuses to seed when any document already exists", async () => {
@@ -69,7 +65,9 @@ describe("seedExample (atomic, guarded)", () => {
       seeded: false,
       reason: "not_empty",
     });
-    expect((await w.listCorpora()).length).toBe(0);
+    expect((await w.listCorpora()).map((c) => c.slug)).toEqual([
+      DEFAULT_CORPUS_SLUG,
+    ]);
   });
 });
 
@@ -78,16 +76,16 @@ describe("listResolvedMembers", () => {
     expect(await ws().listResolvedMembers()).toEqual([]);
   });
 
-  it("reports each resolved corpus → document membership", async () => {
+  it("reports each document's corpus membership", async () => {
     const w = ws();
+    await w.createCorpus({ slug: colSlug("c"), name: "C", changedBy: "u" });
     await w.saveDocument({
       slug: docSlug("a"),
       markdown: "# a",
+      location: { corpusSlug: colSlug("c"), folderSlug: null },
       clientVersion: 0,
       changedBy: "u",
     });
-    await w.createCorpus({ slug: colSlug("c"), name: "C", changedBy: "u" });
-    await w.attachDocument(colSlug("c"), docSlug("a"), 1, "u");
     expect(await w.listResolvedMembers()).toEqual([
       { corpusSlug: "c", documentSlug: "a" },
     ]);

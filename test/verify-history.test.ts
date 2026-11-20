@@ -10,9 +10,15 @@ const project = () => freshStore("verify");
 describe("verifyHistory (DO end-to-end)", () => {
   it("an intact project verifies ok", async () => {
     const store = project();
+    await store.createCorpus({
+      slug: colSlug("c"),
+      name: "C",
+      changedBy: "u",
+    });
     await store.saveDocument({
       slug: docSlug("alpha"),
       markdown: "# Alpha\nv1",
+      location: { corpusSlug: colSlug("c"), folderSlug: null },
       clientVersion: 0,
       changedBy: "u",
     });
@@ -22,12 +28,6 @@ describe("verifyHistory (DO end-to-end)", () => {
       clientVersion: 1,
       changedBy: "u",
     });
-    await store.createCorpus({
-      slug: colSlug("c"),
-      name: "C",
-      changedBy: "u",
-    });
-    await store.attachDocument(colSlug("c"), docSlug("alpha"), 1, "u");
 
     expect(await store.verifyHistory()).toEqual({ ok: true });
     expect(await store.verifyHistory(docSlug("alpha"))).toEqual({ ok: true });

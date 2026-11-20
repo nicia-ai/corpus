@@ -13,10 +13,11 @@ import {
   type ProjectId,
 } from "@/ids";
 import { useSubmit } from "@/lib/forms";
+import type { CorpusListItem } from "@/lib/server/corpora";
 import {
   type FolderRow,
-  type ImportAndLinkResult,
-  importDocumentsAndLink,
+  type ImportIntoCorpusResult,
+  importIntoCorpus,
 } from "@/lib/server/folders";
 import {
   type Collected,
@@ -27,26 +28,32 @@ import {
   dropHasFiles,
   placeEntries,
 } from "@/lib/upload/collect";
-import { importLinkForUpload } from "@/lib/upload/import-link";
-import type { ImportCorpusLink } from "@/project-store";
+import type { ImportDestination } from "@/project-store/contracts";
+import { DEFAULT_CORPUS_SLUG } from "@/store/domain/default-corpus";
 
 // The whole upload flow as one component, shared between the dedicated
-// /import route (page mode, with a Done summary) and the Documents
-// empty state (inline mode, where the route loader's re-render IS the
-// success state — no Done needed). The caller owns the surrounding
-// PageHeader so each surface frames the action with its own words.
+// /import route (page mode, with a Done summary) and the empty-state
+// (inline mode, where the route loader's re-render IS the success state —
+// no Done needed). The caller owns the surrounding PageHeader so each
+// surface frames the action with its own words.
+//
+// An upload lands in exactly one corpus; every path is relative to that
+// corpus's root. The drafts space is a corpus like any other here — it is
+// the default, and the copy says plainly that agents cannot read it.
 
 const MAX_ENTRIES = 5000;
 const ROOT = "" as const;
+const NEW_CORPUS = "+new-corpus" as const;
 
 type FolderIndex = ReadonlyMap<FolderSlug, FolderRow>;
+type UploadDocument = Readonly<{ path: string; corpusSlug: CorpusSlug }>;
 
 function indexFolders(folders: readonly FolderRow[]): FolderIndex {
   return new Map(folders.map((f) => [f.slug, f]));
 }
 
 // Ancestor folder NAMES (root → leaf) for a folder slug; `[]` for the
-// project root. The names are what the importer resolves folders by.
+// corpus root. The names are what the importer resolves folders by.
 function folderNamePath(index: FolderIndex, slug: FolderSlug | null): string[] {
   const out: string[] = [];
   const seen = new Set<FolderSlug>();
@@ -60,30 +67,12 @@ function folderNamePath(index: FolderIndex, slug: FolderSlug | null): string[] {
   return out;
 }
 
-// Does a folder already live at this name-path? Cosmetic only — it
-// predicts the link copy ("live folder" vs "documents"); the DO derives
-// the real link target from what the import created, so a stale snapshot
-// here can only mislabel a hint, never the actual link.
-function folderExistsAtPath(
-  index: FolderIndex,
-  segments: readonly string[],
-): boolean {
-  if (segments.length === 0) return false;
-  let parent: FolderSlug | null = null;
-  for (const name of segments) {
-    const hit = [...index.values()].find(
-      (f) => f.parentSlug === parent && f.name === name,
-    );
-    if (hit === undefined) return false;
-    parent = hit.slug;
-  }
-  return true;
-}
-
 function folderOptions(
   index: FolderIndex,
+  corpusSlug: CorpusSlug,
 ): readonly Readonly<{ slug: FolderSlug; label: string }>[] {
   return [...index.values()]
+    .filter((f) => f.corpusSlug === corpusSlug)
     .map((f) => ({
       slug: f.slug,
       label: folderNamePath(index, f.slug).join(" / "),
@@ -91,47 +80,53 @@ function folderOptions(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+function destinationOf(
+  corpusChoice: string,
+  newCorpusName: string,
+): ImportDestination {
+  if (corpusChoice === NEW_CORPUS) {
+    return { mode: "new", name: newCorpusName.trim() };
+  }
+  const slug = asCorpusSlug(corpusChoice);
+  return slug === DEFAULT_CORPUS_SLUG
+    ? { mode: "default" }
+    : { mode: "existing", slug };
+}
+
 export function DocumentUploader(
   props: Readonly<{
     projectId: ProjectId;
-    corpora: readonly Readonly<{ slug: CorpusSlug; name: string }>[];
+    corpora: readonly Pick<CorpusListItem, "slug" | "name" | "served">[];
     folders: readonly FolderRow[];
-    documents: readonly Readonly<{ path: string }>[];
-    defaultCorpusSlug?: CorpusSlug;
-    autoLinkCorpus?: boolean;
+    documents: readonly UploadDocument[];
+    // The corpus the upload starts aimed at (the corpus page you came
+    // from); the drafts space when absent.
+    initialCorpusSlug?: CorpusSlug;
     // page mode hands the result back so the route can render a Done
     // summary; inline mode is fire-and-forget — router.invalidate()
     // unmounts the empty state when the new documents land.
-    onComplete?: (r: ImportAndLinkResult) => void;
+    onComplete?: (r: ImportIntoCorpusResult) => void;
   }>,
 ): React.ReactElement {
-  const {
-    projectId,
-    corpora,
-    folders,
-    documents,
-    defaultCorpusSlug,
-    autoLinkCorpus,
-    onComplete,
-  } = props;
+  const { projectId, corpora, folders, documents, onComplete } = props;
   const router = useRouter();
   const [collected, setCollected] = useState<Collected | null>(null);
   const [dropError, setDropError] = useState<string>();
+  const [corpusChoice, setCorpusChoice] = useState<string>(
+    props.initialCorpusSlug ?? DEFAULT_CORPUS_SLUG,
+  );
+  const [newCorpusName, setNewCorpusName] = useState("");
   const [destParent, setDestParent] = useState<FolderSlug | null>(null);
   const [makeNew, setMakeNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [keepWrapper, setKeepWrapper] = useState(true);
-  const [link, setLink] = useState<ImportCorpusLink>(() =>
-    importLinkForUpload({ autoLinkCorpus, defaultCorpusSlug }),
-  );
   const [dragging, setDragging] = useState(false);
   const filesRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
 
-  // A fresh drop is a fresh upload: clear the destination + link choices
-  // so the previous upload's selections never silently carry over.
-  // autoLinkCorpus must survive the reset — otherwise the copy lies and
-  // docs land unattached (Documents empty promises a link).
+  // A fresh drop is a fresh upload: clear the folder choices so the
+  // previous upload's selections never silently carry over. The corpus
+  // choice is kept — it is where the person is working.
   function ingest(c: Collected) {
     // A drop the browser handed us files for, but none were readable text
     // (e.g. only binaries) — surface the picker fallback.
@@ -146,15 +141,24 @@ export function DocumentUploader(
     setMakeNew(false);
     setNewName("");
     setKeepWrapper(true);
-    setLink(importLinkForUpload({ autoLinkCorpus, defaultCorpusSlug }));
     setCollected(c);
   }
 
+  const creatingCorpus = corpusChoice === NEW_CORPUS;
   const index = useMemo(() => indexFolders(folders), [folders]);
-  const options = useMemo(() => folderOptions(index), [index]);
+  const options = useMemo(
+    () =>
+      creatingCorpus ? [] : folderOptions(index, asCorpusSlug(corpusChoice)),
+    [index, corpusChoice, creatingCorpus],
+  );
   const existingPaths = useMemo(
-    () => new Set(documents.map((d) => d.path)),
-    [documents],
+    () =>
+      new Set(
+        documents
+          .filter((d) => d.corpusSlug === corpusChoice)
+          .map((d) => d.path),
+      ),
+    [documents, corpusChoice],
   );
 
   // The upload's own top folder (a dragged folder / zip), if it has one.
@@ -177,23 +181,15 @@ export function DocumentUploader(
     [collected, parentSegments, dropWrapper],
   );
 
-  // The folder this upload would create for itself (a new named folder,
-  // or a kept upload wrapper) — used only to predict the link copy.
-  const freshWrapperPath =
-    newTrimmed !== ""
-      ? parentSegments
-      : uploadRoot !== null && keepWrapper
-        ? [...parentSegments, uploadRoot]
-        : null;
-  const willLinkFolder =
-    link.mode !== "none" &&
-    freshWrapperPath !== null &&
-    !folderExistsAtPath(index, freshWrapperPath);
-
   const docCount = placed.length;
+  const corpusName =
+    corpora.find((c) => c.slug === corpusChoice)?.name ?? newCorpusName.trim();
 
   const { pending, error, run } = useSubmit(async () => {
     if (collected === null || placed.length === 0) return;
+    if (creatingCorpus && newCorpusName.trim() === "") {
+      throw new Error("Name the new corpus, or pick an existing one.");
+    }
     if (makeNew && newTrimmed === "") {
       throw new Error("Name the new folder, or uncheck “Create a new folder”.");
     }
@@ -202,14 +198,16 @@ export function DocumentUploader(
         `That’s ${placed.length} files — split it into uploads of ${MAX_ENTRIES} or fewer.`,
       );
     }
-    const result = await importDocumentsAndLink({
+    const result = await importIntoCorpus({
       data: {
         projectId,
         entries: placed.map((f) => ({ path: f.path, markdown: f.text })),
-        link:
-          link.mode === "new" ? { mode: "new", name: link.name.trim() } : link,
+        destination: destinationOf(corpusChoice, newCorpusName),
       },
     });
+    if (result === undefined) {
+      throw new Error("That corpus no longer exists — pick another.");
+    }
     setCollected(null);
     await router.invalidate();
     onComplete?.(result);
@@ -310,6 +308,18 @@ export function DocumentUploader(
             existingPaths={existingPaths}
           />
 
+          <CorpusPicker
+            corpora={corpora}
+            value={corpusChoice}
+            onChange={(next) => {
+              setCorpusChoice(next);
+              setDestParent(null);
+            }}
+            newName={newCorpusName}
+            onNewName={setNewCorpusName}
+            corpusName={corpusName}
+          />
+
           <DestinationPicker
             options={options}
             destParent={destParent}
@@ -323,22 +333,6 @@ export function DocumentUploader(
             onKeepWrapper={setKeepWrapper}
             destLabel={parentSegments.join(" / ")}
           />
-
-          {!autoLinkCorpus && (
-            <LinkPicker
-              corpora={corpora}
-              value={link}
-              onChange={setLink}
-              willLinkFolder={willLinkFolder}
-              docCount={docCount}
-            />
-          )}
-
-          {autoLinkCorpus && (
-            <p className="text-sm text-slate-500">
-              Imported documents join your default corpus automatically.
-            </p>
-          )}
 
           {error && <p className="text-base text-red-600">{error}</p>}
           <Button type="submit" disabled={pending || placed.length === 0}>
@@ -423,7 +417,7 @@ function Review({
   );
 }
 
-// Where the upload lands in the folder tree: a parent (root by default
+// Where the upload lands in the chosen corpus's tree: a parent (top level by default
 // or any existing folder), an optional new folder created under it, and
 // — for a folder/zip upload — whether to keep its own top folder or
 // merge its files into the destination.
@@ -450,7 +444,7 @@ function DestinationPicker({
   uploadRoot: string | null;
   keepWrapper: boolean;
   onKeepWrapper: (v: boolean) => void;
-  // The resolved merge target ("" = project root) — names where a
+  // The resolved merge target ("" = corpus root) — names where a
   // wrapper-dropped folder's files actually land.
   destLabel: string;
 }>): React.ReactElement {
@@ -464,7 +458,7 @@ function DestinationPicker({
           htmlFor="dest"
           className="mb-1 block text-sm font-medium text-slate-700"
         >
-          Import into
+          Folder
         </label>
         <select
           id="dest"
@@ -476,7 +470,7 @@ function DestinationPicker({
           }
           className={fieldInputClass()}
         >
-          <option value={ROOT}>Root</option>
+          <option value={ROOT}>Top level of the corpus</option>
           {options.map((o) => (
             <option key={o.slug} value={o.slug}>
               {o.label}
@@ -527,7 +521,7 @@ function DestinationPicker({
               onChange={() => onKeepWrapper(false)}
             />
             {destLabel === "" ? (
-              "Add its files directly to the root"
+              "Add its files directly to the top level"
             ) : (
               <>Add its files directly to “{destLabel}”</>
             )}
@@ -538,96 +532,59 @@ function DestinationPicker({
   );
 }
 
-function LinkPicker({
+// The corpus an upload lands in. Drafts is listed like any corpus; its
+// line says plainly that agents cannot read it.
+function CorpusPicker({
   corpora,
   value,
   onChange,
-  willLinkFolder,
-  docCount,
+  newName,
+  onNewName,
+  corpusName,
 }: Readonly<{
-  corpora: readonly Readonly<{ slug: CorpusSlug; name: string }>[];
-  value: ImportCorpusLink;
-  onChange: (v: ImportCorpusLink) => void;
-  willLinkFolder: boolean;
-  docCount: number;
-}>) {
+  corpora: readonly Pick<CorpusListItem, "slug" | "name" | "served">[];
+  value: string;
+  onChange: (v: string) => void;
+  newName: string;
+  onNewName: (v: string) => void;
+  corpusName: string;
+}>): React.ReactElement {
+  const served = corpora.find((c) => c.slug === value)?.served ?? true;
   return (
-    <fieldset className="space-y-2">
-      <legend className="mb-1 text-sm font-medium text-slate-700">
-        Link this upload to a corpus
-      </legend>
-      <label className="flex items-center gap-2 text-base text-slate-700">
-        <input
-          type="radio"
-          name="link"
-          checked={value.mode === "none"}
-          onChange={() => onChange({ mode: "none" })}
-        />
-        Don’t link now
+    <div className="space-y-2">
+      <label
+        htmlFor="corpus"
+        className="block text-sm font-medium text-slate-700"
+      >
+        Corpus
       </label>
-      <label className="flex items-center gap-2 text-base text-slate-700">
-        <input
-          type="radio"
-          name="link"
-          checked={value.mode === "new"}
-          onChange={() => onChange({ mode: "new", name: "" })}
-        />
-        New corpus
-      </label>
-      {value.mode === "new" && (
+      <select
+        id="corpus"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={fieldInputClass()}
+      >
+        {corpora.map((c) => (
+          <option key={c.slug} value={c.slug}>
+            {c.served ? c.name : `${c.name} (not shared with agents)`}
+          </option>
+        ))}
+        <option value={NEW_CORPUS}>New corpus…</option>
+      </select>
+      {value === NEW_CORPUS && (
         <input
           autoFocus
-          value={value.name}
-          onChange={(e) => onChange({ mode: "new", name: e.target.value })}
+          value={newName}
+          onChange={(e) => onNewName(e.target.value)}
           placeholder="Corpus name"
-          className={fieldInputClass("ml-6 w-[calc(100%-1.5rem)]!")}
+          className={fieldInputClass()}
         />
       )}
-      <label className="flex items-center gap-2 text-base text-slate-700">
-        <input
-          type="radio"
-          name="link"
-          disabled={corpora.length === 0}
-          checked={value.mode === "existing"}
-          onChange={() =>
-            onChange({
-              mode: "existing",
-              slug: corpora[0]?.slug ?? asCorpusSlug(""),
-            })
-          }
-        />
-        Existing corpus
-        {corpora.length === 0 && (
-          <span className="text-sm text-slate-400">(none yet)</span>
-        )}
-      </label>
-      {value.mode === "existing" && (
-        <select
-          value={value.slug}
-          onChange={(e) =>
-            onChange({
-              mode: "existing",
-              slug: asCorpusSlug(e.target.value),
-            })
-          }
-          className={fieldInputClass("ml-6 w-[calc(100%-1.5rem)]!")}
-        >
-          {corpora.map((c) => (
-            <option key={c.slug} value={c.slug}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      )}
-      {value.mode !== "none" && (
-        <p className="text-sm text-slate-500">
-          {willLinkFolder
-            ? "This upload creates a new folder; linking it is live — files added to it later are in the corpus automatically."
-            : `The ${docCount} uploaded document${
-                docCount === 1 ? "" : "s"
-              } will be added to the corpus.`}
-        </p>
-      )}
-    </fieldset>
+      <p className="text-sm text-slate-500">
+        {served
+          ? `The files join ${corpusName === "" ? "the new corpus" : `“${corpusName}”`} at the paths shown. Agents connected to it can read them.`
+          : "Drafts are not shared with agents. Move pages into a corpus to publish them."}
+      </p>
+    </div>
   );
 }

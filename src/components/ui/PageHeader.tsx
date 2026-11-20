@@ -15,12 +15,14 @@ export function PageHeader({
 }>): React.ReactElement {
   return (
     <header className="mb-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <div className="flex items-baseline gap-3">
           <h1 className="text-2xl font-semibold">{title}</h1>
           {meta}
         </div>
-        {actions && <div className="flex items-center gap-3">{actions}</div>}
+        {actions && (
+          <div className="flex flex-wrap items-center gap-3">{actions}</div>
+        )}
       </div>
       {subtitle !== undefined && (
         <p className="mt-1 text-base text-slate-500">{subtitle}</p>

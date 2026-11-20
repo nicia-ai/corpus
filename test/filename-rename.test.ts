@@ -4,19 +4,32 @@ import { asFolderSlug, type FolderSlug } from "../src/ids";
 
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
-const ws = () => freshStore("fname");
 const by = "u";
+const CORPUS = colSlug("docs");
 
-async function folderSlug(
-  store: ReturnType<typeof ws>,
-  name: string,
-): Promise<FolderSlug> {
+// Every document lives in a corpus, so each workspace starts with one.
+async function freshWorkspace() {
+  const w = freshStore("fname");
+  await w.createCorpus({ slug: CORPUS, name: "Docs", changedBy: by });
+  return w;
+}
+
+type Workspace = Awaited<ReturnType<typeof freshWorkspace>>;
+
+const importAt = (
+  w: Workspace,
+  path: string,
+  markdown: string,
+  changedBy = by,
+) => w.importDocumentAtPath({ corpusSlug: CORPUS, path, markdown, changedBy });
+
+async function folderSlug(store: Workspace, name: string): Promise<FolderSlug> {
   const f = (await store.listFolders()).find((x) => x.name === name);
   if (f === undefined) throw new Error(`folder ${name} not found`);
   return asFolderSlug(f.slug);
 }
 
-const countReordered = async (store: ReturnType<typeof ws>): Promise<number> =>
+const countReordered = async (store: Workspace): Promise<number> =>
   (await store.recentChanges(100)).filter(
     (e) => e.eventType === "collection.reordered",
   ).length;
@@ -24,23 +37,15 @@ const countReordered = async (store: ReturnType<typeof ws>): Promise<number> =>
 // `filename` rename is a FIRST-CLASS op (DO method + distinct event),
 // not a widening of the title-only `renameDocument`. It is head-only
 // (no blob / DocumentVersion / docVersion bump) but, unlike a title
-// rename, it is a path-map mutation and so fans out to folder-linking
-// corpora.
+// rename, it is a path-map mutation and so re-notifies the document's corpus
+// tree.
 describe("renameFilename — head-only, distinct event", () => {
   it("changes filename without touching the content-addressed chain", async () => {
-    const w = ws();
-    const r1 = await w.importDocumentAtPath({
-      path: "a/notes.md",
-      markdown: "# N v1",
-      changedBy: "alice",
-    });
+    const w = await freshWorkspace();
+    const r1 = await importAt(w, "a/notes.md", "# N v1", "alice");
     if (!r1.ok) throw new Error("import failed");
     const slug = docSlug(r1.slug);
-    await w.importDocumentAtPath({
-      path: "a/notes.md",
-      markdown: "# N v2",
-      changedBy: "bob",
-    });
+    await importAt(w, "a/notes.md", "# N v2", "bob");
     expect((await w.getDocument(slug))?.docVersion).toBe(2);
     expect(await w.versionCount(slug)).toBe(2);
 
@@ -60,33 +65,26 @@ describe("renameFilename — head-only, distinct event", () => {
   });
 
   it("emits a distinct document.filename_changed event", async () => {
-    const w = ws();
-    const r1 = await w.importDocumentAtPath({
-      path: "policy.md",
-      markdown: "# Policy",
-      changedBy: by,
-    });
+    const w = await freshWorkspace();
+    const r1 = await importAt(w, "policy.md", "# Policy");
     if (!r1.ok) throw new Error("import failed");
     await w.renameFilename({
       slug: docSlug(r1.slug),
       filename: "policy-v2.md",
       changedBy: "dave",
     });
-    const [latest] = await w.recentChanges(1);
-    expect(latest).toMatchObject({
-      eventType: "document.filename_changed",
+    const changes = await w.recentChanges(10);
+    expect(
+      changes.find((e) => e.eventType === "document.filename_changed"),
+    ).toMatchObject({
       documentSlug: r1.slug,
       changedBy: "dave",
     });
   });
 
   it("an unchanged filename is an idempotent no-op (no event)", async () => {
-    const w = ws();
-    const r1 = await w.importDocumentAtPath({
-      path: "icp.md",
-      markdown: "# ICP",
-      changedBy: by,
-    });
+    const w = await freshWorkspace();
+    const r1 = await importAt(w, "icp.md", "# ICP");
     if (!r1.ok) throw new Error("import failed");
     const evtId = await w.lastEventId();
     expect(
@@ -102,17 +100,9 @@ describe("renameFilename — head-only, distinct event", () => {
 
 describe("renameFilename — cross-type sibling-namespace collision", () => {
   it("rejects a doc-vs-doc clash in the same folder", async () => {
-    const w = ws();
-    await w.importDocumentAtPath({
-      path: "docs/a.md",
-      markdown: "# A",
-      changedBy: by,
-    });
-    const rb = await w.importDocumentAtPath({
-      path: "docs/b.md",
-      markdown: "# B",
-      changedBy: by,
-    });
+    const w = await freshWorkspace();
+    await importAt(w, "docs/a.md", "# A");
+    const rb = await importAt(w, "docs/b.md", "# B");
     if (!rb.ok) throw new Error("import failed");
     expect(
       await w.renameFilename({
@@ -124,19 +114,11 @@ describe("renameFilename — cross-type sibling-namespace collision", () => {
     expect((await w.getDocument(docSlug(rb.slug)))?.filename).toBe("b.md");
   });
 
-  it("rejects a doc-vs-folder clash at the root", async () => {
-    const w = ws();
+  it("rejects a doc-vs-folder clash at the corpus root", async () => {
+    const w = await freshWorkspace();
     // Creates a root folder named `guide`.
-    await w.importDocumentAtPath({
-      path: "guide/intro.md",
-      markdown: "# Intro",
-      changedBy: by,
-    });
-    const rr = await w.importDocumentAtPath({
-      path: "readme.md",
-      markdown: "# Readme",
-      changedBy: by,
-    });
+    await importAt(w, "guide/intro.md", "# Intro");
+    const rr = await importAt(w, "readme.md", "# Readme");
     if (!rr.ok) throw new Error("import failed");
     expect(
       await w.renameFilename({
@@ -148,7 +130,7 @@ describe("renameFilename — cross-type sibling-namespace collision", () => {
   });
 
   it("returns missing for an unknown document", async () => {
-    const w = ws();
+    const w = await freshWorkspace();
     expect(
       await w.renameFilename({
         slug: docSlug("ghost"),
@@ -159,27 +141,13 @@ describe("renameFilename — cross-type sibling-namespace collision", () => {
   });
 });
 
-describe("renameFilename — path-map fan-out (title rename does NOT)", () => {
-  it("re-notifies folder-linking corpora; renameDocument does not", async () => {
-    const w = ws();
-    const rs = await w.importDocumentAtPath({
-      path: "team/setup.md",
-      markdown: "# Setup",
-      changedBy: by,
-    });
+describe("renameFilename — corpus tree fan-out (title rename does NOT)", () => {
+  it("re-notifies the document's corpus tree; renameDocument does not", async () => {
+    const w = await freshWorkspace();
+    const rs = await importAt(w, "team/setup.md", "# Setup");
     if (!rs.ok) throw new Error("import failed");
-    await w.importDocumentAtPath({
-      path: "team/other.md",
-      markdown: "# Other",
-      changedBy: by,
-    });
-    await w.createCorpus({ slug: colSlug("k"), name: "K", changedBy: by });
-    await w.attachFolderToCorpus(
-      colSlug("k"),
-      await folderSlug(w, "team"),
-      1,
-      by,
-    );
+    await importAt(w, "team/other.md", "# Other");
+    expect(await folderSlug(w, "team")).toBeDefined();
 
     const base = await countReordered(w);
 
@@ -191,8 +159,8 @@ describe("renameFilename — path-map fan-out (title rename does NOT)", () => {
     });
     expect(await countReordered(w)).toBe(base);
 
-    // Filename rename shifts the path map → exactly one fan-out event
-    // for the single linking corpus, plus the distinct doc event.
+    // Filename rename shifts the path map → exactly one tree-change event
+    // for the document's corpus, plus the distinct doc event.
     await w.renameFilename({
       slug: docSlug(rs.slug),
       filename: "setup-guide.md",

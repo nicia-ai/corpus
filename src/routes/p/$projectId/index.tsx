@@ -46,7 +46,7 @@ function EmptyProject(): React.ReactElement {
       onResult={(didSeed) => {
         if (didSeed) {
           showToast(
-            "Example loaded — edit any document to see linked corpora update.",
+            "Example loaded — two corpora, each its own folder of pages.",
           );
         }
         void router.invalidate();
@@ -55,9 +55,9 @@ function EmptyProject(): React.ReactElement {
   );
 }
 
-// Empty project: the ghost fan-out graph IS the empty state — the
-// product's one memorable thing (one document → many corpora → many
-// agents, no copies) is shown, not described. "Load our example" is the
+// Empty project: the ghost graph IS the empty state — the product's one
+// memorable thing (one corpus → many agents, no copies) is shown, not
+// described. "Load our example" is the
 // satisficing primary; Upload / Create are the other two doors. Seedable
 // while the only corpus is the empty default.
 function SeedChooser(

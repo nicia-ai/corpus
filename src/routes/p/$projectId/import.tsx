@@ -3,15 +3,19 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { showToast } from "@/components/ui/Toast";
 import { DocumentUploader } from "@/features/documents/DocumentUploader";
-import { asProjectId } from "@/ids";
+import { asCorpusSlug, asProjectId } from "@/ids";
 import { getCorpusList } from "@/lib/server/corpora";
 import { getDocumentList } from "@/lib/server/documents";
 import { getFolderList } from "@/lib/server/folders";
-import type { ImportSummary } from "@/project-store";
-import { DEFAULT_CORPUS_SLUG } from "@/store/domain/default-corpus";
+import type { ImportSummary } from "@/project-store/contracts";
 
 export const Route = createFileRoute("/p/$projectId/import")({
   component: Import,
+  // `?corpus=<slug>` aims the upload at the corpus you came from.
+  validateSearch: (search: Record<string, unknown>): { corpus?: string } =>
+    typeof search.corpus === "string" && search.corpus !== ""
+      ? { corpus: search.corpus }
+      : {},
   loader: async ({ params }) => {
     const { projectId } = params;
     const [corpora, folders, documents] = await Promise.all([
@@ -36,12 +40,8 @@ function importSummary(s: ImportSummary): string {
 function Import() {
   const { corpora, folders, documents } = Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
+  const { corpus } = Route.useSearch();
   const navigate = useNavigate();
-  // Home empty → Upload documents lands here. Mirror the Documents empty
-  // state: imported files join the default corpus so MCP can see them.
-  const defaultCorpus =
-    corpora.find((c) => c.slug === DEFAULT_CORPUS_SLUG) ?? corpora[0];
-
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader
@@ -53,19 +53,16 @@ function Import() {
         corpora={corpora}
         folders={folders}
         documents={documents}
-        {...(defaultCorpus === undefined
+        {...(corpus === undefined
           ? {}
-          : {
-              defaultCorpusSlug: defaultCorpus.slug,
-              autoLinkCorpus: true,
-            })}
+          : { initialCorpusSlug: asCorpusSlug(corpus) })}
         onComplete={(r) => {
-          // Land on Documents so the freshly-imported folder is visible,
-          // with the outcome flashed — no bespoke "upload complete" screen.
+          // Land on the corpus the files went into, with the outcome
+          // flashed — no bespoke "upload complete" screen.
           showToast(`Import complete — ${importSummary(r.summary)}`);
           void navigate({
-            to: "/p/$projectId/documents",
-            params: { projectId },
+            to: "/p/$projectId/corpora/$slug",
+            params: { projectId, slug: r.corpusSlug },
           });
         }}
       />

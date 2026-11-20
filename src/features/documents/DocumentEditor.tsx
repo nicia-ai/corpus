@@ -1163,6 +1163,7 @@ function collabToastMessage(
     case "collection.attached":
     case "collection.detached":
     case "collection.reordered":
+    case "collection.deleted":
       // Project/corpus-level changes don't warrant a per-document toast.
       return undefined;
     default: {

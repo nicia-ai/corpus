@@ -121,8 +121,10 @@ function StructureSection({
       <div>
         <h2 className="text-sm font-semibold text-slate-700">Structure</h2>
         <p className="text-sm text-slate-500">
-          Counts only, refreshed daily. Documents are live (non-archived);
-          corpus membership is resolved (direct plus folder).
+          Counts only, refreshed daily. Documents are live (non-archived).
+          Layout shows how far a project is from one tree per corpus: corpora
+          with a root, documents outside any root, and pre-drive links still
+          present.
         </p>
       </div>
       <div className={listSurface()}>
@@ -140,6 +142,7 @@ function StructureSection({
               <th className="px-4 py-2 text-right font-medium">
                 Cross-corpus links
               </th>
+              <th className="px-4 py-2 text-right font-medium">Layout</th>
               <th className="px-4 py-2 font-medium">Computed</th>
               <th className="px-4 py-2 font-medium">
                 <span className="sr-only">Actions</span>
@@ -188,6 +191,17 @@ function StructureRow({
       <td className={num}>{s === null ? "—" : s.corpora.maxMembers}</td>
       <td className={num}>{s === null ? "—" : s.folders.total}</td>
       <td className={num}>{s === null ? "—" : s.links.crossCorpus}</td>
+      <td className={`${num} whitespace-nowrap`}>
+        {s === null ? (
+          "—"
+        ) : (
+          <>
+            <div>{`${String(s.layout.corporaWithRoot)} / ${String(s.corpora.total)} rooted`}</div>
+            <div>{`${String(s.layout.documentsOutsideRoots)} outside roots`}</div>
+            <div>{`legacy ${String(s.layout.legacyDirectLinks)} doc / ${String(s.layout.legacyFolderLinks)} folder`}</div>
+          </>
+        )}
+      </td>
       <td className="px-4 py-2 text-slate-600">
         {row.computedAt === null ? (
           "Never"

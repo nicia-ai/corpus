@@ -10,7 +10,7 @@ import { z } from "zod";
 import {
   COLLECTION_DELIVERY_VALUES,
   DEFAULT_COLLECTION_DELIVERY,
-} from "./store/domain/collection-expand";
+} from "./store/domain/collection-delivery";
 import {
   alwaysIncludeBudgetTokensZ,
   DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS,
@@ -81,12 +81,10 @@ export const DocumentVersion = defineNode("DocumentVersion", {
   }),
 });
 
-// A collection: the ordered set of documents one agent reads. Members
-// are categorised at the edge level by `delivery` (`core` = pre-loaded
-// by `read_collection`; `reference` = stays in the outline, pulled on
-// demand). `alwaysIncludeBudgetTokens` is the per-collection size
-// threshold the authoring UI compares the assembled core set against —
-// informational; MCP never enforces it.
+// A collection — a corpus, the "drive" an agent reads: the documents under
+// its one root folder (the single `includes_folder` link). `alwaysIncludeBudgetTokens`
+// is a retired field kept so stored nodes and the bundle contract stay
+// decodable; nothing reads it.
 export const Collection = defineNode("Collection", {
   schema: z.object({
     slug: z.string().min(1),
@@ -128,16 +126,16 @@ export const Folder = defineNode("Folder", {
 
 const collectionMembershipSchema = z.object({
   position: z.number().int().nonnegative(),
-  // `core` is included by `read_collection`; `reference` stays reachable
-  // through the outline/list/read_document path. Default `core` so a
-  // programmatic attach (no tier specified) shows up in the corpus.
+  // Retired tier (`core` / `reference`), kept so edges written before
+  // corpora became drives still decode. New edges write the default.
   delivery: z
     .enum(COLLECTION_DELIVERY_VALUES)
     .default(DEFAULT_COLLECTION_DELIVERY),
 });
 
-// Direction Collection -> Document so read_collection is a one-hop `out`
-// traversal; `position` orders the assembled corpus (read app-side).
+// The pre-drive direct Collection -> Document link. Nothing creates one
+// any more (membership is "under the corpus root"); a project written
+// before drives still carries them until its layout migration removes them.
 export const includes = defineEdge("includes", {
   schema: collectionMembershipSchema,
   from: [Collection],
@@ -179,13 +177,10 @@ export const inFolder = defineEdge("in_folder", {
   to: [Folder],
 });
 
-// Collection -> a Folder it includes transitively (the folder→collection
-// link). `position` shares ONE space with `includes` so an author can
-// interleave direct documents and folder includes in a single order;
-// the shared resolver (store/domain/collection-expand.ts) merges both edge
-// lists by position and expands folders depth-first. The published
-// CollectionVersion stays a verbatim pinned-document snapshot — the link
-// is live only at authoring/read time.
+// Collection -> its root Folder: the ONE link a corpus has, and the only
+// way a document is "in" a corpus (it lives under that folder). `position`
+// and `delivery` are retired fields kept decodable; new links write
+// position 0 and the default tier.
 export const includesFolder = defineEdge("includes_folder", {
   schema: collectionMembershipSchema,
   from: [Collection],

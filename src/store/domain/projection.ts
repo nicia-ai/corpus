@@ -192,6 +192,7 @@ export function applyEvent(
     case "collection.attached":
     case "collection.detached":
     case "collection.reordered":
+    case "collection.deleted":
       return state;
   }
 }

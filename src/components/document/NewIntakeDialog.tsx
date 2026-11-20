@@ -74,8 +74,8 @@ export function NewIntakeDialog({
         <>
           <p className="mt-1 text-base text-slate-500">
             Creates an empty page and copies a prompt an agent can use to write
-            it. The agent can edit while the page is unserved. Switch the link
-            to Suggest in Share to review changes before publishing.
+            it. The agent can edit while the page is a draft. Switch the link to
+            Suggest in Share to review changes before publishing.
           </p>
           <div className="mt-4">
             <Field label="Title" value={title} onChange={setTitle} autoFocus />

@@ -9,8 +9,8 @@ type Store = ReturnType<typeof freshStore>;
 // Create-proposal lifecycle at the DO seam: an agent proposes a NEW
 // document (suggestCreate — the MCP entry), a human applies or rejects it.
 // Apply follows the import path's placement semantics (folders created as
-// needed) and attaches the created document to the proposing connection's
-// bound Corpus as `reference` — never always-include.
+// needed) and creates the document inside the proposing connection's bound
+// Corpus, at the proposed corpus-relative path.
 
 const AGENT = asCallerRef("apikey:agent-a");
 const BODY = "# Answer X\n\nthe answer body";
@@ -27,7 +27,11 @@ async function seedCorpus(store: Store): Promise<void> {
     name: "A",
     changedBy: "alice",
   });
-  await store.attachDocument(colSlug("col-a"), docSlug("doc-a"), 1, "alice");
+  await store.moveDocument(
+    docSlug("doc-a"),
+    { corpusSlug: colSlug("col-a"), folderSlug: null },
+    "alice",
+  );
 }
 
 async function propose(
@@ -91,7 +95,7 @@ describe("create-proposals (DO + D1 integration)", () => {
     expect(JSON.stringify(settled)).not.toContain("too late");
   });
 
-  it("apply creates the document at the proposed path and attaches it as reference", async () => {
+  it("apply creates the document at the proposed path in the bound corpus", async () => {
     const store = freshStore("cprop");
     await seedCorpus(store);
     const id = await propose(store, { path: "wiki/answer-x.md" });
@@ -109,7 +113,6 @@ describe("create-proposals (DO + D1 integration)", () => {
     if (!outline.found) throw new Error("outline missing");
     const member = outline.documents.find((d) => d.slug === "wiki-answer-x");
     expect(member?.path).toBe("wiki/answer-x.md");
-    expect(member?.delivery).toBe("reference");
 
     // Terminal: the proposal left the open list.
     expect(await store.listCreateProposals()).toHaveLength(0);
@@ -119,6 +122,7 @@ describe("create-proposals (DO + D1 integration)", () => {
     const store = freshStore("cprop");
     await seedCorpus(store);
     await store.importDocumentAtPath({
+      corpusSlug: colSlug("col-a"),
       path: "wiki/notes.md",
       markdown: "# occupied",
       changedBy: "alice",
@@ -134,6 +138,7 @@ describe("create-proposals (DO + D1 integration)", () => {
     expect(taken).toEqual({ ok: false, reason: "taken" });
     // Root-level slots are checked the same way…
     await store.importDocumentAtPath({
+      corpusSlug: colSlug("col-a"),
       path: "readme.md",
       markdown: "# root",
       changedBy: "alice",
@@ -160,6 +165,7 @@ describe("create-proposals (DO + D1 integration)", () => {
     // the cross-type namespace: a document may not share a sibling
     // folder's name.
     await store.importDocumentAtPath({
+      corpusSlug: colSlug("col-a"),
       path: "wiki/notes.md/inner.md",
       markdown: "# inner",
       changedBy: "alice",
@@ -178,6 +184,7 @@ describe("create-proposals (DO + D1 integration)", () => {
     const id = await propose(store, { path: "wiki/report.md" });
     // The race: a folder named "report.md" lands under wiki/ before apply.
     await store.importDocumentAtPath({
+      corpusSlug: colSlug("col-a"),
       path: "wiki/report.md/inner.md",
       markdown: "# inner",
       changedBy: "alice",
@@ -204,6 +211,7 @@ describe("create-proposals (DO + D1 integration)", () => {
     // a collision (filename uniqueness is per-folder; regression for the
     // folder-scoped save-path check).
     await store.importDocumentAtPath({
+      corpusSlug: colSlug("col-a"),
       path: "readme.md",
       markdown: "# root readme",
       changedBy: "alice",
@@ -277,6 +285,7 @@ describe("create-proposals (DO + D1 integration)", () => {
     });
     if (!withPath.ok) throw new Error("propose failed");
     await store.importDocumentAtPath({
+      corpusSlug: colSlug("col-a"),
       path: "dir/file.md",
       markdown: "import got the slot",
       changedBy: "alice",

@@ -1,19 +1,12 @@
-// The single, pure folder→corpus resolver. Given a corpus's
-// ordered mix of direct-document and folder includes (one shared
-// position space) plus the linked folders' subtree as plain data, it
-// produces the flat, deterministic, deduplicated document order an
-// agent receives. Zero-IO so it is unit-tested without a DO; every
-// consumer (readCorpus, the CorpusVersion snapshot, MCP, bundle
-// export) routes through it so the expansion rule can never drift
-// between surfaces.
+import { type CollectionDelivery, corpusDelivery } from "./collection-delivery";
 
-export const COLLECTION_DELIVERY_VALUES = ["core", "reference"] as const;
-export type CollectionDelivery = (typeof COLLECTION_DELIVERY_VALUES)[number];
-export const DEFAULT_COLLECTION_DELIVERY: CollectionDelivery = "core";
-
-export function corpusDelivery(value: unknown): CollectionDelivery {
-  return value === "reference" ? "reference" : DEFAULT_COLLECTION_DELIVERY;
-}
+// The pre-drive folder→corpus resolver, kept ONLY so the operator stats can
+// describe a project that has not been laid out as drives yet (direct vs
+// folder inclusion, resolved order, effective core/reference tier). Nothing
+// that serves a corpus uses it: a corpus's documents are whatever is under
+// its root. Given a corpus's ordered mix of direct-document and folder
+// entries (one shared position space) plus the linked folders' subtree as
+// plain data, it yields the flat, deduplicated order the old model served.
 
 export type ExpandEntry = Readonly<
   | {
@@ -67,13 +60,6 @@ function byPosition(a: ExpandEntry, b: ExpandEntry): number {
 // reached both directly and via a folder (or via two folders) appears
 // once, at its earliest position. Cycle-guarded defensively even though
 // the single-parent invariant forbids folder cycles.
-export function expandCorpus(
-  entries: readonly ExpandEntry[],
-  tree: FolderTree,
-): readonly string[] {
-  return expandCorpusDocuments(entries, tree).map((d) => d.slug);
-}
-
 export function expandCorpusDocuments(
   entries: readonly ExpandEntry[],
   tree: FolderTree,

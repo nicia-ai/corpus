@@ -26,8 +26,10 @@ just chose is pre-selected — confirm it, then consent.
 | **API key**             | Scripts, CI, or agents that can't do an OAuth flow.                 | A bearer token bound to one Connection (see [API keys](./api-keys.md)).        |
 
 Either way, the credential reaches **only** the Connection's bound
-Corpus. Documents in other Corpora — or in the same Project but not
-attached to this Corpus — are not reachable.
+Corpus. Documents in other Corpora, and documents in **Drafts**, are not
+reachable. Drafts cannot be connected to an agent or an API key at all.
+To give an agent knowledge from several corpora, connect it to each one
+(see [Connecting several corpora](#connecting-several-corpora)).
 
 ## Client setup
 
@@ -126,8 +128,7 @@ the Connection's bound Corpus:
 | Tool                    | Does                                                                                                                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `list_collections`      | The Corpus this connection is bound to (a connection targets exactly one).                                                                                                        |
-| `read_collection`       | The always-included guidance for the bound Corpus. No `collectionSlug` is needed.                                                                                                 |
-| `list_documents`        | The documents in the bound Corpus — path, slug, title, version, size, and a `delivery` field (`"core"` = always-included, `"reference"` = on-demand).                             |
+| `list_documents`        | Every document in the bound Corpus, in alphabetical order by path — path, slug, title, version, and size. Paths are relative to the corpus root.                                  |
 | `read_document`         | Read one document's markdown, verbatim, by `path` or `slug`.                                                                                                                      |
 | `read_document_meta`    | Parsed YAML frontmatter for one document in the bound Corpus, by `path` or `slug`.                                                                                                |
 | `verify_history`        | Verify a document's (or the bound Corpus's) version chain is intact.                                                                                                              |
@@ -137,9 +138,8 @@ the Connection's bound Corpus:
 | `reply_to_proposal`     | Reply inside one of this caller's still-open proposals. It cannot access document comments, resolve feedback, or act on another caller's proposal.                                |
 
 The same data is also exposed as MCP **resources**:
-`collection://<slug>`, `collection://<slug>/outline`, and
-`document://<slug>` — handy for clients that browse resources rather
-than call tools. Resources are scoped the same way; you won't see
+`collection://<slug>/outline` and `document://<slug>` — handy for clients that browse
+resources rather than call tools. Resources are scoped the same way; you won't see
 slugs outside the bound Corpus.
 
 There is **no direct canonical write tool and no search tool**. Agents consume
@@ -169,33 +169,34 @@ the reply tool neither resolves feedback nor changes canonical content. A
 revised proposal starts a new review thread; the settled predecessor remains an
 immutable audit record rather than silently carrying messages into new work.
 
-For anything beyond a small rules-style Corpus, toggle **Always
-include** on for the documents the agent must always start from and
-leave the rest on-demand. `read_collection` returns the always-included
-set; the agent browses `collection://<slug>/outline` and calls
-`read_document` for on-demand documents when relevant. A large
-always-include set dilutes the agent's attention and burns its window,
-so keep it small (or raise the corpus's always-include budget if
-you're feeding a larger context window).
+The agent has no built-in reading list. It calls `list_documents`, then
+reads the documents its task needs with `read_document`. A corpus has no
+manual ordering and no size budget, so the list is the whole picture.
 
 ## Edits take effect on the next call
 
-Adding or removing a document from the bound Corpus — or editing one
-in place — takes effect on the agent's **next request**. No re-paste,
-no reconnect, no token reissue. The Corpus is the live source of
-truth.
+Editing a document in the bound Corpus, or moving a document into or out
+of it, takes effect on the agent's **next request**. No re-paste, no
+reconnect, no token reissue. The Corpus is the live source of truth.
 
 ## Telling the agent to use it
 
 Connecting only makes the tools available. Instruct the agent to use
 them — in a prompt, or in the agent's own rules file:
 
-> Work from the corpus you're connected to. Read the
-> outline, follow its always-included guidance, and read individual
-> on-demand documents when relevant to the task.
+> Work from the corpus you're connected to. List its documents, and
+> read the ones relevant to the task.
 
 You don't need to name the Corpus in the prompt: the connection IS
 the Corpus.
+
+## Connecting several corpora
+
+Knowledge for several audiences is shared by connecting one agent to
+several corpora — for example a **Company** corpus and a **Support desk**
+corpus. Add one entry per corpus, each with its own server name
+(`corpus-company`, `corpus-support-desk`). The agent then reads from each
+of them, and every document still lives in exactly one corpus.
 
 ### Reference Corpus documents by path
 
@@ -204,6 +205,8 @@ does not give the agent a `./docs/` directory — each file becomes a
 document the agent reads over MCP. Corpus preserves the uploaded path
 as a first-class address, so an agent can read `docs/brand-voice.md`
 through `read_document` even though there is no local file at that path.
+Paths are relative to the corpus root; the root itself is never part of
+the path.
 
 Use an explicit Corpus instruction in durable prompts so filesystem
 agents do not look on local disk first:

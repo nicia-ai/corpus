@@ -43,6 +43,10 @@ export class DocumentRepo {
     return node;
   }
 
+  // Heads for a set of slugs, parallel to the input. `bulkFindByIndex` does
+  // not split its bind list, and a Durable Object's SQLite allows only 100
+  // bound variables a statement (it needs a few per slug), so the set is read
+  // in chunks: a statement per chunk, not one per document.
   async findMany(
     slugs: readonly DocumentSlug[],
   ): Promise<readonly (DocumentNode | undefined)[]> {

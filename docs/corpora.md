@@ -1,87 +1,127 @@
 ---
 title: Corpora
-description: Grouping documents into an ordered corpus — the unit an agent reads as one corpus — plus the per-corpus always-include budget and what the agent actually receives.
+description: Corpora are drives of markdown documents — each document belongs to exactly one corpus, agents connect to the corpora they need, and Drafts is the unpublished space.
 sidebar:
   order: 4
 ---
 
-A **corpus** is an ordered set of documents assembled into one body of
-markdown. It is the unit an agent reads. Point every agent that should
-share a body of knowledge at the same corpus and they all see the same
-source of truth.
+A **corpus** is a self-contained drive: a tree of folders and markdown
+documents that belongs together. Every document lives in exactly one
+corpus, and nothing lives outside one. An agent connected to a corpus
+sees that drive as a folder of markdown files and reads what its task
+needs.
+
+Corpora do not nest. A corpus cannot hold another corpus, and a document
+cannot belong to two corpora.
 
 ## Creating a corpus
 
 **Corpora → Corpus**. Give it a **Name** and an optional
-**Description**, then **Create corpus**. The name becomes the slug an
-agent uses to address it (e.g. `read_collection` with `backend-agent`).
+**Description**, then **Create corpus**. The name is the corpus's slug
+in the API and CLI.
 
 Pick names by _who reads it_, not by topic — `backend-agent`,
-`support-bot`, `release-reviewer`. One document can sit in many
-corpora, so you don't duplicate content to serve different audiences.
+`support-desk`, `company`. Because each document belongs to one corpus,
+you don't copy content to serve different audiences. Put shared
+knowledge in its own corpus and connect each agent to every corpus it
+needs (see [Sharing knowledge between corpora](#sharing-knowledge-between-corpora)).
 
-## Adding and ordering documents
+## Adding documents and folders
 
-On the corpus page:
+Documents start in **Drafts** (see below). To put a document into a
+corpus, open it or select it in the list and choose **Move**, then pick
+the corpus. Folders move the same way: **Move folder to…** moves the
+folder and everything in it.
 
-- **Add documents** — search by title, filename, or path and click **Add**.
-  Added documents land on-demand by default: they're listed in the
-  corpus's outline and the agent pulls them by path when relevant.
-- **Add folders** — add a whole folder the same way; new documents in
-  that folder join automatically.
-- **Always include** — toggle the switch on a document (or folder) row
-  to pre-load it into every `read_collection` call. Use this for the
-  small set of guidance an agent should always start from (brand voice,
-  policy constraints, architecture rules).
-- **Reorder** — drag the handle on a row. Order is the sequence in the
-  assembled corpus and the order the agent sees in the outline, so put
-  the most important framing first.
-- **Detach** — the remove button on a row removes the document from this
-  corpus. The document itself is untouched and stays in any other
-  corpus.
+Any project member can move documents and folders between corpora. A
+moved document keeps its history, comments, proposals and share links.
 
-The mental default is "on demand." Promote a document to **Always
-include** only when the agent should not have to choose whether to read
-it.
+Paths are relative to the corpus root. A document at
+`policies/refunds.md` inside the **Company** corpus is shown and read as
+`policies/refunds.md`. The corpus's own root folder is internal and is
+never part of a path.
 
-## Always-include budget
+Agents list a corpus's documents in alphabetical order by path. There is
+no manual ordering, no always-included set, and no size budget: an agent
+lists the corpus, then reads the documents its task needs.
 
-Each corpus has its own **always-include budget** (default
-**8,000 tokens**, configurable per corpus in **Edit**). The header
-shows the always-included document count and an estimated total token
-size compared against that budget. Past the budget the meter turns
-amber.
+## Drafts
 
-The budget is **authoring-side guidance only** — `read_collection`
-still ships every document you've marked Always include, regardless of
-size. The meter is there so you see the cost of what you've configured
-before an agent does. Raise the budget for corpora feeding a larger
-context window; lower it to keep a corpus lean.
+Every project has one built-in corpus called **Drafts**. It is the
+unpublished space. New pages and pages shared by link start there.
 
-A bloated always-include set dilutes the agent's attention and burns
-its window. Prefer several focused corpora over one
-everything-corpus. See [Recipes](./recipes.md) for how to split.
+Drafts is not served. It cannot be connected to an agent or an API key,
+and agents never see its contents. Moving a page out of Drafts into a
+named corpus publishes it. Moving it back into Drafts unpublishes it.
 
-## What the agent actually receives
+Drafts cannot be deleted.
 
-`read_collection` returns the **Always include** documents concatenated
-**in your order** as one markdown string, at each document's current
-version, plus a provenance manifest.
+## Sharing knowledge between corpora
 
-The remaining (on-demand) documents are exposed through the structured
-**outline** — the `collection://<slug>/outline` resource: the document
-list with derived paths and a resolved link graph. The agent reads
-individual on-demand documents with `read_document` as it needs them,
-rather than ingesting everything at once.
+Knowledge that several audiences need is shared by connecting one agent
+to several corpora, not by placing one document in two corpora. The
+example project shows the pattern:
 
-A Connection is bound to exactly one Corpus, so the agent does not
-need to pass a `corpusSlug`; the bound Corpus is the scope. The
-credential cannot read documents outside that Corpus.
+- **Company** — refund policy, product, brand voice.
+- **Support desk** — the support playbook.
 
-## Editing a corpus
+A support agent connects to both. It reads the company policy and the
+playbook from the two corpora it is connected to, and each document is
+edited in one place.
 
-Use **Edit** on the corpus page to change its name, description, or
-**always-include budget**. Attaching, detaching, reordering, or
-toggling Always include on individual documents takes effect on the
-next read — there's nothing to publish or deploy. Update a document and
-every corpus containing it serves the new version immediately.
+Links between corpora still work in the web app. When a link points at
+a document in a different corpus, the editor warns that the document is
+_in a different corpus — agents connected to this corpus can't read it_.
+
+## Deleting a corpus
+
+Only a project owner can delete a corpus. Deleting asks what should
+happen to its pages:
+
+- **Delete its pages too** (pre-selected). Pages are archived, not erased.
+  Their history is kept, and their share links stop working.
+- **Move its pages to Drafts.** Pages are kept and unpublished. Agents
+  can no longer read them until you move them into a corpus.
+
+Either way, agents and API keys connected to the corpus are removed.
+
+## What the agent receives
+
+A connected agent sees the corpus as a folder of markdown files. Its
+tools are listed in [Connect your agent](./connect-your-agent.md#what-the-agent-can-do):
+
+- `list_collections` describes the corpus the connection is bound to.
+- `list_documents` lists every file, by corpus-relative path, in
+  alphabetical order.
+- `read_document` returns one document's markdown, verbatim, by path or
+  slug.
+
+Nothing is delivered automatically. The agent is not handed a README,
+an index, or the whole corpus on connect. It lists, then reads.
+
+A Connection is bound to exactly one corpus, so the agent does not pass
+a corpus name. The credential cannot read documents outside that corpus.
+
+Agents cannot write canonical content. They can only file a proposal
+with `suggest_edit`, which a person reviews in the web app.
+
+## Editing and moving take effect on the next call
+
+Editing a document, moving it into or out of the bound corpus, and
+moving folders take effect on the agent's next request. There is nothing
+to publish or deploy.
+
+## Upgrading from an earlier version
+
+Projects created before this model are migrated automatically the first
+time they are opened:
+
+- Each existing corpus keeps its documents, under a root folder for that
+  corpus. Each document keeps its path inside it.
+- Documents that were in no corpus move to Drafts.
+- A document that was in two or more corpora goes to one of them: a corpus
+  that would otherwise have no pages if there is one, otherwise the
+  earliest-created. The activity log records where it went.
+- If an agent was connected to the old default corpus, the pages that corpus
+  held become a corpus called **General** and the agent stays connected to
+  it. Pages that were in no corpus stay in Drafts and are never shared.

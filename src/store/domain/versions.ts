@@ -1,7 +1,7 @@
 import type { CorpusSlug, DocumentSlug } from "../../ids";
 import { compact } from "../../util";
 
-import type { CollectionDelivery } from "./collection-expand";
+import type { CollectionDelivery } from "./collection-delivery";
 
 // Pure constructors for the version-model nodes — the single place the
 // genesis rule (`prevContentHash === null` at v1) and the

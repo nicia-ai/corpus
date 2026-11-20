@@ -148,14 +148,15 @@ describe("markdown byte cap — DO commands (the authority)", () => {
 
   it("bulk import skips the oversized file with a per-file reason and lands the rest", async () => {
     const store = freshStore("cap");
-    const summary = await store.importDocuments(
-      [
+    const result = await store.importIntoCorpus({
+      entries: [
         { path: "notes/huge.md", markdown: OVERSIZED },
         { path: "notes/fine.md", markdown: "# Fine" },
       ],
-      by,
-    );
-    expect(summary).toEqual({
+      destination: { mode: "new", name: "Caps" },
+      changedBy: by,
+    });
+    expect(result?.summary).toEqual({
       created: 1,
       updated: 0,
       failed: [{ path: "notes/huge.md", reason: "too-large" }],
@@ -163,6 +164,10 @@ describe("markdown byte cap — DO commands (the authority)", () => {
     expect(
       (await store.getDocument(docSlug("notes-fine")))?.markdown,
     ).toContain("Fine");
+    const landed = await store.corpusMembers(
+      result?.corpusSlug ?? colSlug("none"),
+    );
+    expect(landed).toEqual([docSlug("notes-fine")]);
   });
 });
 
@@ -212,10 +217,9 @@ async function mintKey(): Promise<string> {
     clientVersion: 0,
     changedBy: ownerUserId,
   });
-  await store.attachDocument(
-    conn.corpusSlug,
+  await store.moveDocument(
     docSlug(MEMBER_SLUG),
-    0,
+    { corpusSlug: conn.corpusSlug, folderSlug: null },
     ownerUserId,
   );
 
@@ -283,7 +287,11 @@ async function mcpSetup(): Promise<ReturnType<typeof scopedExecutor>> {
     name: "A",
     changedBy: "alice",
   });
-  await store.attachDocument(colSlug("col-a"), docSlug("doc-a"), 1, "alice");
+  await store.moveDocument(
+    docSlug("doc-a"),
+    { corpusSlug: colSlug("col-a"), folderSlug: null },
+    "alice",
+  );
   const members = (await store.corpusMembers(colSlug("col-a"))) ?? [];
   return scopedExecutor(
     store,

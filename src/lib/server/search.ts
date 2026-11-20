@@ -1,7 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { asDocumentSlug, type DocumentSlug } from "@/ids";
+import {
+  asCorpusSlug,
+  asDocumentSlug,
+  type CorpusSlug,
+  type DocumentSlug,
+} from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import { storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
@@ -13,6 +18,8 @@ import { assertServerContext as srv } from "@/lib/server-context";
 export type SearchHit = Readonly<{
   slug: DocumentSlug;
   title: string;
+  corpusSlug: CorpusSlug;
+  // Relative to the corpus root.
   path: string;
   // Highlighted excerpt with `<mark>…</mark>` around matched terms; empty
   // when the backend produced no fragment.
@@ -27,6 +34,7 @@ export const searchDocuments = createServerFn({ method: "GET" })
     return hits.map((h) => ({
       slug: asDocumentSlug(h.slug),
       title: h.title,
+      corpusSlug: asCorpusSlug(h.corpusSlug),
       path: h.path,
       snippet: h.snippet,
     }));

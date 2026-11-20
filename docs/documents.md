@@ -6,13 +6,17 @@ sidebar:
 ---
 
 A **document** is one markdown file. It is the atom of your canonical
-corpus: written once, versioned forever, and read by every agent
-connected to its corpus.
+corpus: written once, versioned forever, and belonging to exactly one
+[corpus](./corpora.md).
 
 ## Creating a document
 
 **Documents → Document** (the **+** button). Enter a **Title** and the
 **Markdown** body, then **Create**.
+
+A new document starts in **Drafts**, the unpublished space. Agents
+cannot see it there. To publish it, move it into a corpus: open it,
+choose **Move**, and pick the corpus. See [Corpora](./corpora.md).
 
 The title is turned into a stable **slug** — `API Style Guide` becomes
 `api-style-guide`. The slug is the document's stable internal identity,
@@ -110,15 +114,17 @@ Have docs already written somewhere? Click **Upload** on the Documents
 page (or drop files into the empty-state uploader). Drag a folder, pick
 individual files, or drop a `.zip` — Corpus keeps the folder structure,
 imports every Markdown/text file under it, and lands you on Documents
-with a summary toast (`12 added · 3 updated · 1 failed`). Each imported
-file becomes a canonical document; re-uploading an unchanged file is a
-no-op, and an edited file appends a new version. The same slug-collision
-rule applies within a folder.
+with a summary toast (`12 added · 3 updated · 1 failed`). Choose the
+corpus the files land in; leave it on Drafts to publish them later. Each
+imported file becomes a canonical document; re-uploading an unchanged
+file is a no-op, and an edited file appends a new version. The same
+slug-collision rule applies within a folder.
 
 ## What an agent sees
 
-When an agent reads a document (directly, or as part of a corpus) it
-gets the **exact markdown** you wrote, at the current version. Write for
+When an agent reads a document from its corpus, it gets the **exact
+markdown** you wrote, at the current version. Documents in Drafts are
+never returned to an agent. Write for
 the agent: clear headings, explicit rules, no implicit context. See
 [Recipes](./recipes.md) for patterns.
 

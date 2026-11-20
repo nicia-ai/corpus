@@ -1,4 +1,4 @@
-import type { CollectionDelivery } from "./collection-expand";
+import type { CollectionDelivery } from "./collection-delivery";
 import { DEFAULT_CORPUS_SLUG } from "./default-corpus";
 
 // Pure, zero-IO structural aggregation over one Project. Counts only:
@@ -7,7 +7,7 @@ import { DEFAULT_CORPUS_SLUG } from "./default-corpus";
 // Unit-tested over a hand-built fixture (test/project-stats.test.ts).
 
 // Bump when a field's meaning or presence changes; stored beside the JSON.
-export const PROJECT_STATS_SCHEMA_VERSION = 1;
+export const PROJECT_STATS_SCHEMA_VERSION = 2;
 
 export type StatsDocument = Readonly<{
   slug: string;
@@ -31,12 +31,23 @@ export type StatsFolder = Readonly<{
 
 export type StatsLink = Readonly<{ sourceSlug: string; targetSlug: string }>;
 
+// How far the project is from the drive layout (every corpus has a root, every
+// document sits under one, no pre-drive links remain). All zero except
+// `corporaWithRoot` (= corpora) once it has been laid out.
+export type StatsLayout = Readonly<{
+  corporaWithRoot: number;
+  documentsOutsideRoots: number;
+  legacyDirectLinks: number;
+  legacyFolderLinks: number;
+}>;
+
 export type ProjectStatsInput = Readonly<{
   archivedDocuments: number;
   liveDocuments: readonly StatsDocument[];
   corpora: readonly StatsCorpus[];
   folders: readonly StatsFolder[];
   links: readonly StatsLink[];
+  layout: StatsLayout;
 }>;
 
 export type CorpusStats = Readonly<{
@@ -77,6 +88,7 @@ export type ProjectStats = Readonly<{
     includedByTwoOrMoreCorpora: number;
   }>;
   sameFilenamePairsAcrossCorpora: number;
+  layout: StatsLayout;
   links: Readonly<{
     resolved: number;
     crossCorpus: number;
@@ -252,6 +264,7 @@ export function computeProjectStats(input: ProjectStatsInput): ProjectStats {
       ),
     },
     sameFilenamePairsAcrossCorpora: sameFilenamePairs,
+    layout: input.layout,
     links: { resolved: resolvedLinks.length, crossCorpus },
   };
 }

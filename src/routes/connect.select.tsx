@@ -81,14 +81,14 @@ function SelectConnection() {
         title="Choose a corpus for this agent"
         subtitle={
           empty
-            ? "No corpora are set up for agent access yet. Open a corpus in Corpus and click “Connect this corpus” first."
+            ? "No corpora are set up for agent access yet. Open a corpus in Corpus and click Connect first."
             : CORPUS_SCOPE_PROMISE
         }
       />
       {empty ? (
         <EmptyState>
-          Open a corpus in Corpus and click <strong>Connect this corpus</strong>
-          , then restart this agent&rsquo;s sign-in.
+          Open a corpus in Corpus and click <strong>Connect</strong>, then
+          restart this agent&rsquo;s sign-in.
         </EmptyState>
       ) : (
         <form

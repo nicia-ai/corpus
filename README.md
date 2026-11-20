@@ -27,9 +27,8 @@ corpora, and folders.
 That document/corpus/folder model is built on
 **[TypeGraph](https://typegraph.dev)**, our open-source typed-graph
 library — Corpus's sibling in the knowledge stack (TypeGraph for
-structure, Corpus for context). Because a corpus and its documents are one
-graph, one approved edit reaches every agent that reads that corpus at
-once. TypeGraph's
+structure, Corpus for context). Every document belongs to exactly one
+corpus, so one edit updates every agent that reads that corpus at once. TypeGraph's
 node-unique `(slug, docVersion)` constraint gives optimistic-concurrency
 conflict detection for free: a racing save becomes a 409 conflict, never
 a lost write. The same graph underpins the verifiable, append-only
@@ -47,15 +46,17 @@ version history.
   restored from. General document review stays off MCP and the full review
   layer stays out of the bundle; an originating agent can only retrieve and
   reply inside its own proposal.
-- **Corpora** — a set of documents an agent reads as one body of
-  knowledge, with a token-size estimate so you can see when a corpus is
-  too large for an agent to use well.
+- **Corpora** — a self-contained drive of folders and markdown
+  documents. Every document belongs to exactly one corpus; agents connect
+  to one or more corpora. **Drafts** is the built-in unpublished space:
+  pages there are never served, and moving a page into a corpus publishes
+  it.
 - **MCP** — each project exposes an MCP endpoint (`/mcp`) authenticated
   by OAuth bearer token or `cck_`-prefixed API key. An agent only ever
   sees the Corpus its credential is bound to. It reads documents and
   corpora, and can **propose edits — and new documents** with
   `suggest_edit`: a reviewable suggestion a human accepts or rejects
-  (per hunk for edits; create-then-attach for a proposed new document),
+  (per hunk for edits; a proposed new document is reviewed the same way),
   never an auto-applied write. Agents propose; only humans approve. With
   `get_proposal_result`, the originating caller can retrieve the outcome,
   accepted hunks, resulting version, and optional reviewer note. The proposal

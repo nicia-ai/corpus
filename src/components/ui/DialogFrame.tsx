@@ -29,7 +29,7 @@ export function DialogFrame({
         aria-modal="true"
         aria-labelledby={titleId}
         className={cn(
-          "relative w-full rounded-lg border border-slate-200 bg-white p-6 shadow-sm",
+          "relative max-h-[calc(100dvh-2rem)] w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-sm",
           widthClass,
         )}
       >

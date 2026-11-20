@@ -4,11 +4,14 @@ import { colSlug, docSlug, freshStore } from "./_helpers";
 
 type Store = ReturnType<typeof freshStore>;
 
-// `createDocumentInCorpus` is the corpus-scoped REST create path
-// (api-key PUT to a slug the transport's member snapshot didn't list). The
-// decision is re-made inside the write transaction, so a stale snapshot —
-// or a racing create that won between snapshot and write — resolves to the
-// right HTTP outcome rather than a misleading 403.
+// `saveDocumentInCorpus` is the corpus-scoped REST create path (api-key PUT
+// to a slug the transport's member snapshot didn't list). The decision is
+// re-made inside the write transaction, so a stale snapshot — or a racing
+// create that won between snapshot and write — resolves to the right HTTP
+// outcome rather than a misleading 403.
+
+const NEW_DOCUMENT_VERSION = 0;
+const FIRST_DOCUMENT_VERSION = 1;
 
 async function withCorpus(
   prefix: string,
@@ -23,43 +26,46 @@ async function withCorpus(
   return { store, corpusSlug };
 }
 
-describe("createDocumentInCorpus (scoped create)", () => {
-  it("creates a new document and attaches it to the corpus", async () => {
+describe("saveDocumentInCorpus (scoped create)", () => {
+  it("creates a new document in the bound corpus", async () => {
     const { store, corpusSlug } = await withCorpus("cic-new");
     const slug = docSlug("brand-new");
     expect(
-      await store.createDocumentInCorpus(
-        { slug, markdown: "# New\n\nbody", clientVersion: 0, changedBy: "a" },
+      await store.saveDocumentInCorpus(
+        {
+          slug,
+          markdown: "# New\n\nbody",
+          clientVersion: NEW_DOCUMENT_VERSION,
+          changedBy: "a",
+        },
         corpusSlug,
-        0,
       ),
-    ).toMatchObject({ ok: true, docVersion: 1 });
+    ).toMatchObject({ ok: true, docVersion: FIRST_DOCUMENT_VERSION });
     expect(await store.corpusMembers(corpusSlug)).toContain(slug);
     expect((await store.getDocument(slug))?.markdown).toBe("# New\n\nbody");
   });
 
-  // An agent push must not grow the always-include payload: the curator
-  // opts a member into "core" delivery, never the create path itself.
-  it("attaches a created document with reference delivery", async () => {
-    const { store, corpusSlug } = await withCorpus("cic-delivery");
+  // A new document lands at the corpus root under its default filename, so
+  // the outline reports the corpus-relative path an agent will address it by.
+  it("places a created document at its corpus-relative path", async () => {
+    const { store, corpusSlug } = await withCorpus("cic-path");
     const slug = docSlug("pushed-by-agent");
     expect(
-      await store.createDocumentInCorpus(
+      await store.saveDocumentInCorpus(
         {
           slug,
           markdown: "# Pushed\n\nbody",
-          clientVersion: 0,
+          clientVersion: NEW_DOCUMENT_VERSION,
           changedBy: "a",
         },
         corpusSlug,
-        0,
       ),
-    ).toMatchObject({ ok: true, docVersion: 1 });
+    ).toMatchObject({ ok: true, docVersion: FIRST_DOCUMENT_VERSION });
     const outline = await store.corpusOutline(corpusSlug);
     expect(outline.found).toBe(true);
     if (!outline.found) return;
-    expect(outline.documents.map((d) => [d.slug, d.delivery])).toEqual([
-      [slug, "reference"],
+    expect(outline.documents.map((d) => [d.slug, d.path])).toEqual([
+      [slug, `${slug}.md`],
     ]);
   });
 
@@ -72,49 +78,64 @@ describe("createDocumentInCorpus (scoped create)", () => {
     const { store, corpusSlug } = await withCorpus("cic-race");
     const slug = docSlug("contested");
     const create = (): Promise<unknown> =>
-      store.createDocumentInCorpus(
-        { slug, markdown: "# v1\n\nfirst", clientVersion: 0, changedBy: "a" },
+      store.saveDocumentInCorpus(
+        {
+          slug,
+          markdown: "# v1\n\nfirst",
+          clientVersion: NEW_DOCUMENT_VERSION,
+          changedBy: "a",
+        },
         corpusSlug,
-        0,
       );
-    expect(await create()).toMatchObject({ ok: true, docVersion: 1 }); // winner
+    expect(await create()).toMatchObject({
+      ok: true,
+      docVersion: FIRST_DOCUMENT_VERSION,
+    }); // winner
     expect(await create()).toMatchObject({
       ok: false,
       conflict: true,
-      currentVersion: 1,
+      currentVersion: FIRST_DOCUMENT_VERSION,
     });
   });
 
   it("refuses (forbidden) a slug that exists OUTSIDE the bound corpus", async () => {
     const { store, corpusSlug } = await withCorpus("cic-out");
     const slug = docSlug("outsider");
-    // Loose document — created in the project but never attached.
+    // Lives in the default corpus (the drafts space), never the bound one.
     await store.saveDocument({
       slug,
       markdown: "secret",
-      clientVersion: 0,
+      clientVersion: NEW_DOCUMENT_VERSION,
       changedBy: "owner",
     });
     expect(
-      await store.createDocumentInCorpus(
-        { slug, markdown: "hijack", clientVersion: 0, changedBy: "intruder" },
+      await store.saveDocumentInCorpus(
+        {
+          slug,
+          markdown: "hijack",
+          clientVersion: NEW_DOCUMENT_VERSION,
+          changedBy: "intruder",
+        },
         corpusSlug,
-        0,
       ),
     ).toMatchObject({ ok: false, forbidden: true });
   });
 
-  // "Created" must mean "created AND attached". If the bound corpus is
-  // gone when the attach runs, the whole unit rolls back — no document is
-  // left created-but-unattached (which would be outside its own scope).
+  // "Created" must mean "created AND placed". If the bound corpus is gone
+  // when the create runs, nothing is written — no document is left
+  // created-but-outside-its-scope.
   it("rolls back with no orphan when the bound corpus is gone", async () => {
     const store = freshStore("cic-ghost");
     const slug = docSlug("orphan-me");
     expect(
-      await store.createDocumentInCorpus(
-        { slug, markdown: "# x\n\ny", clientVersion: 0, changedBy: "a" },
+      await store.saveDocumentInCorpus(
+        {
+          slug,
+          markdown: "# x\n\ny",
+          clientVersion: NEW_DOCUMENT_VERSION,
+          changedBy: "a",
+        },
         colSlug("never-created"),
-        0,
       ),
     ).toMatchObject({ ok: false, forbidden: true });
     expect(await store.getDocument(slug)).toBeUndefined();

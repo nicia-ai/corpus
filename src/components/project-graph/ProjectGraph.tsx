@@ -1,8 +1,5 @@
 import { useMemo } from "react";
 
-import { CorpusCountBadge } from "@/components/ui/CorpusCountBadge";
-import { compact } from "@/util";
-
 import {
   columnX,
   GRAPH_GEOMETRY,
@@ -11,12 +8,11 @@ import {
   linkageSentences,
 } from "./layout";
 
-const COLUMN_LABELS = ["Documents", "Corpora", "Agents"] as const;
+const COLUMN_LABELS = ["Corpora", "Agents"] as const;
 
-// The example/teaching graph (empty-state only): Documents →
-// Corpora → Agents, rendered from the pure `layout()`
-// (deterministic, SSR-safe — no DOM measurement). It exists to show
-// the system's shape — one document feeding many corpora, read by
+// The example/teaching graph (empty-state only): Corpora → Agents,
+// rendered from the pure `layout()` (deterministic, SSR-safe — no DOM
+// measurement). It exists to show the system's shape — one corpus read by
 // many agents, no copies — at a glance.
 // The populated project home is a dashboard, not a graph (a fixed-grid
 // node diagram doesn't scale past a handful of docs and the live app
@@ -37,38 +33,28 @@ function curve(x1: number, y1: number, x2: number, y2: number): string {
 export function ProjectGraph(props: Props): React.ReactElement {
   const g = useMemo(
     () =>
-      layout(
-        compact({
-          documents: props.documents,
-          corpora: props.corpora,
-          attachments: props.attachments,
-          agents: props.agents,
-          agentLinks: props.agentLinks,
-        }),
-      ),
-    [
-      props.documents,
-      props.corpora,
-      props.attachments,
-      props.agents,
-      props.agentLinks,
-    ],
+      layout({
+        corpora: props.corpora,
+        agents: props.agents,
+        agentLinks: props.agentLinks,
+      }),
+    [props.corpora, props.agents, props.agentLinks],
   );
   const sentences = useMemo(
     () =>
       linkageSentences({
-        documents: props.documents,
         corpora: props.corpora,
-        attachments: props.attachments,
+        agents: props.agents,
+        agentLinks: props.agentLinks,
       }),
-    [props.documents, props.corpora, props.attachments],
+    [props.corpora, props.agents, props.agentLinks],
   );
 
   return (
     <div className="relative w-full overflow-x-auto">
-      <ul className="sr-only" aria-label="Document linkage">
+      <ul className="sr-only" aria-label="Corpus linkage">
         {sentences.map((s) => (
-          <li key={s.documentSlug}>{s.sentence}</li>
+          <li key={s.corpusSlug}>{s.sentence}</li>
         ))}
       </ul>
 
@@ -82,7 +68,7 @@ export function ProjectGraph(props: Props): React.ReactElement {
             key={label}
             className="absolute text-sm font-medium text-slate-500"
             style={{
-              left: columnX(col as 0 | 1 | 2),
+              left: columnX(col as 0 | 1),
               top: 0,
               width: GRAPH_GEOMETRY.NODE_W,
             }}
@@ -121,12 +107,6 @@ export function ProjectGraph(props: Props): React.ReactElement {
                 style={{ width: n.w, height: n.h }}
               >
                 <span className="truncate font-semibold">{n.label}</span>
-                {n.kind === "document" && (n.corpusCount ?? 0) >= 1 && (
-                  <CorpusCountBadge
-                    count={n.corpusCount ?? 0}
-                    className="mt-0.5"
-                  />
-                )}
               </div>
             </div>
           ))}

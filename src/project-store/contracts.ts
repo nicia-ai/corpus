@@ -1,5 +1,5 @@
-import type { CorpusSlug, DocumentSlug, FolderSlug } from "../ids";
-import type { CollectionDelivery } from "../store/domain/collection-expand";
+import type { CorpusSlug, DocumentSlug } from "../ids";
+import type { CorpusLocation } from "../store/domain/corpus-drive";
 import type { LinkKind } from "../store/domain/links";
 import type { SectionMatch, SectionTarget } from "../store/domain/sections";
 
@@ -10,13 +10,12 @@ export type SaveDocumentInput = Readonly<{
   /** Original basename incl. extension. Defaults to `<slug>.md` for
    * editor-created docs; bulk uploads pass the real basename. */
   filename?: string;
-  /** Create the document directly in this folder (null / absent = project
-   * root), atomically with the save — the "New document in this folder"
-   * path. Also scopes the brand-new-filename collision check to that
-   * folder's sibling namespace. Create-only (`clientVersion === 0`): on an
-   * update it is inert, since moving a document is `placeDocumentInFolder`'s
-   * job. Editor / REST saves omit it (root). */
-  folderSlug?: FolderSlug | null;
+  /** Where a NEW document is created: a corpus and, optionally, a folder
+   * of it (absent = the default corpus's root — the drafts space). The
+   * placement rides the same transaction as the save, so a document never
+   * exists outside a corpus. Create-only (`clientVersion === 0`): on an
+   * update it is inert, since moving a document is `moveDocuments`' job. */
+  location?: CorpusLocation;
   /** Version the client loaded. Must equal the server head, else 409. */
   clientVersion: number;
   changedBy: string;
@@ -44,11 +43,27 @@ export type UpdateCorpusInput = Readonly<{
   slug: CorpusSlug;
   name: string;
   description?: string;
-  // Absent = preserve the current value (a patch, unlike `description`
-  // where absent clears). The web form always sends an explicit number.
-  alwaysIncludeBudgetTokens?: number;
   changedBy: string;
 }>;
+
+// What happens to a deleted corpus's pages: archived with it (the same
+// soft delete a single page gets — recoverable), or moved to the default
+// corpus so they survive as drafts.
+export const CORPUS_DELETE_PAGE_MODES = ["archive", "move-to-default"] as const;
+export type CorpusDeletePageMode = (typeof CORPUS_DELETE_PAGE_MODES)[number];
+
+export type DeleteCorpusInput = Readonly<{
+  slug: CorpusSlug;
+  pages: CorpusDeletePageMode;
+  changedBy: string;
+}>;
+
+export type DeleteCorpusResult = Readonly<
+  | { ok: true; archivedSlugs: readonly DocumentSlug[]; moved: number }
+  | { ok: false; reason: "missing" | "default-corpus" }
+>;
+
+export type MoveDocumentsResult = Readonly<{ moved: number; failed: number }>;
 
 export type SaveResult = Readonly<
   | { ok: true; docVersion: number }
@@ -57,6 +72,9 @@ export type SaveResult = Readonly<
   // Markdown over MAX_MARKDOWN_BYTES (src/util.ts) — refused before any
   // write; transports map it to validation (HTTP 400/413).
   | { ok: false; tooLarge: true }
+  // A new document named a corpus or folder that does not exist (or a
+  // folder of a different corpus); nothing was written.
+  | { ok: false; unknownLocation: true }
   | { ok: false; rolledBack: true }
 >;
 
@@ -87,10 +105,47 @@ export type SaveSharedSectionResult =
 
 // A scoped create either lands a new document or refuses because the slug
 // already exists outside the bound Corpus — another scope's document,
-// which the credential may never write. The existence check is decided
-// inside the create transaction, so the refusal is atomic with the write.
+// which the credential may never write — or because the bound Corpus is
+// gone. The check is decided inside the create transaction, so the refusal
+// is atomic with the write.
 export type CreateInCorpusResult =
   SaveResult | Readonly<{ ok: false; forbidden: true }>;
+
+// A live document's place: the corpus it is in and its path inside that
+// corpus. `folderSlug` is null when it sits directly in the corpus root.
+export type DocumentLocation = Readonly<{
+  slug: string;
+  corpusSlug: CorpusSlug;
+  path: string;
+  folderSlug: string | null;
+}>;
+
+export type DocumentRef = Readonly<{
+  slug: string;
+  path: string;
+  corpusSlug: string;
+}>;
+
+export type DocumentListRow = Readonly<{
+  slug: string;
+  title: string;
+  docVersion: number;
+  size: number;
+  filename: string;
+  corpusSlug: CorpusSlug;
+  path: string;
+  folderSlug: string | null;
+  updatedAt: string;
+}>;
+
+// A folder as a person sees it: inside one corpus, never the corpus root
+// itself. `parentSlug` is null directly under the root.
+export type CorpusFolderView = Readonly<{
+  slug: string;
+  name: string;
+  corpusSlug: CorpusSlug;
+  parentSlug: string | null;
+}>;
 
 export type DocumentSnapshot = Readonly<{
   slug: string;
@@ -145,20 +200,13 @@ export type EnsureDefaultCorpusResult = Readonly<{
 // Bulk folder upload, per-document outcome: a fresh path is `created`,
 // a re-uploaded path is a new version of the SAME document
 // (`created: false`) — idempotent on path, never a duplicate.
-// `folderSlug` is the document's immediate parent (null = project root);
-// `createdFolders` are the folder slugs this import minted to place it
-// (empty when every ancestor already existed). Together they let the DO
-// derive the corpus-link target from ground truth.
 export type ImportDocResult = Readonly<
+  | { ok: true; slug: string; docVersion: number; created: boolean }
   | {
-      ok: true;
-      slug: string;
-      docVersion: number;
-      created: boolean;
-      folderSlug: string | null;
-      createdFolders: readonly string[];
+      ok: false;
+      reason:
+        "invalid-path" | "segment-collision" | "too-large" | "missing-corpus";
     }
-  | { ok: false; reason: "invalid-path" | "segment-collision" | "too-large" }
 >;
 
 export type ImportSummary = Readonly<{
@@ -167,21 +215,23 @@ export type ImportSummary = Readonly<{
   failed: readonly Readonly<{ path: string; reason: string }>[];
 }>;
 
-export type ImportCorpusLink = Readonly<
-  | { mode: "none" }
+// The corpus an upload lands in: the drafts space, an existing corpus, or
+// a new one named here. Uploaded paths are relative to that corpus's root.
+export type ImportDestination = Readonly<
+  | { mode: "default" }
   | { mode: "existing"; slug: CorpusSlug }
   | { mode: "new"; name: string }
 >;
 
-export type ImportAndLinkInput = Readonly<{
+export type ImportIntoCorpusInput = Readonly<{
   entries: readonly Readonly<{ path: string; markdown: string }>[];
-  link: ImportCorpusLink;
+  destination: ImportDestination;
   changedBy: string;
 }>;
 
-export type ImportAndLinkResult = Readonly<{
+export type ImportIntoCorpusResult = Readonly<{
   summary: ImportSummary;
-  linkedTo: CorpusSlug | undefined;
+  corpusSlug: CorpusSlug;
 }>;
 
 export type ProjectUsageSnapshot = Readonly<{
@@ -198,6 +248,7 @@ export type ProjectUsageSnapshot = Readonly<{
 export type DocumentSearchHit = Readonly<{
   slug: string;
   title: string;
+  corpusSlug: string;
   path: string;
   snippet: string;
 }>;
@@ -205,9 +256,8 @@ export type DocumentSearchHit = Readonly<{
 // The agent-facing folder projection — one resolved link. `kind` is
 // how the link was written (`path` = CommonMark relative destination,
 // `wiki` = Obsidian-style `[[target]]`). `documentSlug` is null when it
-// dangles (escapes the project, or nothing matches the target);
-// `inCorpus` is true when that target is itself in this
-// corpus's resolved expansion.
+// dangles (escapes the corpus root, or nothing matches the target);
+// `inCorpus` is false when the target was found in a different corpus.
 export type OutlineLink = Readonly<{
   target: string;
   kind: LinkKind;
@@ -221,11 +271,10 @@ export type OutlineDoc = Readonly<{
   path: string;
   title: string;
   docVersion: number;
-  delivery: CollectionDelivery;
   links: readonly OutlineLink[];
 }>;
 
-// Tree-ordered with derived paths + resolved links — the whole
+// Path-ordered with corpus-relative paths + resolved links — the whole
 // hierarchy + link graph in one cheap read. Bytes are never rewritten;
 // this is `parsed-links ⊕ current path map`, computed at projection time.
 export type CorpusOutline = Readonly<

@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 export function BackLink(
   props: Readonly<
     | {
-        to: "/p/$projectId/corpora" | "/p/$projectId/documents";
+        to: "/p/$projectId/documents";
         projectId: ProjectId;
         label: string;
         className?: string | undefined;

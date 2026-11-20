@@ -1,5 +1,6 @@
 import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
 
+import { ValidationError } from "../errors";
 import {
   asConnectionId,
   asCorpusSlug,
@@ -11,6 +12,8 @@ import {
   type ProjectId,
   type UserId,
 } from "../ids";
+import { corpusIsServed } from "../store/domain/corpus-drive";
+import { DEFAULT_CORPUS_SLUG } from "../store/domain/default-corpus";
 
 import { ACCESSIBLE_STATUSES, asRole, type Role } from "./access";
 import type { ControlDb } from "./db";
@@ -115,6 +118,18 @@ export async function countConnectionsByCorpus(
   return new Map(rows.map((r) => [asCorpusSlug(r.corpusSlug), r.n]));
 }
 
+// The default corpus is the drafts space and is never served, so no
+// credential may target it. Enforced here, at the only two places a
+// Connection row is written, so no transport can forget it; resolution
+// fails closed on the same rule for any row written before it existed.
+function assertBindable(corpusSlug: CorpusSlug): void {
+  if (!corpusIsServed(corpusSlug)) {
+    throw new ValidationError(
+      "Drafts cannot be connected to an agent. Move pages into a corpus to publish them.",
+    );
+  }
+}
+
 // Reuse-or-create the canonical Connection for (projectId, corpusSlug).
 // One round-trip, race-safe: a concurrent first-click cannot tear,
 // because the partial unique index `WHERE isDefaultForCollection` covers
@@ -132,6 +147,7 @@ export async function createCanonicalConnection(
     name?: string;
   }>,
 ): Promise<ConnectionId> {
+  assertBindable(args.corpusSlug);
   const name = args.name ?? args.corpusSlug;
   const [row] = await db
     .insert(connection)
@@ -210,6 +226,7 @@ export async function upsertCanonicalConnection(
     name?: string;
   }>,
 ): Promise<ConnectionId> {
+  assertBindable(args.corpusSlug);
   const name = args.name ?? args.corpusSlug;
   try {
     const [existing] = await db
@@ -354,6 +371,34 @@ export async function deleteConnection(
     );
 }
 
+// Every Connection bound to one corpus goes when that corpus is deleted —
+// through the same ordered, idempotent delete, so its OAuth grants,
+// consents and API keys are revoked with it. Run BEFORE the corpus is
+// removed from the ProjectStore: a slug can be reused by a later corpus,
+// and a credential that outlived its corpus would silently bind to the
+// new one. Returns how many Connections were deleted.
+export async function deleteConnectionsForCorpus(
+  db: ControlDb,
+  args: Readonly<{ projectId: ProjectId; corpusSlug: CorpusSlug }>,
+): Promise<number> {
+  const rows = await db
+    .select({ id: connection.id })
+    .from(connection)
+    .where(
+      and(
+        eq(connection.projectId, args.projectId),
+        eq(connection.collectionSlug, args.corpusSlug),
+      ),
+    );
+  for (const row of rows) {
+    await deleteConnection(db, {
+      connectionId: asConnectionId(row.id),
+      projectId: args.projectId,
+    });
+  }
+  return rows.length;
+}
+
 // List a single Project's Connections — the per-Project audit/admin
 // view. Roll-up counts (api-keys, active OAuth refresh tokens) make the
 // list practically useful without N+1 lookups in the route.
@@ -421,4 +466,43 @@ export async function listProjectConnections(
     activeGrantCount: grantsById.get(r.id) ?? 0,
     createdAt: r.createdAt.toISOString(),
   }));
+}
+
+// Is any Connection of this project bound to the default corpus? Before the
+// default corpus became the (unserved) drafts space that was allowed, and a
+// project may still have one. The ProjectStore asks this once, when it lays
+// itself out as drives.
+export async function defaultCorpusIsBound(
+  db: ControlDb,
+  projectId: ProjectId,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: connection.id })
+    .from(connection)
+    .where(
+      and(
+        eq(connection.projectId, projectId),
+        eq(connection.collectionSlug, DEFAULT_CORPUS_SLUG),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+// Re-point every Connection bound to the default corpus at `to` (the corpus
+// its pages were promoted into). One UPDATE, so it is atomic and a retry of
+// it is a no-op; the Connections, their OAuth grants and API keys are kept.
+export async function rebindDefaultCorpusConnections(
+  db: ControlDb,
+  args: Readonly<{ projectId: ProjectId; to: CorpusSlug }>,
+): Promise<void> {
+  await db
+    .update(connection)
+    .set({ collectionSlug: args.to })
+    .where(
+      and(
+        eq(connection.projectId, args.projectId),
+        eq(connection.collectionSlug, DEFAULT_CORPUS_SLUG),
+      ),
+    );
 }

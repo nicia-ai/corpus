@@ -73,14 +73,6 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
             ? ["handbook", "salaries"]
             : undefined,
       ),
-    readCorpus: (slug) =>
-      slug === "marketing"
-        ? Promise.resolve({
-            found: true as const,
-            corpus: "# brand-voice\n",
-            documents: [{ slug: "brand-voice", docVersion: 1, size: 10 }],
-          })
-        : Promise.resolve({ found: false as const }),
     getDocument: (slug) => {
       const all: Record<string, string> = {
         "brand-voice": "marketing-only",
@@ -119,7 +111,6 @@ function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
                 path: "brand-voice.md",
                 title: "Brand voice",
                 docVersion: 1,
-                delivery: "core",
                 links: [
                   // member-link → preserved
                   {
@@ -170,7 +161,7 @@ describe("scopedExecutor confines reads to the bound Corpus", () => {
     expect(docs.map((d) => d.slug)).toEqual(["brand-voice"]);
   });
 
-  it("readCorpus / corpusOutline of a non-bound slug → found:false", async () => {
+  it("corpusOutline of a non-bound slug → found:false", async () => {
     const exec = scopedExecutor(
       stubExec(),
       asCorpusSlug("marketing"),
@@ -178,9 +169,6 @@ describe("scopedExecutor confines reads to the bound Corpus", () => {
       asCallerRef("apikey:test"),
       TEST_LOCATION,
     );
-    expect(await exec.readCorpus(asCorpusSlug("hr"))).toEqual({
-      found: false,
-    });
     expect(await exec.corpusOutline(asCorpusSlug("hr"))).toEqual({
       found: false,
     });
@@ -528,28 +516,24 @@ describe("north-star: bound credential confinement (server side)", () => {
     }
     await createCorpusFor(org.projectId, asCorpusSlug("marketing"));
     await createCorpusFor(org.projectId, asCorpusSlug("hr"));
-    await store.attachDocument(
-      asCorpusSlug("marketing"),
+    await store.moveDocument(
       asDocumentSlug("brand-voice"),
-      1,
+      { corpusSlug: asCorpusSlug("marketing"), folderSlug: null },
       "seed",
     );
-    await store.attachDocument(
-      asCorpusSlug("marketing"),
+    await store.moveDocument(
       asDocumentSlug("messaging"),
-      2,
+      { corpusSlug: asCorpusSlug("marketing"), folderSlug: null },
       "seed",
     );
-    await store.attachDocument(
-      asCorpusSlug("hr"),
+    await store.moveDocument(
       asDocumentSlug("employee-handbook"),
-      1,
+      { corpusSlug: asCorpusSlug("hr"), folderSlug: null },
       "seed",
     );
-    await store.attachDocument(
-      asCorpusSlug("hr"),
+    await store.moveDocument(
       asDocumentSlug("salaries"),
-      2,
+      { corpusSlug: asCorpusSlug("hr"), folderSlug: null },
       "seed",
     );
 
@@ -729,8 +713,11 @@ async function assertScopeForbids(
   }
 
   const otherCtx = bound === "marketing" ? "hr" : "marketing";
-  const rc = await callTool(token, "read_collection", {
-    collectionSlug: otherCtx,
+  const outline = await rpc(token, {
+    jsonrpc: "2.0",
+    id: 100,
+    method: "resources/read",
+    params: { uri: `collection://${otherCtx}/outline` },
   });
-  expect(rc.error?.code).toBe(-32004);
+  expect(((await outline.json()) as JsonRpcOk).error?.code).toBe(-32004);
 }

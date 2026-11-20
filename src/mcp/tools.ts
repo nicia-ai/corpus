@@ -1,14 +1,14 @@
 import { CREATE_PROPOSAL_BASE_VERSION } from "@nicia-ai/prose-diff";
 import { z } from "zod";
 
-import { asCorpusSlug, asDocumentSlug } from "../ids";
+import { asDocumentSlug } from "../ids";
 import { proposalMessageSchema } from "../lib/proposal-message";
 import type { ProposalResult } from "../project-store/commands/suggestions";
 import { parseFrontmatter } from "../store/domain/frontmatter";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "../util";
 
 import type { McpExecutor } from "./executor";
-import { boundCorpusSlug, documentSlugFromArgs, strField } from "./params";
+import { documentSlugFromArgs, strField } from "./params";
 import { ERR, err, ok, textContent, TOOLS } from "./protocol";
 
 // suggest_edit args. The document is addressed by slug OR path (resolved
@@ -161,18 +161,6 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
 
   list_documents: async ({ id, exec }) =>
     ok(id, textContent(JSON.stringify(await exec.listDocuments()))),
-
-  read_collection: async ({ id, exec, params }) => {
-    const rawSlug = strField(params, "collectionSlug");
-    const slug =
-      rawSlug === "" ? await boundCorpusSlug(exec) : asCorpusSlug(rawSlug);
-    if (slug === undefined) {
-      return err(id, ERR.NOT_FOUND, "no bound collection");
-    }
-    const r = await exec.readCorpus(slug);
-    if (!r.found) return err(id, ERR.NOT_FOUND, `unknown collection: ${slug}`);
-    return ok(id, textContent(r.corpus));
-  },
 
   read_document: async ({ id, exec, params }) => {
     const requested = await documentSlugFromArgs(exec, params);
@@ -409,7 +397,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
           ),
         );
       case "missing": {
-        // Not a member of the bound Collection (or gone). With
+        // Not in the bound Corpus (or gone). With
         // baseDocVersion 0 this is the slug form of a NEW-document
         // proposal; otherwise the same NOT_FOUND as before, no oracle. A
         // slug that exists elsewhere in the project comes back from the

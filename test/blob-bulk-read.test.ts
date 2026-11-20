@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asDocumentSlug } from "../src/ids";
+import { DEFAULT_CORPUS_SLUG } from "../src/store/domain/default-corpus";
 
 import { colSlug, freshStore } from "./_helpers";
 
@@ -8,7 +8,7 @@ import { colSlug, freshStore } from "./_helpers";
 // read that resolves a set of blob hashes must stay under it however many
 // documents the project holds.
 const DOCUMENT_COUNT = 260;
-const ATTACHED_COUNT = 120;
+const IN_CORPUS_COUNT = 120;
 const SEEDING_TIMEOUT_MS = 120_000;
 const BUNDLE_SOURCE = { organization: "acme", project: "default" };
 
@@ -17,12 +17,18 @@ describe("bulk blob reads on a project with more than 100 documents", () => {
     "lists, exports and computes stats",
     async () => {
       const store = freshStore("blob-bulk");
+      const corpus = colSlug("bulk");
+      await store.createCorpus({ slug: corpus, name: "bulk", changedBy: "u" });
+      await store.ensureDefaultCorpus("u");
+      // 120 pages in the corpus, the other 140 in Drafts.
       for (let i = 0; i < DOCUMENT_COUNT; i += 1) {
-        await store.importDocumentAtPath({
+        const r = await store.importDocumentAtPath({
+          corpusSlug: i < IN_CORPUS_COUNT ? corpus : DEFAULT_CORPUS_SLUG,
           path: `notes/note-${String(i).padStart(3, "0")}.md`,
           markdown: `# Note ${String(i)}\n\nbody ${String(i)}\n`,
           changedBy: "u",
         });
+        expect(r.ok).toBe(true);
       }
 
       const stats = await store.statsSnapshot();
@@ -31,27 +37,18 @@ describe("bulk blob reads on a project with more than 100 documents", () => {
       const listed = await store.listDocuments();
       expect(listed).toHaveLength(DOCUMENT_COUNT);
 
-      const corpus = colSlug("bulk");
-      await store.createCorpus({ slug: corpus, name: "bulk", changedBy: "u" });
-      for (const [i, row] of listed.slice(0, ATTACHED_COUNT).entries()) {
-        await store.attachDocument(
-          corpus,
-          asDocumentSlug(row.slug),
-          i + 1,
-          "u",
-        );
-      }
-
-      expect(await store.corpusMembers(corpus)).toHaveLength(ATTACHED_COUNT);
-      expect((await store.readCorpus(corpus)).found).toBe(true);
-      expect((await store.corpusStructure(corpus)).found).toBe(true);
-      expect(await store.listResolvedMembers()).toHaveLength(ATTACHED_COUNT);
+      expect(await store.corpusMembers(corpus)).toHaveLength(IN_CORPUS_COUNT);
+      const outline = await store.corpusOutline(corpus);
+      expect(outline.found && outline.documents).toHaveLength(IN_CORPUS_COUNT);
+      expect(await store.listResolvedMembers()).toHaveLength(DOCUMENT_COUNT);
       expect(await store.listDocumentRefs()).toHaveLength(DOCUMENT_COUNT);
       expect((await store.searchDocuments("body")).length).toBeGreaterThan(0);
       expect((await store.verifyHistory()).ok).toBe(true);
       await store.usageSnapshot();
-      expect((await store.statsSnapshot()).corpora.totalMembers).toBe(
-        ATTACHED_COUNT,
+      const after = await store.statsSnapshot();
+      expect(after.corpora.totalMembers).toBe(DOCUMENT_COUNT);
+      expect(after.corpora.defaultMembers).toBe(
+        DOCUMENT_COUNT - IN_CORPUS_COUNT,
       );
 
       const bundle = await store.exportBundle(BUNDLE_SOURCE);

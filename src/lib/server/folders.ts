@@ -8,12 +8,19 @@ import {
   asCorpusSlug,
   asDocumentSlug,
   asFolderSlug,
+  type CorpusSlug,
   type FolderSlug,
 } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import { changedBy, storeOf } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
-import type { ImportAndLinkResult, ImportSummary } from "@/project-store";
+import type {
+  ImportDestination,
+  ImportIntoCorpusResult,
+  ImportSummary,
+  MoveDocumentsResult,
+} from "@/project-store/contracts";
+import type { CorpusLocation } from "@/store/domain/corpus-drive";
 import { folderNameHasSeparator } from "@/store/domain/folders";
 import type {
   DeleteFolderResult,
@@ -27,28 +34,37 @@ import { utf8Bytes } from "@/util";
 // of per-document transactions.
 const MAX_UPLOAD_ENTRIES = 5_000;
 
-// Plain DTO mirror of FolderView (DO returns carry branding). One flat
-// row per folder; the client builds the nesting from `parentSlug`.
+// Plain DTO mirror of CorpusFolderView (DO returns carry branding). One
+// flat row per folder, tagged with its corpus; the client builds the
+// nesting from `parentSlug` (null = directly in the corpus root).
 export type FolderRow = Readonly<{
   slug: FolderSlug;
   name: string;
+  corpusSlug: CorpusSlug;
   parentSlug: FolderSlug | null;
-  position: number;
 }>;
 
 export type CreateFolderResult = Readonly<
-  { ok: true; slug: FolderSlug } | { ok: false; reason: "segment-collision" }
+  | { ok: true; slug: FolderSlug }
+  | { ok: false; reason: "segment-collision" | "missing" }
 >;
 
+export type { ImportIntoCorpusResult, ImportSummary, MoveDocumentsResult };
+
 const slugInput = z.string().min(1);
-// `null` = project root; absent treated as root.
-const parentInput = slugInput.nullable().optional();
+// A place in a corpus: `folderSlug: null` (or absent) is the corpus root.
+const locationInput = z
+  .object({ corpusSlug: slugInput, folderSlug: slugInput.nullish() })
+  .transform((v): CorpusLocation => ({
+    corpusSlug: asCorpusSlug(v.corpusSlug),
+    folderSlug: v.folderSlug == null ? null : asFolderSlug(v.folderSlug),
+  }));
 const importEntryInput = z.object({
   path: z.string().trim().min(1),
   markdown: z.string(),
 });
-const importLinkInput = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("none") }),
+const importDestinationInput = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("default") }),
   z.object({
     mode: z.literal("existing"),
     slug: slugInput.transform(asCorpusSlug),
@@ -67,8 +83,6 @@ const folderNameInput = z
   );
 
 type ImportEntry = Readonly<z.infer<typeof importEntryInput>>;
-
-export type { ImportAndLinkResult };
 
 async function assertImportQuota(
   context: ReturnType<typeof srv>,
@@ -91,18 +105,18 @@ export const getFolderList = createServerFn({ method: "GET" })
     return folders.map((f) => ({
       slug: asFolderSlug(f.slug),
       name: f.name,
+      corpusSlug: asCorpusSlug(f.corpusSlug),
       parentSlug: f.parentSlug === null ? null : asFolderSlug(f.parentSlug),
-      position: f.position,
     }));
   });
 
 export const createFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ name: folderNameInput, parentSlug: parentInput }))
+  .validator(z.object({ name: folderNameInput, location: locationInput }))
   .handler(async ({ data, context }): Promise<CreateFolderResult> => {
     const r = await storeOf(srv(context)).createFolder(
       data.name,
-      data.parentSlug == null ? null : asFolderSlug(data.parentSlug),
+      data.location,
     );
     return r.ok ? { ok: true, slug: asFolderSlug(r.slug) } : r;
   });
@@ -119,14 +133,16 @@ export const renameFolder = createServerFn({ method: "POST" })
     );
   });
 
+// Move a folder within its corpus or into another one. Any project member
+// may; everything under the folder travels with it.
 export const moveFolder = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(z.object({ slug: slugInput, newParentSlug: parentInput }))
+  .validator(z.object({ slug: slugInput, destination: locationInput }))
   .handler(async ({ data, context }): Promise<MoveFolderResult> => {
     const c = srv(context);
     return storeOf(c).moveFolder(
       asFolderSlug(data.slug),
-      data.newParentSlug == null ? null : asFolderSlug(data.newParentSlug),
+      data.destination,
       changedBy(c),
     );
   });
@@ -149,139 +165,65 @@ export const deleteFolder = createServerFn({ method: "POST" })
     return result;
   });
 
-// Place (or re-place) a document in a folder. `folderSlug: null` = root.
-export const placeDocumentInFolder = createServerFn({ method: "POST" })
+// Move one document to a place in any corpus. Moving it out of the
+// default corpus into a named one publishes it; moving it back
+// unpublishes it.
+export const moveDocument = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
-  .validator(
-    z.object({ documentSlug: slugInput, folderSlug: slugInput.nullable() }),
-  )
+  .validator(z.object({ documentSlug: slugInput, destination: locationInput }))
   .handler(async ({ data, context }): Promise<PlaceDocumentResult> => {
     const c = srv(context);
-    return storeOf(c).placeDocumentInFolder(
+    return storeOf(c).moveDocument(
       asDocumentSlug(data.documentSlug),
-      data.folderSlug === null ? null : asFolderSlug(data.folderSlug),
+      data.destination,
       changedBy(c),
     );
   });
 
-export type MoveDocumentsResult = Readonly<{
-  moved: number;
-  failed: number;
-}>;
-
-// Bulk move the selected documents into one folder (`null` = root) — the
-// picker's alternative to dragging when there are many files.
-export const moveDocumentsToFolder = createServerFn({ method: "POST" })
+// Bulk move the selected documents into one place — the picker's
+// alternative to dragging when there are many files.
+export const moveDocuments = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
       slugs: z.array(slugInput).min(1),
-      folderSlug: slugInput.nullable(),
+      destination: locationInput,
     }),
   )
   .handler(async ({ data, context }): Promise<MoveDocumentsResult> => {
     const c = srv(context);
-    return storeOf(c).placeDocumentsInFolder(
+    return storeOf(c).moveDocuments(
       data.slugs.map(asDocumentSlug),
-      data.folderSlug === null ? null : asFolderSlug(data.folderSlug),
+      data.destination,
       changedBy(c),
     );
   });
 
-// Folder→corpus links: include a whole folder (transitively) in a
-// corpus. Shares the document `includes` position space. Delivery
-// defaults to the uniform domain default ("core") like every other
-// attach surface — a caller that wants a folder to be reference-only
-// (e.g. a bulk import that shouldn't flood read_collection) passes it
-// explicitly, so the default never diverges by entry point.
-export const attachFolderToCorpus = createServerFn({ method: "POST" })
-  .middleware([projectMiddleware])
-  .validator(
-    z.object({
-      corpusSlug: slugInput,
-      folderSlug: slugInput,
-      position: z.number().int().nonnegative(),
-      delivery: z.enum(["core", "reference"]).default("core"),
-    }),
-  )
-  .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
-    const c = srv(context);
-    return storeOf(c).attachFolderToCorpus(
-      asCorpusSlug(data.corpusSlug),
-      asFolderSlug(data.folderSlug),
-      data.position,
-      changedBy(c),
-      data.delivery,
-    );
-  });
-
-// Flip a folder link's delivery tier in place (mirrors `setMemberDelivery`
-// for documents) — a position-free update so the toggle never reorders.
-export const setFolderLinkDelivery = createServerFn({ method: "POST" })
-  .middleware([projectMiddleware])
-  .validator(
-    z.object({
-      corpusSlug: slugInput,
-      folderSlug: slugInput,
-      delivery: z.enum(["core", "reference"]),
-    }),
-  )
-  .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
-    const c = srv(context);
-    return storeOf(c).setFolderLinkDelivery(
-      asCorpusSlug(data.corpusSlug),
-      asFolderSlug(data.folderSlug),
-      data.delivery,
-      changedBy(c),
-    );
-  });
-
-export const detachFolderFromCorpus = createServerFn({ method: "POST" })
-  .middleware([projectMiddleware])
-  .validator(z.object({ corpusSlug: slugInput, folderSlug: slugInput }))
-  .handler(async ({ data, context }): Promise<{ ok: boolean }> => {
-    const c = srv(context);
-    return storeOf(c).detachFolderFromCorpus(
-      asCorpusSlug(data.corpusSlug),
-      asFolderSlug(data.folderSlug),
-      changedBy(c),
-    );
-  });
-
-// Bulk folder upload: a flat list of {path, markdown} (the client walks
-// the picked directory tree). Each entry is its own atomic import;
-// idempotent on path. Returns a created/updated/failed summary.
-export const importDocuments = createServerFn({ method: "POST" })
+// Bulk folder upload into one corpus: a flat list of {path, markdown}
+// (the client walks the picked directory tree), paths relative to the
+// corpus root. Each entry is its own atomic import; idempotent on path.
+// `undefined` = the named corpus no longer exists.
+export const importIntoCorpus = createServerFn({ method: "POST" })
   .middleware([projectMiddleware])
   .validator(
     z.object({
       entries: z.array(importEntryInput).min(1).max(MAX_UPLOAD_ENTRIES),
+      destination: importDestinationInput,
     }),
   )
-  .handler(async ({ data, context }): Promise<ImportSummary> => {
-    const c = srv(context);
-    // Bulk import is gated like a document create (approximate, per the
-    // entitlements port contract): one pre-flight assertion so a hosted
-    // tier impl can reject an over-limit project before the batch opens
-    // any per-document transaction. OSS default is unlimited.
-    await assertImportQuota(c, data.entries);
-    return storeOf(c).importDocuments(data.entries, changedBy(c));
-  });
-
-export const importDocumentsAndLink = createServerFn({ method: "POST" })
-  .middleware([projectMiddleware])
-  .validator(
-    z.object({
-      entries: z.array(importEntryInput).min(1).max(MAX_UPLOAD_ENTRIES),
-      link: importLinkInput,
-    }),
-  )
-  .handler(async ({ data, context }): Promise<ImportAndLinkResult> => {
-    const c = srv(context);
-    await assertImportQuota(c, data.entries);
-    return storeOf(c).importDocumentsAndLink({
-      entries: data.entries,
-      link: data.link,
-      changedBy: changedBy(c),
-    });
-  });
+  .handler(
+    async ({ data, context }): Promise<ImportIntoCorpusResult | undefined> => {
+      const c = srv(context);
+      // Gated like a document create (approximate, per the entitlements
+      // port contract): one pre-flight assertion so a hosted tier impl can
+      // reject an over-limit project before the batch opens any
+      // per-document transaction. OSS default is unlimited.
+      await assertImportQuota(c, data.entries);
+      const destination: ImportDestination = data.destination;
+      return storeOf(c).importIntoCorpus({
+        entries: data.entries,
+        destination,
+        changedBy: changedBy(c),
+      });
+    },
+  );

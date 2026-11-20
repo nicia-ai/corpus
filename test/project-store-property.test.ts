@@ -1,13 +1,16 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { asFolderSlug } from "../src/ids";
+import { asFolderSlug, type CorpusSlug } from "../src/ids";
 import { type Bundle, canonicalJson } from "../src/store/domain/bundle";
 
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const SOURCE = { organization: "acme", project: "default" };
-const COLLECTION = colSlug("team");
+const CORPORA = {
+  team: colSlug("team"),
+  other: colSlug("other"),
+} as const;
 const DOCS = [
   { slug: "a-alpha", path: "a/alpha.md", title: "Alpha" },
   { slug: "a-beta", path: "a/beta.md", title: "Beta" },
@@ -16,44 +19,26 @@ const DOCS = [
 
 type DocSlugValue = (typeof DOCS)[number]["slug"];
 type FolderName = "a" | "b";
+type CorpusName = keyof typeof CORPORA;
 type Op = Readonly<
   | {
-      kind: "attach-doc";
+      kind: "move-doc";
       doc: DocSlugValue;
-      position: number;
-      delivery: "core" | "reference";
+      corpus: CorpusName;
+      folder: FolderName | "root";
     }
-  | {
-      kind: "attach-folder";
-      folder: FolderName;
-      position: number;
-      delivery: "core" | "reference";
-    }
-  | { kind: "detach-doc"; doc: DocSlugValue }
   | { kind: "archive-doc"; doc: DocSlugValue }
   | { kind: "rename-file"; doc: DocSlugValue; suffix: number }
-  | { kind: "place-doc"; doc: DocSlugValue; folder: FolderName | "root" }
   | { kind: "reimport"; doc: (typeof DOCS)[number]; version: number }
   | { kind: "delete-folder"; folder: FolderName }
-  | { kind: "reorder"; reverse: boolean }
 >;
 
 const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({
-    kind: fc.constant("attach-doc"),
+    kind: fc.constant("move-doc"),
     doc: fc.constantFrom(...DOCS.map((d) => d.slug)),
-    position: fc.integer({ min: 1, max: 4 }),
-    delivery: fc.constantFrom("core", "reference"),
-  }),
-  fc.record({
-    kind: fc.constant("attach-folder"),
-    folder: fc.constantFrom("a", "b"),
-    position: fc.integer({ min: 1, max: 4 }),
-    delivery: fc.constantFrom("core", "reference"),
-  }),
-  fc.record({
-    kind: fc.constant("detach-doc"),
-    doc: fc.constantFrom(...DOCS.map((d) => d.slug)),
+    corpus: fc.constantFrom<CorpusName>("team", "other"),
+    folder: fc.constantFrom<FolderName | "root">("a", "b", "root"),
   }),
   fc.record({
     kind: fc.constant("archive-doc"),
@@ -65,11 +50,6 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
     suffix: fc.integer({ min: 1, max: 50 }),
   }),
   fc.record({
-    kind: fc.constant("place-doc"),
-    doc: fc.constantFrom(...DOCS.map((d) => d.slug)),
-    folder: fc.constantFrom("a", "b", "root"),
-  }),
-  fc.record({
     kind: fc.constant("reimport"),
     doc: fc.constantFrom(...DOCS),
     version: fc.integer({ min: 1, max: 50 }),
@@ -77,10 +57,6 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({
     kind: fc.constant("delete-folder"),
     folder: fc.constantFrom("a", "b"),
-  }),
-  fc.record({
-    kind: fc.constant("reorder"),
-    reverse: fc.boolean(),
   }),
 );
 
@@ -93,25 +69,35 @@ function stable(bundle: Bundle): string {
 
 async function folderSlug(
   store: ReturnType<typeof freshStore>,
+  corpusSlug: CorpusSlug,
   name: FolderName,
 ): Promise<ReturnType<typeof asFolderSlug> | undefined> {
-  const folder = (await store.listFolders()).find((f) => f.name === name);
+  const folder = (await store.listFolders()).find(
+    (f) => f.name === name && f.corpusSlug === corpusSlug,
+  );
   return folder === undefined ? undefined : asFolderSlug(folder.slug);
 }
 
+// Every document lives in the team corpus, in the folder its path names.
 async function seed(store: ReturnType<typeof freshStore>): Promise<void> {
+  await store.createCorpus({
+    slug: CORPORA.team,
+    name: "Team",
+    changedBy: "prop",
+  });
+  await store.createCorpus({
+    slug: CORPORA.other,
+    name: "Other",
+    changedBy: "prop",
+  });
   for (const d of DOCS) {
     await store.importDocumentAtPath({
+      corpusSlug: CORPORA.team,
       path: d.path,
       markdown: `# ${d.title}\ninitial`,
       changedBy: "prop",
     });
   }
-  await store.createCorpus({
-    slug: COLLECTION,
-    name: "Team",
-    changedBy: "prop",
-  });
 }
 
 async function applyOp(
@@ -119,31 +105,21 @@ async function applyOp(
   op: Op,
 ): Promise<void> {
   switch (op.kind) {
-    case "attach-doc":
-      await store.attachDocument(
-        COLLECTION,
-        docSlug(op.doc),
-        op.position,
-        "prop",
-        op.delivery,
-      );
-      return;
-    case "attach-folder": {
-      const slug = await folderSlug(store, op.folder);
-      if (slug !== undefined) {
-        await store.attachFolderToCorpus(
-          COLLECTION,
-          slug,
-          op.position,
+    case "move-doc": {
+      const corpusSlug = CORPORA[op.corpus];
+      const targetFolder =
+        op.folder === "root"
+          ? null
+          : await folderSlug(store, corpusSlug, op.folder);
+      if (targetFolder !== undefined) {
+        await store.moveDocument(
+          docSlug(op.doc),
+          { corpusSlug, folderSlug: targetFolder },
           "prop",
-          op.delivery,
         );
       }
       return;
     }
-    case "detach-doc":
-      await store.detachDocument(COLLECTION, docSlug(op.doc), "prop");
-      return;
     case "archive-doc":
       await store.archiveDocument(docSlug(op.doc), "prop");
       return;
@@ -154,33 +130,17 @@ async function applyOp(
         changedBy: "prop",
       });
       return;
-    case "place-doc": {
-      const folder =
-        op.folder === "root" ? null : await folderSlug(store, op.folder);
-      if (folder !== undefined) {
-        await store.placeDocumentInFolder(docSlug(op.doc), folder, "prop");
-      }
-      return;
-    }
     case "reimport":
       await store.importDocumentAtPath({
+        corpusSlug: CORPORA.team,
         path: op.doc.path,
         markdown: `# ${op.doc.title}\nversion ${op.version.toString()}`,
         changedBy: "prop",
       });
       return;
     case "delete-folder": {
-      const slug = await folderSlug(store, op.folder);
+      const slug = await folderSlug(store, CORPORA.team, op.folder);
       if (slug !== undefined) await store.deleteFolder(slug, "prop");
-      return;
-    }
-    case "reorder": {
-      const order = DOCS.map((d) => docSlug(d.slug));
-      await store.reorderCorpusDocuments(
-        COLLECTION,
-        op.reverse ? [...order].reverse() : order,
-        "prop",
-      );
       return;
     }
   }
@@ -201,9 +161,10 @@ describe("ProjectStore command invariants (property)", () => {
           const activeSlugs = new Set(
             (await store.listDocuments()).map((d) => d.slug),
           );
-          const corpus = await store.readCorpus(COLLECTION);
-          if (corpus.found) {
-            for (const d of corpus.documents) {
+          for (const corpusSlug of Object.values(CORPORA)) {
+            const outline = await store.corpusOutline(corpusSlug);
+            if (!outline.found) continue;
+            for (const d of outline.documents) {
               expect(activeSlugs.has(d.slug)).toBe(true);
               await expect(
                 store.getDocument(docSlug(d.slug)),

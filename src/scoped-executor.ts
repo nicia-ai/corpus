@@ -5,7 +5,6 @@ import {
   type ProjectId,
 } from "./ids";
 import type { McpExecutor } from "./mcp";
-import { compact } from "./util";
 
 // The read-side scope for an MCP request. The Connection's bound
 // Corpus is the agent's entire world; every McpExecutor method is
@@ -32,15 +31,26 @@ export function scopedExecutor(
   location: Readonly<{ baseUrl: string; projectId: ProjectId }>,
 ): McpExecutor {
   const memberSet = new Set<string>(members);
+  // An agent listing the Corpus is the freshness moment: record which
+  // version of each document it was shown. The inner method swallows
+  // failures, so a momentary EventLogStore blip never fails the read.
+  const recordListing = (
+    documents: readonly Readonly<{ slug: string; docVersion: number }>[],
+  ): Promise<void> => {
+    const versionMap: Record<string, number> = {};
+    for (const d of documents) {
+      if (memberSet.has(d.slug)) versionMap[d.slug] = d.docVersion;
+    }
+    return inner.recordRead(callerRef, boundSlug, versionMap);
+  };
   return {
     callerRef,
     baseUrl: location.baseUrl,
     projectId: location.projectId,
-    // Only the bound Corpus is reachable. The inner DO returns the
-    // builder-side `CorpusMeta` (which carries authoring-only fields
-    // like `alwaysIncludeBudgetTokens`); project it down to the MCP port
-    // shape here so that information cannot leak to an agent through
-    // JSON.stringify in handleMcp.
+    // Only the bound Corpus is reachable. Project the inner DO's
+    // `CorpusMeta` down to the MCP port shape explicitly, so a field added
+    // to it later cannot leak to an agent through JSON.stringify in
+    // handleMcp.
     listCorpora: async () => {
       const all = await inner.listCorpora();
       return all
@@ -52,64 +62,31 @@ export function scopedExecutor(
         );
     },
 
-    // The relevance scope an agent should work within (and the only
-    // scope it can: getDocument below is membership-gated). The inner
-    // DO returns wider fields (`filename`, `folderSlug`, `updatedAt`)
-    // than the McpExecutor port declares; project explicitly so internal
-    // project-scope identifiers cannot reach the agent via JSON.stringify.
+    // The agent's whole world: the bound Corpus's documents in path order,
+    // each at its Corpus-relative path. Built from the outline (which is
+    // what orders and paths them) and never from the project-wide list's
+    // own rows — those carry other corpora's documents and project-scope
+    // fields (`filename`, `folderSlug`, `corpusSlug`, `updatedAt`). If the
+    // bound Corpus vanished mid-request the outline is not-found and the
+    // answer is empty, never a fallback to the wider list.
     listDocuments: async () => {
       const [all, outline] = await Promise.all([
         inner.listDocuments(),
         inner.corpusOutline(boundSlug),
       ]);
-      const bySlug = new Map(
-        outline.found ? outline.documents.map((d) => [d.slug, d]) : [],
-      );
-      return all
+      if (!outline.found) return [];
+      const sizeBySlug = new Map(all.map((d) => [d.slug, d.size]));
+      const documents = outline.documents
         .filter((d) => memberSet.has(d.slug))
-        .map((d) => {
-          const projected = bySlug.get(d.slug);
-          // Both `path` and `delivery` come from the resolved-outline
-          // projection. When a member is unexpectedly missing from it
-          // (e.g. the bound Corpus vanished mid-request, so
-          // `outline` came back not-found), omit both rather than fall
-          // back to `d.path` from the project-wide listDocuments —
-          // that's the agent's full folder hierarchy, which the
-          // preflight's fail-closed contract is supposed to keep out
-          // of reach.
-          return compact({
-            slug: d.slug,
-            title: d.title,
-            docVersion: d.docVersion,
-            size: d.size,
-            path: projected?.path,
-            delivery: projected?.delivery,
-          });
-        });
-    },
-
-    readCorpus: async (slug) => {
-      if (slug !== boundSlug) return { found: false };
-      const result = await inner.readCorpus(slug);
-      if (!result.found) return { found: false };
-      // Record the read for the freshness moment. Cross-DO call;
-      // the inner method swallows failures so a momentary
-      // EventLogStore blip never fails the agent's read.
-      const versionMap: Record<string, number> = {};
-      for (const d of result.documents) versionMap[d.slug] = d.docVersion;
-      await inner.recordRead(callerRef, slug, versionMap);
-      // Project to the port shape — the inner DO carries `name` /
-      // `description` on found:true; the McpExecutor port does not
-      // declare them, so we drop them at the wrapper edge.
-      return {
-        found: true as const,
-        corpus: result.corpus,
-        documents: result.documents.map((d) => ({
+        .map((d) => ({
           slug: d.slug,
+          title: d.title,
           docVersion: d.docVersion,
-          size: d.size,
-        })),
-      };
+          size: sizeBySlug.get(d.slug) ?? 0,
+          path: d.path,
+        }));
+      await recordListing(documents);
+      return documents;
     },
 
     // The preflight already used `inner.corpusMembers` directly on the
@@ -154,18 +131,22 @@ export function scopedExecutor(
           reason: "missing" as const,
         });
       }
+      // `memberSet` is a snapshot from the start of the request; pinning
+      // the bound Corpus lets the DO re-check, inside the write, where the
+      // document is NOW.
       return inner.suggestEdit(
         callerRef,
         slug,
         proposedMarkdown,
         baseDocVersion,
+        boundSlug,
       );
     },
 
     // Create-proposals have no membership to gate (the document doesn't
     // exist yet); scope is enforced by pinning the origin to the bound
     // Corpus — whatever the caller put in `originCollectionSlug` is
-    // overwritten, so an applied proposal can only ever attach here.
+    // overwritten, so an applied proposal can only ever be created here.
     suggestCreate: (suppliedCallerRef, input) => {
       if (suppliedCallerRef !== callerRef) {
         return Promise.resolve({
@@ -181,12 +162,12 @@ export function scopedExecutor(
 
     proposalResult: (suppliedCallerRef, proposalId) =>
       suppliedCallerRef === callerRef
-        ? inner.proposalResult(callerRef, proposalId)
+        ? inner.proposalResult(callerRef, proposalId, boundSlug)
         : Promise.resolve({ found: false as const }),
 
     replyToProposal: (suppliedCallerRef, proposalId, body) =>
       suppliedCallerRef === callerRef
-        ? inner.replyToProposal(callerRef, proposalId, body)
+        ? inner.replyToProposal(callerRef, proposalId, body, boundSlug)
         : Promise.resolve({
             ok: false as const,
             reason: "missing" as const,
@@ -217,34 +198,40 @@ export function scopedExecutor(
     },
 
     // The outline is the agent's hierarchy + link graph in one shot, so
-    // link projection is where reverse-leak is the most expensive: a
-    // non-member link target's `documentSlug` would enumerate a slug
-    // the agent cannot read. Collapse such links to the dangling /
-    // external pass-through shape — same shape an unresolved relative
-    // link already gets.
+    // link projection is where reverse-leak is the most expensive: a link
+    // into ANOTHER corpus resolves on the web, and its `documentSlug` /
+    // `resolvedPath` would enumerate a document the agent cannot read.
+    // Collapse such links to the dangling / external pass-through shape —
+    // same shape an unresolved relative link already gets.
     corpusOutline: async (slug) => {
       if (slug !== boundSlug) return { found: false };
       const o = await inner.corpusOutline(slug);
       if (!o.found) return { found: false };
+      await recordListing(o.documents);
       return {
         found: true,
 
         corpus: o.corpus,
         name: o.name,
-        documents: o.documents.map((d) => ({
-          ...d,
-          links: d.links.map((l) =>
-            l.documentSlug !== null && !memberSet.has(l.documentSlug)
-              ? {
-                  target: l.target,
-                  kind: l.kind,
-                  resolvedPath: null,
-                  documentSlug: null,
-                  inCorpus: false,
-                }
-              : l,
-          ),
-        })),
+        documents: o.documents
+          .filter((d) => memberSet.has(d.slug))
+          .map((d) => ({
+            slug: d.slug,
+            path: d.path,
+            title: d.title,
+            docVersion: d.docVersion,
+            links: d.links.map((l) =>
+              l.documentSlug !== null && !memberSet.has(l.documentSlug)
+                ? {
+                    target: l.target,
+                    kind: l.kind,
+                    resolvedPath: null,
+                    documentSlug: null,
+                    inCorpus: false,
+                  }
+                : l,
+            ),
+          })),
       };
     },
   };

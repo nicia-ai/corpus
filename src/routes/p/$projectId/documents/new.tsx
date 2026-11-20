@@ -11,44 +11,53 @@ import {
 import { BackLink } from "@/components/ui/BackLink";
 import { Button } from "@/components/ui/Button";
 import { textLinkClass } from "@/components/ui/text-link";
-import { asFolderSlug, asProjectId, type FolderSlug } from "@/ids";
+import { asCorpusSlug, asFolderSlug, asProjectId } from "@/ids";
 import { track } from "@/lib/analytics";
 import { useSubmit } from "@/lib/forms";
+import { getCorpusList } from "@/lib/server/corpora";
 import { getDocumentRefs, saveDocument } from "@/lib/server/documents";
+import { DEFAULT_CORPUS_SLUG } from "@/store/domain/default-corpus";
 import { hasFrontmatterFence } from "@/store/domain/frontmatter";
 import { defaultFilename } from "@/store/domain/paths";
 import { compact, slugify } from "@/util";
 
 export const Route = createFileRoute("/p/$projectId/documents/new")({
   component: NewDoc,
-  // Optional target folder: the "New document" action on a folder row deep-links
-  // here with `?folder=<slug>`, so the created document lands in that folder
-  // instead of at the root. Absent/blank = root (the top-level "Document" button).
-  validateSearch: (search: Record<string, unknown>): { folder?: FolderSlug } =>
-    typeof search.folder === "string" && search.folder.length > 0
-      ? { folder: asFolderSlug(search.folder) }
-      : {},
+  // Optional target: the "New document" action on a corpus page (or one of
+  // its folders) deep-links here with `?corpus=<slug>` and `&folder=<slug>`,
+  // so the document is created there. Absent = the default corpus (drafts).
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { corpus?: string; folder?: string } => ({
+    ...(typeof search.corpus === "string" && search.corpus.length > 0
+      ? { corpus: search.corpus }
+      : {}),
+    ...(typeof search.folder === "string" && search.folder.length > 0
+      ? { folder: search.folder }
+      : {}),
+  }),
   // Slugs feed the editor's broken-link linter. The new-document page is
   // always an authoring surface (unlike a read view), so the list loads up
   // front here. The linter is purely cosmetic and "never blocks Save", so a
   // failed fetch must not error the whole authoring page — fall back to no
   // known slugs (every link then just lints as unknown until the page reloads).
   loader: async ({ params }) => {
-    try {
-      return await getDocumentRefs({
-        data: { projectId: params.projectId },
-      });
-    } catch {
-      return [];
-    }
+    const { projectId } = params;
+    const [docRefs, corpora] = await Promise.all([
+      getDocumentRefs({ data: { projectId } }).catch(() => []),
+      getCorpusList({ data: { projectId } }).catch(() => []),
+    ]);
+    return { docRefs, corpora };
   },
 });
 
 function NewDoc() {
   const nav = useNavigate();
   const projectId = asProjectId(Route.useParams().projectId);
-  const { folder } = Route.useSearch();
-  const docRefs = Route.useLoaderData();
+  const search = Route.useSearch();
+  const { docRefs, corpora } = Route.useLoaderData();
+  const corpusSlug = asCorpusSlug(search.corpus ?? DEFAULT_CORPUS_SLUG);
+  const corpus = corpora.find((c) => c.slug === corpusSlug);
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
@@ -76,9 +85,14 @@ function NewDoc() {
         title,
         markdown,
         filename,
-        // The document is created directly in the target folder in one atomic
-        // transaction (server-side), so it never briefly lands at the root.
-        folderSlug: folder,
+        // The document is created directly in the target corpus (and folder)
+        // in one atomic transaction (server-side), so it never exists
+        // outside a corpus.
+        location: {
+          corpusSlug,
+          folderSlug:
+            search.folder === undefined ? null : asFolderSlug(search.folder),
+        },
         clientVersion: 0,
       }),
     });
@@ -106,9 +120,10 @@ function NewDoc() {
   return (
     <div className="mx-auto max-w-doc">
       <BackLink
-        to="/p/$projectId/documents"
+        to="/p/$projectId/corpora/$slug"
         projectId={projectId}
-        label="Documents"
+        slug={corpusSlug}
+        label={corpus?.name ?? "Documents"}
         className="mb-4 inline-block"
       />
       <div>
@@ -156,6 +171,7 @@ function NewDoc() {
           editorRef={editorRef}
           docRefs={docRefs}
           selfSlug={slug}
+          selfCorpusSlug={corpusSlug}
           onBrokenChange={setBroken}
           ariaLabel="Document body"
           ariaDescribedBy={describedBy}
