@@ -2,7 +2,7 @@
   "name": "@nicia-ai/corpus",
   "version": "0.1.0",
   "private": true,
-  "description": "Corpus — a Git-free canonical markdown context store for teams: documents + agent collections served to agents over MCP, on Cloudflare Workers/D1/Durable Objects.",
+  "description": "Corpus — a canonical markdown context store for teams: documents + agent collections served to agents over MCP, on Cloudflare Workers/D1/Durable Objects.",
   "license": "Apache-2.0",
   "author": "Nicia AI, Inc.",
   "homepage": "https://github.com/nicia-ai/corpus#readme",

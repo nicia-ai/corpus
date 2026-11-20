@@ -25,6 +25,9 @@
     "config-path.ts",
     "core.ts",
     "corpus.ts",
-    "mcp-add.ts"
+    "mcp-add.ts",
+    "errors.ts",
+    "sync.ts",
+    "sync-state.ts"
   ]
 }

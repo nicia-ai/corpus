@@ -295,12 +295,14 @@ export const api = new Hono<{ Bindings: Env }>()
     if (scope instanceof Response) return scope;
     const docs = await scope.store.listDocuments();
     return c.json({
+      corpus: { projectId: scope.ref.projectId, slug: scope.ref.corpusSlug },
       documents: docs
         .filter((d) => scope.members.has(d.slug))
         .map((d) => ({
           slug: d.slug,
           title: d.title,
           docVersion: d.docVersion,
+          path: d.path,
         })),
     });
   })

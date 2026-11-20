@@ -151,6 +151,19 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     expect(slugs).not.toContain(OUTSIDER_SLUG);
   });
 
+  it("lists each member's path and the bound corpus identity, nothing outside it", async () => {
+    const token = await mintKey();
+    const body: {
+      corpus: { projectId: string; slug: string };
+      documents: readonly { slug: string; path: string }[];
+    } = await (await call("/api/v1/docs", token)).json();
+    expect(body.documents).toEqual([
+      expect.objectContaining({ slug: MEMBER_SLUG, path: `${MEMBER_SLUG}.md` }),
+    ]);
+    expect(body.corpus.projectId).toEqual(expect.any(String));
+    expect(body.corpus.slug).toEqual(expect.any(String));
+  });
+
   it("404s a document outside the bound corpus (no existence leak)", async () => {
     const token = await mintKey();
     expect((await call(`/api/v1/docs/${OUTSIDER_SLUG}`, token)).status).toBe(

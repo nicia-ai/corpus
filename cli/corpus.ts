@@ -8,12 +8,13 @@ import {
   open,
   readFile,
   rename,
+  rm,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { homedir, platform } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import { emitKeypressEvents } from "node:readline";
 
@@ -30,16 +31,28 @@ import {
   CliError,
   type CorpusConfig,
   doctor,
-  type Files,
   list,
   pull,
   push,
+  type SyncConfig,
+  type TreeFiles,
 } from "./core.js";
 import { MCP_ADD_USAGE, mcpAdd } from "./mcp-add.js";
+import { formatSyncReport, pullAll } from "./sync.js";
 
-function die(message: string): never {
+const EXIT_ERROR = 1;
+// `pull --all` only: local edits were left untouched (re-run with --overwrite
+// or resolve them); everything that could be applied was.
+const EXIT_CONFLICT = 2;
+// `pull --all` only: the server was unreachable or refused the request.
+const EXIT_TRANSPORT = 3;
+
+const PULL_USAGE = "usage: corpus pull <slug> [path]";
+const PULL_ALL_USAGE = "usage: corpus pull --all [dir] [--overwrite]";
+
+function die(message: string, exitCode: number = EXIT_ERROR): never {
   process.stderr.write(`${message}\n`);
-  process.exit(1);
+  process.exit(exitCode);
 }
 
 function configPath(): string {
@@ -66,7 +79,7 @@ async function readStoredConfig(
   }
 }
 
-const files: Files = {
+const files: TreeFiles = {
   readText: async (path) => {
     try {
       return await readFile(path, "utf8");
@@ -82,10 +95,14 @@ const files: Files = {
       throw error;
     }
   },
-  writeText: (path, data) => writeFile(path, data),
+  writeText: async (path, data) => {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, data);
+  },
+  remove: (path) => rm(path, { force: true }),
 };
 
-function runtimeConfig(config: SavedConfig): CorpusConfig {
+function runtimeConfig(config: SavedConfig): CorpusConfig & SyncConfig {
   return { ...config, fetch, files };
 }
 
@@ -295,9 +312,48 @@ Commands:
           [--url URL] [--name NAME] Write an OAuth MCP entry for an agent client
   list                              List documents in the bound corpus
   pull <slug> [path]                Download markdown + version sidecar
+  pull --all [dir] [--overwrite]    Write the whole corpus into dir (default .)
+                                    exit 0 ok, 1 error, 2 local edits kept, 3 server/auth
   push <slug> [path]                Upload a new conflict-checked version
 
 Environment overrides: CORPUS_URL, CORPUS_API_KEY, CORPUS_CONFIG`;
+}
+
+// Single-document pull/push look for a `pull --all` state file in the
+// file's ancestor folders; handing the core an absolute path lets that
+// search reach the checkout root from any working directory.
+function absoluteForwardSlashes(path: string): string {
+  return resolve(path).split(sep).join("/");
+}
+
+function parsePullAll(
+  args: readonly string[],
+): Readonly<{ dir: string; overwrite: boolean }> {
+  const flags = new Set(["--all", "--overwrite"]);
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const unknown = args.filter((a) => a.startsWith("--") && !flags.has(a));
+  if (unknown.length > 0 || positional.length > 1) die(PULL_ALL_USAGE);
+  return {
+    dir: positional[0] ?? ".",
+    overwrite: args.includes("--overwrite"),
+  };
+}
+
+async function pullEverything(args: readonly string[]): Promise<void> {
+  const { dir, overwrite } = parsePullAll(args);
+  const { config } = await configured();
+  try {
+    const report = await pullAll(runtimeConfig(config), dir, { overwrite });
+    for (const line of formatSyncReport(report, dir)) {
+      process.stdout.write(`${line}\n`);
+    }
+    if (report.conflicts.length > 0) process.exit(EXIT_CONFLICT);
+  } catch (error) {
+    if (error instanceof CliError && error.kind === "http") {
+      die(error.message, EXIT_TRANSPORT);
+    }
+    throw error;
+  }
 }
 
 async function main(): Promise<void> {
@@ -359,12 +415,16 @@ async function main(): Promise<void> {
       return;
     }
     case "pull": {
+      if (args.includes("--all")) return pullEverything(args);
       const [slug, path] = args;
-      if (slug === undefined || args.length > 2) {
-        die("usage: corpus pull <slug> [path]");
-      }
+      if (slug === undefined || args.length > 2) die(PULL_USAGE);
       const { config } = await configured();
-      const { file, doc } = await pull(runtimeConfig(config), slug, path);
+      const file = path ?? `${slug}.md`;
+      const { doc } = await pull(
+        runtimeConfig(config),
+        slug,
+        absoluteForwardSlashes(file),
+      );
       process.stdout.write(`pulled ${slug} (v${doc.docVersion}) → ${file}\n`);
       return;
     }
@@ -374,7 +434,11 @@ async function main(): Promise<void> {
         die("usage: corpus push <slug> [path]");
       }
       const { config } = await configured();
-      const { docVersion } = await push(runtimeConfig(config), slug, path);
+      const { docVersion } = await push(
+        runtimeConfig(config),
+        slug,
+        absoluteForwardSlashes(path ?? `${slug}.md`),
+      );
       process.stdout.write(`pushed ${slug} → v${docVersion}\n`);
       return;
     }

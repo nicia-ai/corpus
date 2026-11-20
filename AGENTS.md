@@ -14,7 +14,7 @@ evidence goes there — do not append release notes to this file.
 
 ## What this is
 
-**Corpus** — a Git-free **canonical markdown context store for teams**:
+**Corpus** — a **canonical markdown context store for teams**:
 non-engineers write markdown documents, group them into ordered **agent
 corpora**, and agents consume those corpora over **MCP** (OAuth
 bearer). Multi-tenant — **Organization → Project** (one default Project
