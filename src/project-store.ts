@@ -26,6 +26,7 @@ import {
   rebindDefaultCorpusConnections,
 } from "./control/connections";
 import { connectControlDb } from "./control/db";
+import { resolveUserNames } from "./control/users";
 import type { LedgerDb } from "./db";
 import { EMBASSY_ACTOR_LABEL } from "./embassy/actor";
 import { ConflictError, isUniqueViolation, RollbackProbe } from "./errors";
@@ -41,6 +42,7 @@ import {
   parseCallerRef,
   type ProjectId,
 } from "./ids";
+import { mirrorFor } from "./mirror/mirror-for";
 import {
   type CommandOutcome,
   corpusSnapshotMembers,
@@ -162,6 +164,11 @@ import type {
   SeedResult,
   UpdateCorpusInput,
 } from "./project-store/contracts";
+import {
+  type CloneAccessResult,
+  ProjectGitMirror,
+  type RebuildResult,
+} from "./project-store/git-mirror";
 import { ProjectInstrumentation } from "./project-store/outbox";
 import {
   ClientMessage,
@@ -198,6 +205,7 @@ import {
   corpusIsServed,
 } from "./store/domain/corpus-drive";
 import { DEFAULT_CORPUS_SLUG } from "./store/domain/default-corpus";
+import type { GitMirrorStatus } from "./store/domain/git-mirror";
 import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
 import type { ProjectStats } from "./store/domain/project-stats";
@@ -223,6 +231,7 @@ import {
   type RenameFolderResult,
 } from "./store/repos/folder-repo";
 import { InstrumentationOutbox } from "./store/repos/instrumentation-outbox";
+import { MirrorStateRepo } from "./store/repos/mirror-state";
 import { SuggestionRepo } from "./store/repos/suggestion";
 import { VersionRepo } from "./store/repos/version-repo";
 import { graphStatementLogger } from "./store/statement-log";
@@ -377,6 +386,7 @@ export class ProjectStore extends DurableObject<Env> {
   // Bounded by the active set of callers × corpora.
   private readonly readDedupCache = new Map<string, string>();
   private instrumentationOutbox: ProjectInstrumentation | undefined;
+  private gitMirrorHandle: ProjectGitMirror | undefined;
   // Cleared until the one-time `searchText` backfill has run for this DO
   // (see `ensureSearchBackfilled`); mirrors a persistent storage marker so
   // the reindex happens at most once per DO, not once per instance.
@@ -403,19 +413,62 @@ export class ProjectStore extends DurableObject<Env> {
       projectId: () => this.projectId(),
       read: () => this.read(),
       write: (fn) => this.write(fn),
-      scheduleAlarm: () => this.ctx.storage.setAlarm(Date.now() + 30_000),
+      scheduleAlarm: () => this.scheduleAlarmAt(Date.now() + 30_000),
     }));
   }
 
-  private commandContext(u: Unit, now: string): ProjectCommandContext {
+  private gitMirror(): ProjectGitMirror {
+    return (this.gitMirrorHandle ??= new ProjectGitMirror({
+      port: () => mirrorFor(this.env),
+      projectId: () => this.projectId(),
+      read: () => this.read(),
+      write: (fn) => this.write(fn),
+      scheduleAlarm: (atMs) => this.scheduleAlarmAt(atMs),
+      authorName: (changedBy) => this.mirrorAuthorName(changedBy),
+      now: () => Date.now(),
+    }));
+  }
+
+  // A Durable Object has ONE alarm, shared by every drain (the event-stream
+  // outbox retry, the repository mirror). Each asks for a time; the soonest
+  // wins, and `alarm()` runs every drain, so none is starved by another.
+  private async scheduleAlarmAt(atMs: number): Promise<void> {
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || atMs < current) {
+      await this.ctx.storage.setAlarm(atMs);
+    }
+  }
+
+  // The name a mirror commit is authored under. Best effort: an unresolvable
+  // author falls back to the system name rather than blocking the mirror.
+  private async mirrorAuthorName(
+    changedBy: string,
+  ): Promise<string | undefined> {
+    try {
+      return (
+        await resolveUserNames(connectControlDb(this.env.DB), [changedBy])
+      ).get(changedBy);
+    } catch (error) {
+      console.error("[mirror] could not resolve the author name", error);
+      return undefined;
+    }
+  }
+
+  private commandContext(
+    u: Unit,
+    now: string,
+    snapshotted?: Set<CorpusSlug>,
+  ): ProjectCommandContext {
     return {
       u,
       now,
       hash: sha256,
       corpus: {
         resolvedViews,
-        snapshot: (unit, slug, changedBy, changedAt) =>
-          this.snapshotCorpus(unit, slug, changedBy, changedAt),
+        snapshot: (unit, slug, changedBy, changedAt) => {
+          snapshotted?.add(slug);
+          return this.snapshotCorpus(unit, slug, changedBy, changedAt);
+        },
       },
     };
   }
@@ -425,12 +478,17 @@ export class ProjectStore extends DurableObject<Env> {
     fn: (ctx: ProjectCommandContext) => Promise<CommandOutcome<T>>,
     realtime?: RealtimeChangeResolver<T>,
   ): Promise<CommandOutcome<T>> {
-    const outcome = await this.write(async (u) => {
-      const out = await fn(this.commandContext(u, now));
+    const { outcome, mirrorOwed } = await this.write(async (u) => {
+      const snapshotted = new Set<CorpusSlug>();
+      const out = await fn(this.commandContext(u, now, snapshotted));
       await this.instrumentation().recordChanges(u, out.changes);
+      // Same transaction as the change: the mirror's debt commits with it or
+      // not at all. The push itself happens later, off the save path.
+      const owed = await this.gitMirror().record(u, out.changes, snapshotted);
       if (out.rollbackAfterRecord === true) throw new RollbackProbe();
-      return out;
+      return { outcome: out, mirrorOwed: owed };
     });
+    if (mirrorOwed) await this.gitMirror().wake();
     await this.instrumentation().drain();
     // Nudge connected clients that something in this project changed so they
     // re-fetch (comments / suggestions / the document). Ephemeral, best-effort.
@@ -442,6 +500,7 @@ export class ProjectStore extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await this.instrumentation().drain();
+    await this.gitMirror().drain();
   }
 
   // — Real-time channel (presence + change nudges) ————————————————————
@@ -710,6 +769,7 @@ export class ProjectStore extends DurableObject<Env> {
       blobs: new BlobStore(ledger),
       versions: new VersionRepo(graph),
       outbox: new InstrumentationOutbox(ledger),
+      mirror: new MirrorStateRepo(ledger),
       blockMaps: new BlockMapRepo(ledger),
       comments: new CommentRepo(ledger),
       suggestions: new SuggestionRepo(ledger),
@@ -831,6 +891,7 @@ export class ProjectStore extends DurableObject<Env> {
   // Tear down all of this project's data (reconcile sweep, after a
   // project soft-delete). Idempotent.
   async purge(): Promise<void> {
+    await this.gitMirror().discardAll();
     await this.ctx.storage.deleteAll();
     this.driveLayout = undefined;
     this.store = undefined;
@@ -1076,6 +1137,34 @@ export class ProjectStore extends DurableObject<Env> {
   ): Promise<ReapResult> {
     const now = nowMs ?? Date.now();
     return this.write((u) => reapExpiredRecords(u, retention, now));
+  }
+
+  // — Repository mirror ——————————————————————————————————————————————
+  // Each corpus served to agents has a read-only Git repository mirroring it
+  // (see ProjectGitMirror). Off without the Artifacts binding.
+
+  async gitMirrorStatus(corpusSlug: CorpusSlug): Promise<GitMirrorStatus> {
+    return this.gitMirror().status(corpusSlug);
+  }
+
+  // Throw the repository away and rebuild it from the corpus as it is now.
+  // History is lost by design; the caller is owner-gated at the transport.
+  async rebuildGitMirror(
+    corpusSlug: CorpusSlug,
+    changedBy: string,
+  ): Promise<RebuildResult> {
+    return this.gitMirror().rebuild(corpusSlug, changedBy);
+  }
+
+  // A short-lived read-only credential for cloning the corpus's repository.
+  async gitCloneAccess(corpusSlug: CorpusSlug): Promise<CloneAccessResult> {
+    return this.gitMirror().cloneAccess(corpusSlug);
+  }
+
+  // Run the mirror's drain now instead of waiting for the alarm. The alarm
+  // calls the same method; tests use this to settle the mirror.
+  async drainGitMirror(): Promise<void> {
+    await this.gitMirror().drain();
   }
 
   // — Bundle export / import ————————————————————————————————————————

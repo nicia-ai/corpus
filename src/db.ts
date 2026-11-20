@@ -65,6 +65,43 @@ export const instrumentationOutbox = sqliteTable("instrumentation_outbox", {
   attemptCount: integer("attempt_count").notNull().default(0),
 });
 
+// What a corpus's repository mirror owes its repository. One row per mirrored
+// corpus, written in the SAME ProjectStore transaction as the change it
+// records (`generation` ticks), and drained after commit by a DO alarm that
+// pushes the difference. `synced_generation` catching up to `generation` is
+// "nothing pending"; a change that lands mid-push leaves it behind and
+// earns another pass. `intent` is what the next pass must do: a normal
+// `sync`, a from-scratch `rebuild`, or `delete` the repository (the corpus
+// is gone). Rows exist only while the Artifacts binding is configured.
+export const MIRROR_INTENTS = ["sync", "rebuild", "delete"] as const;
+
+export const mirrorState = sqliteTable(
+  "mirror_state",
+  {
+    corpusSlug: text("corpus_slug").primaryKey(),
+    intent: text("intent", { enum: MIRROR_INTENTS }).notNull().default("sync"),
+    generation: integer("generation").notNull().default(0),
+    syncedGeneration: integer("synced_generation").notNull().default(0),
+    // The latest change's author and time: who the next commit is credited to.
+    changedBy: text("changed_by").notNull(),
+    changedAt: text("changed_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    // Epoch milliseconds; null = due now.
+    retryAt: integer("retry_at"),
+    lastError: text("last_error"),
+    // The head commit this DO last pushed, and when: the "history is what we
+    // expected" check, and what the UI reports.
+    lastCommit: text("last_commit"),
+    lastSyncedAt: text("last_synced_at"),
+  },
+  () => [
+    check(
+      "mirror_state_intent_valid",
+      sql.raw(`intent in (${MIRROR_INTENTS.map((i) => `'${i}'`).join(", ")})`),
+    ),
+  ],
+);
+
 // --- Collaboration: derived block ids + anchored comments -------------
 // Non-canonical side state: off-bundle, off-MCP, reaped with the document
 // versions they describe. Enum columns use drizzle `{ enum }` + a CHECK so
@@ -158,6 +195,8 @@ export const comment = sqliteTable(
 // Downstream types are INFERRED from the schema above — never hand-written —
 // so each column's type (including the status union) is the single source
 // of truth shared by repos, DO methods, and DTOs.
+export type MirrorStateRow = Readonly<typeof mirrorState.$inferSelect>;
+export type MirrorIntent = MirrorStateRow["intent"];
 export type StoredBlockMap = Readonly<typeof documentBlockMap.$inferSelect>;
 export type CommentThreadRow = Readonly<typeof commentThread.$inferSelect>;
 export type NewCommentThread = Readonly<typeof commentThread.$inferInsert>;
@@ -297,6 +336,7 @@ export type LedgerDb = DrizzleSqliteDODatabase<{
   contentBlobs: typeof contentBlobs;
   changeEvents: typeof changeEvents;
   instrumentationOutbox: typeof instrumentationOutbox;
+  mirrorState: typeof mirrorState;
   documentBlockMap: typeof documentBlockMap;
   documentBlockSeq: typeof documentBlockSeq;
   commentThread: typeof commentThread;

@@ -77,7 +77,7 @@ Org / Project only.
 Every change must pass `pnpm check` — the single gate CI also runs:
 `pnpm typecheck`, `pnpm lint`, `pnpm format:check`,
 `pnpm check:do-migrations`, `pnpm check:event-log-migrations`,
-`pnpm test` (full suite — vitest-pool-workers, real DO + D1), and
+`pnpm test` (full suite — vitest-plugin, real DO + D1), and
 `pnpm build`, in that order. `pnpm check` is read-only. Use
 `pnpm check:fix` to auto-fix formatting + lint (`prettier --write`,
 `eslint --fix`) before running the gate. The gate is defined once in
@@ -333,6 +333,37 @@ rules.
 - Verify library APIs against the installed version + current docs —
   training data lags this dependency badly.
 
+## Git mirror
+
+Each served corpus has a one-way, read-only Git mirror on Cloudflare
+Artifacts (`docs/git-mirror.md`); Corpus is the source of truth and the
+repository is derived. The Artifacts binding is **optional** — absent
+means off, with no records kept (`mirrorFor` in `src/mirror/mirror-for.ts`
+is the only place it is resolved; the namespace lives in the wrangler
+binding, never in `src/`).
+
+- **Never mirror Drafts** (`corpusIsServed`), and **never hand out a write
+  token**: pushes mint their own short-lived one inside the adapter and
+  revoke it; clone credentials are read-scoped.
+- The tree is exactly what `corpus pull --all` writes. Share
+  `cli/sync-state.ts` (format, hashing, path safety) — never re-implement it.
+- The debt is recorded in `ProjectStore.write()` (`mirror_state`, via
+  `ProjectGitMirror.record`); the push happens after commit, off the save
+  path, from the shared DO alarm (`scheduleAlarmAt` keeps the soonest of
+  every drain's requests). A save must never fail or wait on the mirror.
+- The DO talks to the `GitMirror` port (`src/mirror/port.ts`), never to
+  Artifacts. Object, pack and wire code is pure and lives in
+  `src/store/domain/git/`; its hashes are pinned to ids real `git`
+  produced (`test/git-objects.test.ts`).
+- Decide a rejected push from the branch (did the head move?), not from the
+  reason text. Keepers: `test/mirror/sync.test.ts` (stale ref, crash
+  recovery, rebuild), `test/mirror/mirror-cost.test.ts` (a one-file change
+  costs the same at any corpus size), `test/mirror-disabled.test.ts` (no
+  binding).
+- Tests that need the binding live in `test/mirror/` and run in the `mirror`
+  vitest project (wrangler environment `mirror`, local Artifacts simulator,
+  Git 2.32+ on `PATH`); the rest of the suite runs without it.
+
 ## Durable Object migrations
 
 `wrangler.jsonc` has the initial migrations for `ProjectStore` and
@@ -394,14 +425,14 @@ is left unplaced rather than resurrected as a draft.
 
 ## Testing
 
-`vite.config.ts` uses vitest-pool-workers with real Worker bindings,
+`vite.config.ts` uses vitest-plugin with real Worker bindings,
 `isolatedStorage: false`. D1 migrations applied via
 `test/apply-migrations.ts`. `test/_helpers.ts` carries a per-module
 `SALT` so user emails don't collide across test files sharing D1.
 
 Tests are typechecked. `tsconfig.json` covers `src/` only, so `test/`
 gets its own `tsconfig.test.json` (same strict options, plus the
-`@cloudflare/vitest-pool-workers/types` needed for `cloudflare:test`),
+`@cloudflare/vitest-plugin/types` needed for `cloudflare:test`),
 and `pnpm typecheck` runs both projects. Test code is held to the same
 rules as `src/` — brand ids through the `as*` constructors, no `any` /
 `@ts-expect-error` to silence a mock that has drifted from its port.

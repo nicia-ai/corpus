@@ -128,7 +128,7 @@ function serializeSidecar(slug: string, docVersion: number): string {
   return `${JSON.stringify({ slug, docVersion })}\n`;
 }
 
-async function request(
+export async function request(
   cfg: CorpusConfig,
   path: string,
   init?: RequestInit,

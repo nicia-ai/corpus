@@ -33,7 +33,7 @@ import type { ProjectStore } from "../src/project-store";
 // production callers, so they build ids the same way.
 export { asCorpusSlug as colSlug, asDocumentSlug as docSlug } from "../src/ids";
 
-// vitest-pool-workers isolates storage per test FILE (each file is its own
+// vitest-plugin isolates storage per test FILE (each file is its own
 // Worker isolate with its own D1 + DO storage; verified — a row written in
 // one file is invisible in another). Within a file the counter `n` alone
 // guarantees unique emails / ids. The per-module salt is defense in depth:

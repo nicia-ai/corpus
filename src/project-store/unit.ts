@@ -6,6 +6,7 @@ import type { CommentRepo } from "../store/repos/comment";
 import type { DocumentRepo } from "../store/repos/document-repo";
 import type { FolderRepo } from "../store/repos/folder-repo";
 import type { InstrumentationOutbox } from "../store/repos/instrumentation-outbox";
+import type { MirrorStateRepo } from "../store/repos/mirror-state";
 import type { SuggestionRepo } from "../store/repos/suggestion";
 import type { VersionRepo } from "../store/repos/version-repo";
 
@@ -21,6 +22,7 @@ export type ProjectUnit = Readonly<{
   blobs: BlobStore;
   versions: VersionRepo;
   outbox: InstrumentationOutbox;
+  mirror: MirrorStateRepo;
   blockMaps: BlockMapRepo;
   comments: CommentRepo;
   suggestions: SuggestionRepo;

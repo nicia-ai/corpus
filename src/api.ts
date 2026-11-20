@@ -38,9 +38,14 @@ import {
   callerRefFromOAuth,
 } from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
+import {
+  MIRROR_NOT_ENABLED_MESSAGE,
+  MIRROR_NOT_READY_MESSAGE,
+} from "./mirror/errors";
 import { checkedPathSegments } from "./project-store/commands/untrusted-path";
 import { scopedExecutor } from "./scoped-executor";
 import { corpusIsServed } from "./store/domain/corpus-drive";
+import { MIRROR_BRANCH } from "./store/domain/git-mirror";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "./util";
 
 // Shared MCP responder: parse the JSON-RPC envelope (the trust
@@ -399,6 +404,37 @@ export const api = new Hono<{ Bindings: Env }>()
       return c.json({ ok: false, segmentCollision: true }, 409);
     }
     return c.json({ ok: false, rolledBack: true }, 409);
+  })
+  // A short-lived READ-ONLY credential for cloning the key's corpus from its
+  // mirror repository. The API key is exchanged for an Artifacts token scoped
+  // to that one repository; a write token is never issued. No owner gate here:
+  // minting the key was the owner-gated act.
+  .post("/api/v1/git/token", async (c) => {
+    const scope = await apiKeyScope(c);
+    if (scope instanceof Response) return scope;
+    const access = await scope.store.gitCloneAccess(scope.ref.corpusSlug);
+    if (access.ok) {
+      return c.json({
+        remote: access.remote,
+        corpus: scope.ref.corpusSlug,
+        branch: MIRROR_BRANCH,
+        token: access.token,
+        expiresAt: access.expiresAt,
+        current: access.current,
+      });
+    }
+    if (access.reason === "not-ready") {
+      return c.json({ error: MIRROR_NOT_READY_MESSAGE }, 409);
+    }
+    return c.json(
+      {
+        error:
+          access.reason === "not-enabled"
+            ? MIRROR_NOT_ENABLED_MESSAGE
+            : "not found",
+      },
+      404,
+    );
   })
   .get("/.well-known/oauth-authorization-server", (c) =>
     // See `asBetterAuthPlugin` in better-auth-plugin-compat.ts: widening the

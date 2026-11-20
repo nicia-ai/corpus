@@ -82,6 +82,12 @@ export const ledgerMigrations: LedgerMigrationBundle = {
         "when": 1784226035280,
         "tag": "0010_dark_tinkerer",
         "breakpoints": true
+      },
+      {
+        "idx": 11,
+        "when": 1795199915091,
+        "tag": "0011_legal_mesmero",
+        "breakpoints": true
       }
     ]
   },
@@ -96,6 +102,7 @@ export const ledgerMigrations: LedgerMigrationBundle = {
     "m0007": "ALTER TABLE `suggestion_hunk` ADD `lead_sep` text DEFAULT '' NOT NULL;--> statement-breakpoint\nALTER TABLE `suggestion_hunk` ADD `trail_sep` text DEFAULT '' NOT NULL;",
     "m0008": "ALTER TABLE `suggestion_hunk` ADD `prop_start` integer DEFAULT 0 NOT NULL;--> statement-breakpoint\nALTER TABLE `suggestion_hunk` ADD `prop_end` integer DEFAULT 0 NOT NULL;",
     "m0009": "ALTER TABLE `suggestion_hunk` DROP COLUMN `lead_sep`;--> statement-breakpoint\nALTER TABLE `suggestion_hunk` DROP COLUMN `trail_sep`;",
-    "m0010": "ALTER TABLE `suggestion` ADD `granularity` text DEFAULT 'block' NOT NULL;"
+    "m0010": "ALTER TABLE `suggestion` ADD `granularity` text DEFAULT 'block' NOT NULL;",
+    "m0011": "CREATE TABLE `mirror_state` (\n\t`corpus_slug` text PRIMARY KEY NOT NULL,\n\t`intent` text DEFAULT 'sync' NOT NULL,\n\t`generation` integer DEFAULT 0 NOT NULL,\n\t`synced_generation` integer DEFAULT 0 NOT NULL,\n\t`changed_by` text NOT NULL,\n\t`changed_at` text NOT NULL,\n\t`attempts` integer DEFAULT 0 NOT NULL,\n\t`retry_at` integer,\n\t`last_error` text,\n\t`last_commit` text,\n\t`last_synced_at` text,\n\tCONSTRAINT \"mirror_state_intent_valid\" CHECK(intent in ('sync', 'rebuild', 'delete'))\n);\n"
   }
 };

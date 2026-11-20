@@ -5,6 +5,7 @@ import { McpSetupPage } from "@/features/connectors/McpSetupPage";
 import { asProjectId } from "@/ids";
 import { listConnectionApiKeys } from "@/lib/server/api-keys";
 import { getCorpusMeta } from "@/lib/server/corpora";
+import { getGitMirrorStatus } from "@/lib/server/git-mirror";
 import { getMcpUrl } from "@/lib/server/session";
 
 const layout = getRouteApi("/p/$projectId");
@@ -18,7 +19,7 @@ export const Route = createFileRoute("/p/$projectId/connectors/mcp/setup")({
   validateSearch: z.object({ corpus: z.string().optional() }),
   loaderDeps: ({ search }) => ({ corpus: search.corpus }),
   loader: async ({ params, deps }) => {
-    const [url, connection, col] = await Promise.all([
+    const [url, connection, col, mirror] = await Promise.all([
       getMcpUrl(),
       deps.corpus === undefined
         ? Promise.resolve(undefined)
@@ -33,8 +34,13 @@ export const Route = createFileRoute("/p/$projectId/connectors/mcp/setup")({
         : getCorpusMeta({
             data: { projectId: params.projectId, slug: deps.corpus },
           }),
+      deps.corpus === undefined
+        ? Promise.resolve(undefined)
+        : getGitMirrorStatus({
+            data: { projectId: params.projectId, corpusSlug: deps.corpus },
+          }),
     ]);
-    return { url, connection, col };
+    return { url, connection, col, mirror };
   },
 });
 
@@ -51,6 +57,7 @@ function SetupMcpRoute(): React.ReactElement {
       url={data.url}
       connection={data.connection}
       col={data.col}
+      mirror={data.mirror}
     />
   );
 }

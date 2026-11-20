@@ -17,6 +17,7 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import { emitKeypressEvents } from "node:readline";
+import { text as readAll } from "node:stream/consumers";
 
 import { corpusConfigPath } from "./config-path.js";
 import {
@@ -37,6 +38,13 @@ import {
   type SyncConfig,
   type TreeFiles,
 } from "./core.js";
+import {
+  cloneCommand,
+  credentialReply,
+  fetchCloneAccess,
+  GIT_USAGE,
+  isCredentialOperation,
+} from "./git.js";
 import { MCP_ADD_USAGE, mcpAdd } from "./mcp-add.js";
 import { formatSyncReport, pullAll } from "./sync.js";
 
@@ -315,6 +323,8 @@ Commands:
   pull --all [dir] [--overwrite]    Write the whole corpus into dir (default .)
                                     exit 0 ok, 1 error, 2 local edits kept, 3 server/auth
   push <slug> [path]                Upload a new conflict-checked version
+  git clone [dir] [--helper]        Print a ready-to-run read-only \`git clone\`
+  git credential <get|store|erase>  Git credential helper for \`git pull\`
 
 Environment overrides: CORPUS_URL, CORPUS_API_KEY, CORPUS_CONFIG`;
 }
@@ -356,6 +366,44 @@ async function pullEverything(args: readonly string[]): Promise<void> {
   }
 }
 
+// `corpus git ...`: a read-only clone of the key's corpus. Errors go to
+// stderr and exit 1; stdout carries only the command (or the credential
+// reply), so it can be piped or evaluated.
+async function gitCommand(args: readonly string[]): Promise<void> {
+  const [sub, ...rest] = args;
+  try {
+    if (sub === "clone") {
+      const helper = rest.includes("--helper");
+      const positional = rest.filter((a) => !a.startsWith("--"));
+      const unknown = rest.filter(
+        (a) => a.startsWith("--") && a !== "--helper",
+      );
+      if (unknown.length > 0 || positional.length > 1) die(GIT_USAGE);
+      const { config } = await configured();
+      const access = await fetchCloneAccess(runtimeConfig(config));
+      process.stdout.write(
+        `${cloneCommand(access, { dir: positional[0], helper })}\n`,
+      );
+      return;
+    }
+    if (sub === "credential" && isCredentialOperation(rest[0])) {
+      const { config } = await configured();
+      process.stdout.write(
+        await credentialReply(
+          runtimeConfig(config),
+          rest[0],
+          await readAll(process.stdin),
+        ),
+      );
+      return;
+    }
+  } catch (error) {
+    if (error instanceof CliError) die(error.message);
+    throw error;
+  }
+  die(GIT_USAGE);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   if (command === undefined) die(usage());
@@ -394,6 +442,7 @@ async function main(): Promise<void> {
       die(error instanceof Error ? error.message : String(error));
     }
   }
+  if (command === "git") return gitCommand(args);
   if (command === "--version" || command === "-v") {
     if (args.length > 0) die("usage: corpus --version");
     process.stdout.write(`${await version()}\n`);
