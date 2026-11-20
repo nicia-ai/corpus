@@ -989,6 +989,13 @@ export class ProjectStore extends DurableObject<Env> {
     return usageSnapshotProjection(await this.read());
   }
 
+  // Lay this project out as drives now instead of on its next read or write.
+  // The scheduled sweep calls it so a project nobody has opened since the
+  // drive model shipped does not stay in the old shape.
+  async layOutAsDrivesIfNeeded(): Promise<void> {
+    await this.ensureDriveLayout();
+  }
+
   // Structural counts for operators (no content, names, or ids). Read-only
   // and off the boot path: only the admin refresh and the daily cron call it.
   // It deliberately does NOT go through `read()`: a project that has not been
