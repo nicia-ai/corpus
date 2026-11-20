@@ -36,7 +36,8 @@ and write **Markdown** in the body. For example:
 ```
 
 Click **Create**. The title becomes a stable slug
-(`backend-conventions`), and this is version 1.
+(`backend-conventions`), and this is version 1. The page starts in
+**Drafts**, the unpublished space, so agents can't see it yet.
 
 ## 4. Build a corpus
 
@@ -44,22 +45,18 @@ Go to **Corpora → Corpus**. Give it a **Name** (e.g.
 `backend-agent`) and an optional **Description**, then **Create
 corpus**.
 
-On the corpus page, use **Add to this corpus** to search for the
-document you just wrote and click **Add**. Added documents land
-**on-demand** — the agent sees them in the outline and pulls them by
-path when relevant. If a document should be pre-loaded into every
-`read_collection` call (brand voice, a compliance notice, the core
-architecture rules), flip its **Always include** switch. Drag the
-handle to reorder; that's the sequence the agent sees. See
-[Corpora](./corpora.md) for the always-include budget and
-when to split.
+Now publish the document: open it, choose **Move**, and pick
+`backend-agent`. The document belongs to that corpus from then on,
+under the corpus's root. Its path inside the corpus is the path you
+give it. See [Corpora](./corpora.md) for folders, moving documents
+between corpora, and deleting a corpus.
 
 ## 5. Connect this corpus
 
-On the Corpus page (where you just attached documents), click
-**Connect this corpus**. Corpus creates (or reuses) the Connection
-for this Corpus and shows the setup snippet. The agent will reach
-**only** this Corpus — no other documents in the project.
+On the corpus page, click **Connect this corpus**. Corpus creates (or
+reuses) the Connection for this corpus and shows the setup snippet. The
+agent will reach **only** this corpus — no documents in Drafts, and none
+in other corpora.
 
 Use a per-Connection local server name so multiple Corpora from the
 same client don't overwrite each other:
@@ -89,48 +86,51 @@ else.
 
 Ask your agent to use it. For example, in Claude Code:
 
-> Work from the corpus you're connected to. Read its
-> always-included guidance, browse the outline, and pull on-demand
-> documents when relevant.
+> Work from the corpus you're connected to. List its documents, and
+> read the ones the task needs.
 
-The agent reads the always-included documents with `read_collection`,
-browses the Corpus's outline, and reads on-demand documents by path
-as needed. Edit a document in Corpus and the agent picks up the new
-version on its **next call** — no re-paste, no reconnect.
+The agent lists the corpus's documents with `list_documents`, then reads
+the ones relevant to the task with `read_document`. Edit a document in
+Corpus and the agent picks up the new version on its **next call** — no
+re-paste, no reconnect.
 
 ## Start from the built-in example instead
 
 Don't want to author a document first? On an empty project, the home
 screen offers **Load our example** — click it to populate the project
 with demo data for a fictional subscription product (Marlow), including
-two ready-made corpora, **Sales** and **Support**.
+two ready-made corpora, **Company** and **Support desk**.
 
-Connect the **Sales** corpus exactly as in step 5 (use a server name
-like `corpus-sales`), then smoke-test it:
+Connect the **Company** corpus exactly as in step 5 (use a server name
+like `corpus-company`), then smoke-test it:
 
-> What documents are in my Sales corpus?
+> What documents are in my Company corpus?
 
 You should see something like:
 
-> Your Sales corpus contains 3 documents:
+> Your Company corpus contains 3 documents:
 >
-> - refund-policy.md — Refund Policy
+> - policies/refunds.md — Refund Policy
 > - product.md — Product
 > - brand-voice.md — Brand Voice
 
 Then put the corpus to work — the point is that the agent treats it
 as the source of truth, not just a file listing:
 
-> Using only the guidance in my Sales corpus, draft a cold outreach
+> Using only the guidance in my Company corpus, draft a cold outreach
 > email to a 34-year-old pediatric nurse who joined the Marlow waitlist
 > last month but hasn't subscribed yet.
+
+To give a support agent both the company rules and the support playbook,
+connect it to the **Company** and **Support desk** corpora. See
+[Connect your agent](./connect-your-agent.md).
 
 ## Next steps
 
 - [Documents](./documents.md) — frontmatter, versions, conflict
   resolution, importing existing markdown.
-- [Corpora](./corpora.md) — ordering, the always-include
-  budget, and what the agent actually receives.
+- [Corpora](./corpora.md) — drafts, moving documents between corpora,
+  and what the agent actually receives.
 - [Connect your agent](./connect-your-agent.md) — Claude Desktop,
   Cursor, VS Code, and API-key auth for non-OAuth clients.
 - [Recipes](./recipes.md) — patterns that work well in practice.

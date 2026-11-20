@@ -1,22 +1,11 @@
-import { assembleCorpus, type AssembledCorpus } from "../corpus";
+import { asDocumentSlug, type CorpusSlug, type DocumentSlug } from "../ids";
 import {
-  asCorpusSlug,
-  asDocumentSlug,
-  type CorpusSlug,
-  type DocumentSlug,
-} from "../ids";
-import {
-  DEFAULT_COLLECTION_DELIVERY,
-  expandCorpusDocuments,
-  type ExpandEntry,
-  type FolderTreeNode,
-} from "../store/domain/collection-expand";
+  buildCorpusPathIndex,
+  comparePaths,
+  corpusRelativePath,
+  resolveCorpusLink,
+} from "../store/domain/corpus-drive";
 import { type ParsedLink, parseLinks } from "../store/domain/links";
-import {
-  derivePath,
-  resolveRelativePath,
-  resolveWikiPath,
-} from "../store/domain/paths";
 import { toSafeFulltextQuery } from "../store/domain/search";
 import {
   type DocumentChain,
@@ -28,12 +17,16 @@ import type {
   CorpusDocView,
   CorpusMeta,
 } from "../store/repos/collection-graph";
-import { compact, estimateTokens, pluralize } from "../util";
+import { compact, estimateTokens } from "../util";
 
 import type {
+  CorpusFolderView,
   CorpusOutline,
   DocumentHistoryEntry,
   DocumentHistoryMeta,
+  DocumentListRow,
+  DocumentLocation,
+  DocumentRef,
   DocumentSearchHit,
   DocumentSnapshot,
   OutlineDoc,
@@ -61,37 +54,42 @@ export async function getDocumentProjection(
   };
 }
 
-export async function listDocumentsProjection(u: ProjectUnit): Promise<
-  readonly {
-    slug: string;
-    title: string;
-    docVersion: number;
-    size: number;
-    filename: string;
-    path: string;
-    folderSlug: string | null;
-    updatedAt: string;
-  }[]
-> {
+export async function listDocumentsProjection(
+  u: ProjectUnit,
+): Promise<readonly DocumentListRow[]> {
+  const locations = new Map(
+    (await documentLocations(u)).map((l) => [l.slug, l] as const),
+  );
   // Drop archived docs BEFORE bounding, so soft-deleted rows can't consume
   // list slots and silently hide active documents past the limit.
   const docs = (await u.docs.listAll())
     .filter((d) => d.archivedAt === undefined)
     .slice(0, DOC_LIST_LIMIT);
-  const [bytes, paths] = await Promise.all([
-    u.blobs.getMany(docs.map((d) => d.contentHash)),
-    pathIndex(u),
-  ]);
-  return docs.map((d) => ({
-    slug: d.slug,
-    title: d.title,
-    docVersion: d.docVersion,
-    size: estimateTokens(bytes.get(d.contentHash) ?? ""),
-    filename: d.filename,
-    path: paths.slugToPath.get(d.slug) ?? d.filename,
-    folderSlug: paths.slugToFolderSlug.get(d.slug) ?? null,
-    updatedAt: d.updatedAt,
-  }));
+  const bytes = await u.blobs.getMany(docs.map((d) => d.contentHash));
+  return docs
+    .flatMap((d) => {
+      const location = locations.get(d.slug);
+      return location === undefined
+        ? []
+        : [
+            {
+              slug: d.slug,
+              title: d.title,
+              docVersion: d.docVersion,
+              size: estimateTokens(bytes.get(d.contentHash) ?? ""),
+              filename: d.filename,
+              corpusSlug: location.corpusSlug,
+              path: location.path,
+              folderSlug: location.folderSlug,
+              updatedAt: d.updatedAt,
+            },
+          ];
+    })
+    .sort(
+      (a, b) =>
+        comparePaths(a.corpusSlug, b.corpusSlug) ||
+        comparePaths(a.path, b.path),
+    );
 }
 
 const SEARCH_RESULT_LIMIT = 20;
@@ -104,8 +102,8 @@ const SEARCH_MIN_QUERY = 2;
 // tokens (`toSafeFulltextQuery`) and run in "plain" mode, so no FTS5 operator
 // syntax can inject or throw. Archived docs are excluded because their
 // `searchText` is cleared on archive; the `archivedAt` skip is defence in
-// depth. Path is derived per hit (≤ SEARCH_RESULT_LIMIT), never over the
-// whole corpus.
+// depth. Each hit's corpus and path are derived per hit (≤
+// SEARCH_RESULT_LIMIT), never over the whole project.
 export async function searchDocumentsProjection(
   store: CorpusStore,
   u: ProjectUnit,
@@ -123,38 +121,129 @@ export async function searchDocumentsProjection(
   const out: DocumentSearchHit[] = [];
   for (const { node, snippet } of hits) {
     if (node.archivedAt !== undefined) continue;
+    const location = await documentLocationProjection(
+      u,
+      asDocumentSlug(node.slug),
+    );
+    if (location === undefined) continue;
     out.push({
       slug: node.slug,
       title: node.title,
-      path: await hitPath(u, node.slug, node.filename),
+      corpusSlug: location.corpusSlug,
+      path: location.path,
       snippet: snippet ?? "",
     });
   }
   return out;
 }
 
-// Derive one hit's display path (folder ancestry + filename) without
-// scanning the whole document set — the search result is already bounded.
-async function hitPath(
+// Where one document lives — its corpus and corpus-relative path — read
+// from its own folder chain, without scanning the project. `undefined`
+// for a missing or archived document.
+export async function documentLocationProjection(
   u: ProjectUnit,
-  slug: string,
-  filename: string,
-): Promise<string> {
-  const folder = await u.folders.documentFolder(asDocumentSlug(slug));
-  const names = folder != null ? await u.folders.ancestorNames(folder) : [];
-  return derivePath(names, filename);
+  slug: DocumentSlug,
+): Promise<DocumentLocation | undefined> {
+  const node = await u.docs.find(slug);
+  if (node === undefined || node.archivedAt !== undefined) return undefined;
+  const chain = await u.folders.documentFolderChain(slug);
+  const [root] = chain;
+  const home = chain[chain.length - 1];
+  if (root === undefined || home === undefined) return undefined;
+  const [corpusSlug] = await u.cols.collectionsIncludingFolders([root.slug]);
+  if (corpusSlug === undefined) return undefined;
+  return {
+    slug: node.slug,
+    corpusSlug,
+    path: corpusRelativePath(
+      chain.map((folder) => folder.name),
+      node.filename,
+    ),
+    folderSlug: home.slug === root.slug ? null : home.slug,
+  };
 }
 
-// Every LIVE document as a link-resolution ref (slug + derived path).
-// Feeds the editor's broken-link linter and wikilink resolution, which
-// need the complete set — a partial/capped list would flag real links as
-// broken — and must exclude archived docs (which would otherwise resolve
-// as valid targets the documents list doesn't show).
+// Every LIVE document with the corpus it is in and its path inside that
+// corpus. The one place a project path is turned into a corpus-relative
+// one, so no surface can show the hidden root folder.
+export async function documentLocations(
+  u: ProjectUnit,
+): Promise<readonly DocumentLocation[]> {
+  const [rows, links] = await Promise.all([
+    u.folders.liveDocumentPaths(),
+    u.cols.folderLinks(),
+  ]);
+  const corpusOfRoot = new Map(
+    links.map((link) => [link.folderSlug as string, link.corpusSlug] as const),
+  );
+  return rows.flatMap((row) => {
+    const rootSlug = row.ancestorSlugs[0];
+    const corpusSlug =
+      rootSlug === undefined ? undefined : corpusOfRoot.get(rootSlug);
+    if (corpusSlug === undefined) return [];
+    return [
+      {
+        slug: row.slug,
+        corpusSlug,
+        path: corpusRelativePath(row.ancestorNames, row.filename),
+        folderSlug: row.folderSlug === rootSlug ? null : row.folderSlug,
+      },
+    ];
+  });
+}
+
+// Every LIVE document as a link-resolution ref. Feeds the editor's
+// broken-link linter and wikilink resolution, which need the complete set
+// — a partial/capped list would flag real links as broken — and must
+// exclude archived docs (which would otherwise resolve as valid targets
+// the documents list doesn't show).
 export async function listDocumentRefsProjection(
   u: ProjectUnit,
-): Promise<{ slug: string; path: string }[]> {
-  const { slugToPath } = await pathIndex(u);
-  return [...slugToPath.entries()].map(([slug, path]) => ({ slug, path }));
+): Promise<readonly DocumentRef[]> {
+  return (await documentLocations(u)).map((l) => ({
+    slug: l.slug,
+    path: l.path,
+    corpusSlug: l.corpusSlug,
+  }));
+}
+
+// The folders a person sees: every folder except the corpus roots, each
+// tagged with its corpus, a folder directly under a root reported as
+// top-level (`parentSlug: null`).
+export async function listFoldersProjection(
+  u: ProjectUnit,
+): Promise<readonly CorpusFolderView[]> {
+  const [folders, links] = await Promise.all([
+    u.folders.listAll(),
+    u.cols.folderLinks(),
+  ]);
+  const corpusOfRoot = new Map(
+    links.map((link) => [link.folderSlug as string, link.corpusSlug] as const),
+  );
+  const parentOf = new Map(folders.map((f) => [f.slug, f.parentSlug] as const));
+  const rootOf = (slug: string): string => {
+    let cursor = slug;
+    const seen = new Set<string>();
+    for (;;) {
+      const parent = parentOf.get(cursor) ?? null;
+      if (parent === null || seen.has(cursor)) return cursor;
+      seen.add(cursor);
+      cursor = parent;
+    }
+  };
+  return folders.flatMap((f) => {
+    if (f.parentSlug === null) return [];
+    const corpusSlug = corpusOfRoot.get(rootOf(f.slug));
+    if (corpusSlug === undefined) return [];
+    return [
+      {
+        slug: f.slug,
+        name: f.name,
+        corpusSlug,
+        parentSlug: corpusOfRoot.has(f.parentSlug) ? null : f.parentSlug,
+      },
+    ];
+  });
 }
 
 export function listCorporaProjection(
@@ -189,13 +278,7 @@ export async function corpusMetaProjection(
   u: ProjectUnit,
   corpusSlug: CorpusSlug,
 ): Promise<
-  | { found: false }
-  | {
-      found: true;
-      name: string;
-      description?: string;
-      alwaysIncludeBudgetTokens: number;
-    }
+  { found: false } | { found: true; name: string; description?: string }
 > {
   const col = await u.cols.findCorpus(corpusSlug);
   if (col === undefined) return { found: false };
@@ -203,144 +286,6 @@ export async function corpusMetaProjection(
     found: true as const,
     name: col.name,
     description: col.description,
-    alwaysIncludeBudgetTokens: col.alwaysIncludeBudgetTokens,
-  });
-}
-
-export async function readCorpusProjection(
-  u: ProjectUnit,
-  corpusSlug: CorpusSlug,
-): Promise<
-  | { found: false }
-  | ({
-      found: true;
-      name: string;
-      description?: string;
-    } & AssembledCorpus)
-> {
-  const colNode = await u.cols.findCorpus(corpusSlug);
-  const ordered = await resolvedViews(u, corpusSlug);
-  if (colNode === undefined || ordered === undefined) {
-    return { found: false };
-  }
-  const delivered = ordered.filter((d) => d.delivery === "core");
-  const bytes = await u.blobs.getMany(delivered.map((d) => d.contentHash));
-  const documents = delivered.map((d) => ({
-    slug: d.slug,
-    title: d.title,
-    docVersion: d.docVersion,
-    updatedAt: d.updatedAt,
-    markdown: bytes.get(d.contentHash) ?? "",
-  }));
-  const assembled: AssembledCorpus =
-    documents.length === 0 && ordered.length > 0
-      ? {
-          documents: [],
-          corpus: `# Corpus: ${corpusSlug}\n(no core guidance documents configured)\n`,
-        }
-      : assembleCorpus(corpusSlug, documents);
-  const referenceCount = ordered.length - delivered.length;
-  const corpus =
-    referenceCount > 0
-      ? [
-          assembled.corpus,
-          "",
-          "---",
-          referenceCount === 1
-            ? `1 reference document is available in collection://${corpusSlug}/outline. Read it with read_document when relevant.`
-            : `${pluralize(referenceCount, "reference document")} are available in collection://${corpusSlug}/outline. Read them with read_document when relevant.`,
-        ].join("\n")
-      : assembled.corpus;
-  return {
-    found: true,
-    ...compact({ name: colNode.name, description: colNode.description }),
-    documents: assembled.documents,
-    corpus,
-  };
-}
-
-export async function corpusStructureProjection(
-  u: ProjectUnit,
-  corpusSlug: CorpusSlug,
-): Promise<
-  | { found: false }
-  | {
-      found: true;
-      name: string;
-      description?: string;
-      alwaysIncludeBudgetTokens: number;
-      folders: readonly Readonly<{
-        slug: string;
-        name: string;
-        position: number;
-        delivery: "core" | "reference";
-      }>[];
-      members: readonly Readonly<{
-        slug: string;
-        title: string;
-        docVersion: number;
-        size: number;
-        updatedAt: string;
-        direct: boolean;
-        position: number;
-        delivery: "core" | "reference";
-        viaFolder?: string;
-      }>[];
-    }
-> {
-  const colNode = await u.cols.findCorpus(corpusSlug);
-  const entries = await u.cols.entries(corpusSlug);
-  const ordered = await resolvedViews(u, corpusSlug);
-  if (colNode === undefined || entries === undefined || ordered === undefined) {
-    return { found: false };
-  }
-  const bytes = await u.blobs.getMany(ordered.map((d) => d.contentHash));
-  const directSlugs = new Set(entries.documents.map((d) => d.slug));
-  const nameBySlug = new Map(
-    (await u.folders.listAll()).map((f) => [f.slug, f.name] as const),
-  );
-  const linkedFolders = [...entries.folders]
-    .map((f) => ({
-      slug: f.slug,
-      name: nameBySlug.get(f.slug) ?? f.slug,
-      position: f.position,
-      delivery: f.delivery,
-    }))
-    .sort((a, b) => a.position - b.position);
-  const folderDocSlugs = await Promise.all(
-    linkedFolders.map(async (f) => {
-      const tree = await u.folders.subtree(f.slug);
-      const slugs = new Set<string>();
-      for (const node of tree.values()) {
-        for (const d of node.documents) slugs.add(d.slug);
-      }
-      return { slug: f.slug, slugs };
-    }),
-  );
-  const members = ordered.map((d) => {
-    const direct = directSlugs.has(d.slug);
-    const viaFolder = direct
-      ? undefined
-      : folderDocSlugs.find((f) => f.slugs.has(d.slug))?.slug;
-    return compact({
-      slug: d.slug,
-      title: d.title,
-      docVersion: d.docVersion,
-      size: estimateTokens(bytes.get(d.contentHash) ?? ""),
-      updatedAt: d.updatedAt,
-      direct,
-      position: d.position,
-      delivery: d.delivery,
-      viaFolder,
-    });
-  });
-  return compact({
-    found: true as const,
-    name: colNode.name,
-    description: colNode.description,
-    alwaysIncludeBudgetTokens: colNode.alwaysIncludeBudgetTokens,
-    folders: linkedFolders,
-    members,
   });
 }
 
@@ -352,25 +297,15 @@ export async function corpusMembersProjection(
   return views?.map((v) => v.slug);
 }
 
-// One row per (corpus, RESOLVED member document) — direct includes
-// plus folder-expanded docs, deduped exactly as the agent-facing
-// expansion sees them (shares `resolvedViews`, so a list/card count can
-// never disagree with the corpus detail or MCP). The single source
-// for every "how many documents" / "in how many corpora" count.
+// One row per live document with the corpus it is in. The single source
+// for every "how many documents" count.
 export async function resolvedMembersProjection(
   u: ProjectUnit,
 ): Promise<readonly Readonly<{ corpusSlug: string; documentSlug: string }>[]> {
-  const corpora = await u.cols.list(DOC_LIST_LIMIT);
-  const perCorpus = await Promise.all(
-    corpora.map(async (c) => {
-      const views = await resolvedViews(u, asCorpusSlug(c.slug));
-      return (views ?? []).map((v) => ({
-        corpusSlug: c.slug,
-        documentSlug: v.slug,
-      }));
-    }),
-  );
-  return perCorpus.flat();
+  return (await documentLocations(u)).map((l) => ({
+    corpusSlug: l.corpusSlug,
+    documentSlug: l.slug,
+  }));
 }
 
 export async function documentHistoryProjection(
@@ -495,81 +430,37 @@ export async function verifyHistoryProjection(
   return verifyChain({ documents, corpora, blobs });
 }
 
+// A corpus's documents: everything under its root, by corpus-relative
+// path. `undefined` = no such corpus. Shared by the outline, the member
+// scope, the CorpusVersion snapshot and bundle export, so none of them can
+// disagree about what a corpus contains or in what order.
 export async function resolvedViews(
   u: ProjectUnit,
   corpusSlug: CorpusSlug,
 ): Promise<readonly CorpusDocView[] | undefined> {
-  const e = await u.cols.entries(corpusSlug);
-  if (e === undefined) return undefined;
-  if (e.folders.length === 0) {
-    return [...e.documents].sort(
-      (a, b) => a.position - b.position || a.slug.localeCompare(b.slug),
-    );
-  }
-
-  const tree = new Map<string, FolderTreeNode>();
-  for (const sub of await Promise.all(
-    e.folders.map((f) => u.folders.subtree(f.slug)),
-  )) {
-    for (const [k, v] of sub) tree.set(k, v);
-  }
-  const entries: ExpandEntry[] = [
-    ...e.documents.map((d) => ({
-      type: "document" as const,
-      slug: d.slug,
-      position: d.position,
-      delivery: d.delivery,
-    })),
-    ...e.folders.map((f) => ({
-      type: "folder" as const,
-      slug: f.slug,
-      position: f.position,
-      delivery: f.delivery,
-    })),
-  ];
-  const expanded = expandCorpusDocuments(entries, tree);
+  if ((await u.cols.findCorpus(corpusSlug)) === undefined) return undefined;
+  const located = (await documentLocations(u))
+    .filter((l) => l.corpusSlug === corpusSlug)
+    .sort((a, b) => comparePaths(a.path, b.path));
   const nodes = await u.docs.findMany(
-    expanded.map((d) => asDocumentSlug(d.slug)),
+    located.map((l) => asDocumentSlug(l.slug)),
   );
-  return nodes
-    .map((node, i) =>
-      node === undefined || node.archivedAt !== undefined
-        ? undefined
-        : {
-            node,
-            delivery: expanded[i]?.delivery ?? DEFAULT_COLLECTION_DELIVERY,
-          },
-    )
-    .filter((x) => x !== undefined)
-    .map(({ node, delivery }, i) => ({
+  return located
+    .flatMap((location, i) => {
+      const node = nodes[i];
+      return node === undefined || node.archivedAt !== undefined
+        ? []
+        : [{ node, path: location.path }];
+    })
+    .map(({ node, path }, i) => ({
       slug: node.slug,
+      path,
       title: node.title,
       docVersion: node.docVersion,
       contentHash: node.contentHash,
       updatedAt: node.updatedAt,
       position: i + 1,
-      delivery,
     }));
-}
-
-export async function pathIndex(u: ProjectUnit): Promise<
-  Readonly<{
-    pathToSlug: Map<string, string>;
-    slugToPath: Map<string, string>;
-    slugToFolderSlug: Map<string, string | null>;
-  }>
-> {
-  const rows = await u.folders.liveDocumentPaths();
-  const pathToSlug = new Map<string, string>();
-  const slugToPath = new Map<string, string>();
-  const slugToFolderSlug = new Map<string, string | null>();
-  for (const row of rows) {
-    const path = derivePath(row.ancestorNames, row.filename);
-    pathToSlug.set(path, row.slug);
-    slugToPath.set(row.slug, path);
-    slugToFolderSlug.set(row.slug, row.folderSlug);
-  }
-  return { pathToSlug, slugToPath, slugToFolderSlug };
 }
 
 export async function corpusOutlineProjection(
@@ -580,38 +471,33 @@ export async function corpusOutlineProjection(
   const colNode = await u.cols.findCorpus(corpusSlug);
   const views = await resolvedViews(u, corpusSlug);
   if (colNode === undefined || views === undefined) return { found: false };
-  const { pathToSlug, slugToPath } = await pathIndex(u);
-  const allPaths = [...pathToSlug.keys()];
-  const inCorpus = new Set(views.map((v) => v.slug));
+  const index = buildCorpusPathIndex(await documentLocations(u));
   const documents: OutlineDoc[] = [];
   for (const v of views) {
-    const path = slugToPath.get(v.slug) ?? v.slug;
     const targets = await parsedLinks(
       parsedLinksByHash,
       v.contentHash,
       async () => (await u.blobs.get(v.contentHash)) ?? "",
     );
     const links: OutlineLink[] = targets.map((link) => {
-      const resolved =
-        link.kind === "wiki"
-          ? resolveWikiPath(path, link.target, allPaths)
-          : resolveRelativePath(path, link.target);
-      const documentSlug =
-        resolved === undefined ? null : (pathToSlug.get(resolved) ?? null);
+      const resolved = resolveCorpusLink(
+        { corpusSlug, path: v.path },
+        link,
+        index,
+      );
       return {
         target: link.target,
         kind: link.kind,
-        resolvedPath: resolved ?? null,
-        documentSlug,
-        inCorpus: documentSlug !== null && inCorpus.has(documentSlug),
+        resolvedPath: resolved?.path ?? null,
+        documentSlug: resolved?.documentSlug ?? null,
+        inCorpus: resolved?.corpusSlug === corpusSlug,
       };
     });
     documents.push({
       slug: v.slug,
-      path,
+      path: v.path,
       title: v.title,
       docVersion: v.docVersion,
-      delivery: v.delivery,
       links,
     });
   }

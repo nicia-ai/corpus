@@ -118,9 +118,16 @@ describe("retention reap with protection sets spanning pages", () => {
     for (let i = 0; i < names.length; i += 1) {
       const d = docSlug(`d${String(i)}`);
       const c = colSlug(names[i] ?? "");
+      await store.createCorpus({
+        slug: c,
+        name: names[i] ?? "",
+        changedBy: "u",
+      });
+      // Creating the document in its corpus cuts a CorpusVersion pinning v1.
       await store.saveDocument({
         slug: d,
         markdown: "v1",
+        location: { corpusSlug: c, folderSlug: null },
         clientVersion: 0,
         changedBy: "u",
       });
@@ -130,22 +137,16 @@ describe("retention reap with protection sets spanning pages", () => {
         clientVersion: 1,
         changedBy: "u",
       });
-      await store.createCorpus({
-        slug: c,
-        name: names[i] ?? "",
-        changedBy: "u",
-      });
-      await store.attachDocument(c, d, 1, "u"); // snapshot pins head v2
       await store.saveDocument({
         slug: d,
         markdown: "v3",
         clientVersion: 2,
         changedBy: "u",
-      }); // head is now v3 — v2 is a pinned, non-head version
+      }); // head is now v3 — v2 is unpinned, v1 is pinned by its corpus
     }
-    // v1 reaped, v2 pinned (survives), v3 head (survives) → one delete/doc.
+    // v2 reaped, v1 pinned (survives), v3 head (survives) → one delete/doc.
     // A truncated pinned set would drop the page-2 corpus and wrongly
-    // reap its doc's v2.
+    // reap its doc's v1.
     const r = await store.reapExpired(
       { documentVersionDays: 1 },
       Date.now() + 5 * DAY,
@@ -167,13 +168,19 @@ describe("folder cascade delete spanning pages", () => {
 
   it("deletes every descendant when the subtree spans pages (no orphans)", async () => {
     const store = freshStore("pg-folder");
-    const root = await store.createFolder("root", null);
+    const corpusSlug = colSlug("pg-folder-corpus");
+    await store.createCorpus({ slug: corpusSlug, name: "F", changedBy: "u" });
+    const root = await store.createFolder("root", {
+      corpusSlug,
+      folderSlug: null,
+    });
     expect(root.ok).toBe(true);
     if (!root.ok) return;
+    const rootLocation = { corpusSlug, folderSlug: asFolderSlug(root.slug) };
     for (let i = 0; i < 5; i += 1) {
       const child = await store.createFolder(
         `child-${String(i)}`,
-        asFolderSlug(root.slug),
+        rootLocation,
       );
       expect(child.ok).toBe(true);
     }

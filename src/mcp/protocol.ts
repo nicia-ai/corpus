@@ -20,6 +20,16 @@ export const ERR = {
   CONFLICT: -32009,
 } as const;
 
+// What an agent is told at `initialize`. A Corpus is a folder of markdown
+// files; nothing is pre-assembled or pre-selected for the agent — it lists
+// the folder and reads what it decides it needs.
+export const SERVER_INSTRUCTIONS = [
+  "This server gives you one Corpus: a folder of markdown files that a team maintains for you.",
+  "Paths are relative to the Corpus root, like files in a directory (for example `README.md` or `policies/refunds.md`).",
+  "Call list_documents to see every file with its path, then read_document with a path to read one. Nothing is loaded for you in advance: list first, then read what the task needs.",
+  "You cannot change a file directly. Use suggest_edit to propose an edit or a new file; a person reviews it and decides.",
+].join(" ");
+
 export const COLLECTION_URI = "collection://";
 export const DOCUMENT_URI = "document://";
 export const OUTLINE_SUFFIX = "/outline";
@@ -28,32 +38,27 @@ export const TOOLS = [
   {
     name: "list_collections",
     description:
-      "List the Collection this connection is bound to (a connection targets exactly one).",
-  },
-  {
-    name: "read_collection",
-    description:
-      "Read the core guidance for the Collection this connection is bound to. No arguments are needed; a collectionSlug may be passed only if it is this connection's bound Collection. Reference documents remain available through the outline and read_document.",
+      "Describe the Corpus this connection is bound to (a connection targets exactly one): its slug, name and description.",
   },
   {
     name: "list_documents",
     description:
-      "List the documents in the Collection this connection is bound to (path, slug, title, version, size, delivery). Use path for user-facing references and slug for stable internal reads.",
+      "List every markdown file in the Corpus, like a directory listing: path (relative to the Corpus root), slug, title, version and size, ordered by path. Start here, then read the files the task needs.",
   },
   {
     name: "read_document",
     description:
-      "Read one document's markdown, verbatim, by slug or by Corpus path such as `docs/brand-voice.md` / `./docs/brand-voice.md`. The document must be in the bound Collection.",
+      "Read one file's markdown, verbatim, by its Corpus path such as `docs/brand-voice.md` (or by slug). The file must be in this Corpus.",
   },
   {
     name: "read_document_meta",
     description:
-      "Parsed YAML frontmatter for one document in the bound Collection, by slug or Corpus path. The file itself is never altered — read_document still returns it verbatim.",
+      "Parsed YAML frontmatter for one file in the Corpus, by Corpus path or slug. The file itself is never altered — read_document still returns it verbatim.",
   },
   {
     name: "verify_history",
     description:
-      "Verify the content-addressed version chain. Pass `documentSlug` to verify one document; omitted = verify every document in the Collection this connection is bound to.",
+      "Verify the content-addressed version chain. Pass `documentSlug` to verify one document; omitted = verify every document in the Corpus this connection is bound to.",
   },
   {
     name: "get_proposal_result",
@@ -127,7 +132,7 @@ export const TOOLS = [
   {
     name: "suggest_edit",
     description:
-      "Propose an edit to a document in the bound Collection — or a NEW document — as a reviewable suggestion. Nothing is EVER auto-applied: a human accepts or rejects it. To edit: read the document first, then pass its `slug` (or Corpus `path`), the full `proposedMarkdown` body, and the `baseDocVersion` you read; if the document has moved on since, you get a conflict and must re-read. To propose a new document: pass a slug or Corpus path that doesn't exist yet with `baseDocVersion: 0` and the full body; when a human applies it, the document is created and joins this Collection.",
+      "Propose an edit to a file in the Corpus — or a NEW file — as a reviewable suggestion. Nothing is EVER auto-applied: a human accepts or rejects it. To edit: read the file first, then pass its Corpus `path` (or `slug`), the full `proposedMarkdown` body, and the `baseDocVersion` you read; if the file has moved on since, you get a conflict and must re-read. To propose a new file: pass a Corpus path (or slug) that doesn't exist yet with `baseDocVersion: 0` and the full body; when a human applies it, the file is created at that path in this Corpus.",
     inputSchema: {
       type: "object",
       properties: {

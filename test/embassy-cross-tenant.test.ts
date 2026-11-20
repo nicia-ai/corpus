@@ -230,7 +230,13 @@ describe("Embassy HTTP", () => {
 
     await createCorpusFor(org.projectId, colSlug("published"));
     expect(
-      (await store.attachDocument(colSlug("published"), slug, 1, "owner")).ok,
+      (
+        await store.moveDocument(
+          slug,
+          { corpusSlug: colSlug("published"), folderSlug: null },
+          "owner",
+        )
+      ).ok,
     ).toBe(true);
     const denied = await SELF.fetch(url, {
       method: "PUT",
@@ -267,10 +273,9 @@ describe("Embassy HTTP", () => {
     await createCorpusFor(org.projectId, colSlug("published"));
     expect(
       (
-        await store.attachDocument(
-          colSlug("published"),
+        await store.moveDocument(
           docSlug("draft"),
-          1,
+          { corpusSlug: colSlug("published"), folderSlug: null },
           "owner",
         )
       ).ok,

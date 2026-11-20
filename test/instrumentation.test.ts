@@ -46,26 +46,25 @@ describe("instrumentation — saves emit events into the per-Project event log",
     });
   });
 
-  it("createCorpus + attachDocument fire corpus.created and corpus.attached", async () => {
+  it("createCorpus + a document created inside it fire collection.created and document.created", async () => {
     const { store, log } = freshProject("col-emit");
-    await store.saveDocument({
-      slug: docSlug("runbook"),
-      markdown: "# r",
-      clientVersion: 0,
-      changedBy: "u",
-    });
     await store.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "u",
     });
-    await store.attachDocument(colSlug("ops"), docSlug("runbook"), 1, "u");
+    await store.saveDocument({
+      slug: docSlug("runbook"),
+      markdown: "# r",
+      location: { corpusSlug: colSlug("ops"), folderSlug: null },
+      clientVersion: 0,
+      changedBy: "u",
+    });
 
     const events = await log.iterate({ limit: 20 });
     const types = events.map((e) => e.eventType);
-    expect(types).toContain("document.created");
     expect(types).toContain("collection.created");
-    expect(types).toContain("collection.attached");
+    expect(types).toContain("document.created");
   });
 
   it("idempotency-key dedups a retry of the same save to one event", async () => {
@@ -104,20 +103,20 @@ describe("instrumentation — saves emit events into the per-Project event log",
 });
 
 describe("instrumentation — MCP read events fire with coalescing", () => {
-  it("first readCorpus emits a read.first event", async () => {
+  it("first recordRead emits a read.first event", async () => {
     const { store, log } = freshProject("read-first");
-    await store.saveDocument({
-      slug: docSlug("d1"),
-      markdown: "# d1",
-      clientVersion: 0,
-      changedBy: "u",
-    });
     await store.createCorpus({
       slug: colSlug("c"),
       name: "C",
       changedBy: "u",
     });
-    await store.attachDocument(colSlug("c"), docSlug("d1"), 1, "u");
+    await store.saveDocument({
+      slug: docSlug("d1"),
+      markdown: "# d1",
+      location: { corpusSlug: colSlug("c"), folderSlug: null },
+      clientVersion: 0,
+      changedBy: "u",
+    });
 
     const caller = asCallerRef("apikey:test-k1");
     await store.recordRead(caller, "c", { d1: 1 });
@@ -184,18 +183,18 @@ describe("instrumentation — END-TO-END WEDGE: invited edit → agent read fres
   // projection's CallerCorpusState with the new version-set).
   it("full chain: save v1 → first read → save v2 → second read → projection reflects after-edit", async () => {
     const { store, log } = freshProject("wedge");
-    await store.saveDocument({
-      slug: docSlug("plan"),
-      markdown: "# Plan v1",
-      clientVersion: 0,
-      changedBy: "alice", // operator
-    });
     await store.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "alice",
     });
-    await store.attachDocument(colSlug("ops"), docSlug("plan"), 1, "alice");
+    await store.saveDocument({
+      slug: docSlug("plan"),
+      markdown: "# Plan v1",
+      location: { corpusSlug: colSlug("ops"), folderSlug: null },
+      clientVersion: 0,
+      changedBy: "alice", // operator
+    });
 
     const agentCaller = asCallerRef("apikey:agent-cli");
     // Operator's agent reads at v1.
@@ -256,18 +255,18 @@ describe("instrumentation — failure of the event-stream append never fails the
 describe("instrumentation — events are typed and round-trip the encode/decode boundary", () => {
   it("every emitted event payload decodes cleanly via decodeEvent (no malformed rows in the log)", async () => {
     const { store, log } = freshProject("roundtrip");
-    await store.saveDocument({
-      slug: docSlug("a"),
-      markdown: "# a",
-      clientVersion: 0,
-      changedBy: "u",
-    });
     await store.createCorpus({
       slug: colSlug("x"),
       name: "X",
       changedBy: "u",
     });
-    await store.attachDocument(colSlug("x"), docSlug("a"), 1, "u");
+    await store.saveDocument({
+      slug: docSlug("a"),
+      markdown: "# a",
+      location: { corpusSlug: colSlug("x"), folderSlug: null },
+      clientVersion: 0,
+      changedBy: "u",
+    });
     await store.recordCallerConnected(asCallerRef("apikey:k"));
     await store.recordRead(asCallerRef("apikey:k"), "x", { a: 1 });
 

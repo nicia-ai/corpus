@@ -83,12 +83,17 @@ const CorpusUpdatedSchema = z.object({
   changedBy: z.string(),
 });
 
+// `movedFrom` / `movedTo` name the other corpus when the event records a
+// document moving between corpora — the only way a document joins or
+// leaves one now. Rows without them are pre-drive attach/detach events
+// (which is also where `folderSlug` and a meaningful `position` come from).
 const CorpusAttachedSchema = z.object({
   type: z.literal("collection.attached"),
   corpusSlug: z.string(),
   documentSlug: z.string().optional(),
   folderSlug: z.string().optional(),
   position: z.number().int().nonnegative(),
+  movedFrom: z.string().optional(),
   changedBy: z.string(),
 });
 
@@ -97,6 +102,14 @@ const CorpusDetachedSchema = z.object({
   corpusSlug: z.string(),
   documentSlug: z.string().optional(),
   folderSlug: z.string().optional(),
+  movedTo: z.string().optional(),
+  changedBy: z.string(),
+});
+
+const CorpusDeletedSchema = z.object({
+  type: z.literal("collection.deleted"),
+  corpusSlug: z.string(),
+  pages: z.enum(["archive", "move-to-default"]),
   changedBy: z.string(),
 });
 
@@ -176,6 +189,7 @@ export const InstrumentationEventSchema = z.discriminatedUnion("type", [
   CorpusAttachedSchema,
   CorpusDetachedSchema,
   CorpusReorderedSchema,
+  CorpusDeletedSchema,
   ReadEventSchema,
   CallerConnectedSchema,
   PromptAnsweredSchema,
@@ -244,6 +258,9 @@ export const events = {
   corpusReordered: (
     fields: Omit<z.infer<typeof CorpusReorderedSchema>, "type">,
   ): InstrumentationEvent => ({ type: "collection.reordered", ...fields }),
+  corpusDeleted: (
+    fields: Omit<z.infer<typeof CorpusDeletedSchema>, "type">,
+  ): InstrumentationEvent => ({ type: "collection.deleted", ...fields }),
   readFirst: (
     fields: Omit<z.infer<typeof ReadEventSchema>, "type" | "kind">,
   ): InstrumentationEvent => ({ type: "read", kind: "first", ...fields }),
@@ -287,8 +304,13 @@ export function idempotencyKey(
       return localEventId === undefined
         ? `${event.type}:${event.slug}:v${String(event.docVersion)}`
         : `${event.type}:${event.slug}:e${String(localEventId)}`;
+    // A slug can be deleted and created again, so the ledger row id (when
+    // the write path supplies one) is what keeps the second life distinct.
     case "collection.created":
-      return `${event.type}:${event.corpusSlug}`;
+    case "collection.deleted":
+      return localEventId === undefined
+        ? `${event.type}:${event.corpusSlug}`
+        : `${event.type}:${event.corpusSlug}:e${String(localEventId)}`;
     case "collection.updated":
       return localEventId === undefined
         ? `${event.type}:${event.corpusSlug}`
@@ -304,7 +326,11 @@ export function idempotencyKey(
           : event.folderSlug !== undefined
             ? `folder:${event.folderSlug}`
             : "unknown";
-      return `${event.type}:${event.corpusSlug}:${member}`;
+      // A document can move into and out of the same corpus repeatedly;
+      // the ledger row id keeps each move a distinct event.
+      return localEventId === undefined
+        ? `${event.type}:${event.corpusSlug}:${member}`
+        : `${event.type}:${event.corpusSlug}:${member}:e${String(localEventId)}`;
     }
     case "collection.reordered":
       // Reason discriminates: a `drag-reorder` collapses by corpus +

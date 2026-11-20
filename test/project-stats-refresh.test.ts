@@ -85,6 +85,12 @@ describe("stats refresh job", () => {
       corpora: [],
       folders: [],
       links: [],
+      layout: {
+        corporaWithRoot: 0,
+        documentsOutsideRoots: 0,
+        legacyDirectLinks: 0,
+        legacyFolderLinks: 0,
+      },
     });
     const source: StatsSource = (id) =>
       id === broken

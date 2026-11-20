@@ -1,16 +1,9 @@
-import type { CorpusSlug, DocumentSlug, FolderSlug } from "../ids";
+import type { CorpusSlug } from "../ids";
 import type {
   CollectionChange,
   DocumentChange,
 } from "../store/domain/change-events";
-import type {
-  CollectionDelivery,
-  FolderTreeNode,
-} from "../store/domain/collection-expand";
-import type {
-  CollectionMember,
-  CollectionVersionSnapshot,
-} from "../store/domain/versions";
+import type { CollectionVersionSnapshot } from "../store/domain/versions";
 import type { CorpusDocView } from "../store/repos/collection-graph";
 
 import type { ProjectUnit } from "./unit";
@@ -42,18 +35,6 @@ export type ProjectCommandContext = Readonly<{
   }>;
 }>;
 
-export type CorpusEntrySnapshot = Readonly<{
-  documentSlug: DocumentSlug;
-  docVersion: number;
-  contentHash: string;
-  position: number;
-  delivery: CollectionDelivery;
-}>;
-
-export type FolderTreeLoader = (
-  folderSlug: FolderSlug,
-) => Promise<Map<string, FolderTreeNode>>;
-
 export function isDocumentChange(
   change: DomainChange,
 ): change is DocumentChange {
@@ -67,18 +48,6 @@ export function commandOutcome<T>(
   return { result, changes };
 }
 
-export function corpusMembers(
-  views: readonly CorpusEntrySnapshot[],
-): CollectionMember[] {
-  return views.map((v) => ({
-    documentSlug: v.documentSlug,
-    docVersion: v.docVersion,
-    contentHash: v.contentHash,
-    position: v.position,
-    delivery: v.delivery,
-  }));
-}
-
 export function corpusSnapshotMembers(
   views: readonly CorpusDocView[],
 ): CollectionVersionSnapshot["members"] {
@@ -87,6 +56,5 @@ export function corpusSnapshotMembers(
     docVersion: v.docVersion,
     contentHash: v.contentHash,
     position: v.position,
-    delivery: v.delivery,
   }));
 }

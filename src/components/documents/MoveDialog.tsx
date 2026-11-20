@@ -1,46 +1,56 @@
-import { Folder as FolderIcon } from "lucide-react";
-import { useRef } from "react";
+import { Folder as FolderIcon, Library } from "lucide-react";
+import { useMemo, useRef } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { useDialogFocusTrap } from "@/components/ui/dialog-focus";
-import type { FolderSlug } from "@/ids";
+import type { CorpusSlug, FolderSlug } from "@/ids";
 import { cn } from "@/lib/cn";
+import type { CorpusListItem } from "@/lib/server/corpora";
 import type { FolderRow } from "@/lib/server/folders";
 import { treeIndent } from "@/lib/tree";
+import type { CorpusLocation } from "@/store/domain/corpus-drive";
 
-// `null` parent = project root. A folder move's disabled subtree
-// (the folder being moved + every descendant) cannot be the destination
-// — a folder can't move into itself.
-type DropTarget = FolderSlug | null;
-
-// Concise folder picker — the drag-free way to move a selection (or one
-// folder) into a folder when the tree is too long to drag across. The
-// Top-level row pins above the tree; subtree rows recurse to render the
-// full hierarchy with depth-indented buttons.
+// A folder move's disabled subtree (the folder being moved + every
+// descendant) cannot be the destination — a folder can't move into itself.
+// Moving across corpora is the same pick as moving within one: a corpus row
+// is its top level, and its folders nest beneath it. Publishing a page is
+// picking a served corpus; unpublishing is picking Drafts.
 export function MoveDialog({
+  corpora,
   folders,
-  childFolders,
   disabledSubtree,
   title,
   onPick,
   onClose,
 }: Readonly<{
+  corpora: readonly Pick<CorpusListItem, "slug" | "name" | "served">[];
   folders: readonly FolderRow[];
-  childFolders: Map<DropTarget, FolderRow[]>;
   disabledSubtree?: FolderSlug | undefined;
   title: string;
-  onPick: (target: DropTarget) => void;
+  onPick: (destination: CorpusLocation) => void;
   onClose: () => void;
 }>): React.ReactElement {
-  const topRef = useRef<HTMLButtonElement>(null);
+  const firstRef = useRef<HTMLButtonElement>(null);
   // The component is conditionally rendered (mounted = open), not toggled by
   // an `open` prop, so this is a constant "always open while mounted" — the
   // hook's restore-focus/Tab-trap cleanup runs on unmount either way.
   const dialogRef = useDialogFocusTrap({
     open: true,
     onClose,
-    initialFocus: topRef,
+    initialFocus: firstRef,
   });
+
+  const childFolders = useMemo(() => {
+    const out = new Map<FolderSlug | null, FolderRow[]>();
+    for (const folder of [...folders].sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    )) {
+      const list = out.get(folder.parentSlug) ?? [];
+      list.push(folder);
+      out.set(folder.parentSlug, list);
+    }
+    return out;
+  }, [folders]);
 
   const blocked = new Set<FolderSlug>();
   if (disabledSubtree !== undefined) {
@@ -51,31 +61,39 @@ export function MoveDialog({
     mark(disabledSubtree);
   }
 
-  const tree = (parent: DropTarget, depth: number): React.ReactNode =>
-    (childFolders.get(parent) ?? []).map((f) => {
-      const isBlocked = blocked.has(f.slug);
-      return (
-        <div key={f.slug}>
-          <button
-            type="button"
-            disabled={isBlocked}
-            onClick={() => onPick(f.slug)}
-            style={treeIndent(depth)}
-            className={cn(
-              "flex w-full items-center gap-2 py-2 pr-3 text-left text-base",
-              isBlocked ? "text-slate-300" : "text-slate-900 hover:bg-slate-50",
-            )}
-          >
-            <FolderIcon
-              className="size-4 shrink-0 text-slate-400"
-              aria-hidden
-            />
-            <span className="truncate">{f.name}</span>
-          </button>
-          {tree(f.slug, depth + 1)}
-        </div>
-      );
-    });
+  const tree = (
+    corpusSlug: CorpusSlug,
+    parent: FolderSlug | null,
+    depth: number,
+  ): React.ReactNode =>
+    (childFolders.get(parent) ?? [])
+      .filter((f) => f.corpusSlug === corpusSlug)
+      .map((f) => {
+        const isBlocked = blocked.has(f.slug);
+        return (
+          <div key={f.slug}>
+            <button
+              type="button"
+              disabled={isBlocked}
+              onClick={() => onPick({ corpusSlug, folderSlug: f.slug })}
+              style={treeIndent(depth)}
+              className={cn(
+                "flex w-full items-center gap-2 py-2 pr-3 text-left text-base",
+                isBlocked
+                  ? "text-slate-300"
+                  : "text-slate-900 hover:bg-slate-50",
+              )}
+            >
+              <FolderIcon
+                className="size-4 shrink-0 text-slate-400"
+                aria-hidden
+              />
+              <span className="truncate">{f.name}</span>
+            </button>
+            {tree(corpusSlug, f.slug, depth + 1)}
+          </div>
+        );
+      });
 
   return (
     <div className="fixed inset-0 z-70 flex items-center justify-center p-4">
@@ -96,19 +114,30 @@ export function MoveDialog({
           {title}
         </h2>
         <div className="min-h-0 flex-1 overflow-auto py-1">
-          <button
-            ref={topRef}
-            type="button"
-            onClick={() => onPick(null)}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-base text-slate-900 hover:bg-slate-50"
-          >
-            <FolderIcon
-              className="size-4 shrink-0 text-slate-400"
-              aria-hidden
-            />
-            Top level
-          </button>
-          {folders.length > 0 && tree(null, 0)}
+          {corpora.map((corpus, i) => (
+            <div key={corpus.slug}>
+              <button
+                ref={i === 0 ? firstRef : undefined}
+                type="button"
+                onClick={() =>
+                  onPick({ corpusSlug: corpus.slug, folderSlug: null })
+                }
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-base font-medium text-slate-900 hover:bg-slate-50"
+              >
+                <Library
+                  className="size-4 shrink-0 text-slate-400"
+                  aria-hidden
+                />
+                <span className="truncate">{corpus.name}</span>
+                {!corpus.served && (
+                  <span className="shrink-0 text-sm font-normal text-slate-500">
+                    not shared with agents
+                  </span>
+                )}
+              </button>
+              {tree(corpus.slug, null, 1)}
+            </div>
+          ))}
         </div>
         <div className="flex justify-end border-t border-slate-200 px-4 py-3">
           <Button variant="secondary" onClick={onClose}>

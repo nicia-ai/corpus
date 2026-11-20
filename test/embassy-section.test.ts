@@ -335,10 +335,9 @@ describe("PUT /s/:token/section", () => {
     const f = await fixture("served");
     const link = await f.link("Agent");
     await createCorpusFor(f.projectId, colSlug("published"));
-    await storeFor(env, f.projectId).attachDocument(
-      colSlug("published"),
+    await storeFor(env, f.projectId).moveDocument(
       f.slug,
-      1,
+      { corpusSlug: colSlug("published"), folderSlug: null },
       "owner",
     );
     const res = await putSection(link, "Location", "x", 1);

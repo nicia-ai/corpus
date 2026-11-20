@@ -107,18 +107,18 @@ describe("renameDocument — title-only, no version-chain mutation", () => {
 describe("updateCorpus — name/description, no CorpusVersion cut", () => {
   it("edits name/description, leaves slug + membership snapshot intact", async () => {
     const w = freshStore("coledit");
-    await w.saveDocument({
-      slug: docSlug("runbook"),
-      markdown: "# Runbook",
-      clientVersion: 0,
-      changedBy: "u",
-    });
     await w.createCorpus({
       slug: colSlug("ops"),
       name: "Ops",
       changedBy: "u",
     });
-    await w.attachDocument(colSlug("ops"), docSlug("runbook"), 1, "u");
+    await w.saveDocument({
+      slug: docSlug("runbook"),
+      markdown: "# Runbook",
+      location: { corpusSlug: colSlug("ops"), folderSlug: null },
+      clientVersion: 0,
+      changedBy: "u",
+    });
 
     const v1 = (await w.exportBundle(SOURCE)).collections["ops"]
       ?.collectionVersion;
@@ -135,12 +135,12 @@ describe("updateCorpus — name/description, no CorpusVersion cut", () => {
       ).ok,
     ).toBe(true);
 
-    const r = await w.readCorpus(colSlug("ops"));
-    if (!r.found) throw new Error("corpus vanished");
-    expect(r.name).toBe("Operations");
-    expect(r.description).toBe("On-call runbooks");
+    const meta = await w.corpusMeta(colSlug("ops"));
+    if (!meta.found) throw new Error("corpus vanished");
+    expect(meta.name).toBe("Operations");
+    expect(meta.description).toBe("On-call runbooks");
     // Membership unchanged.
-    expect(r.documents.map((d) => d.slug)).toEqual(["runbook"]);
+    expect(await w.corpusMembers(colSlug("ops"))).toEqual(["runbook"]);
 
     const b2 = await w.exportBundle(SOURCE);
     // Slug is identity — still keyed "ops"; no new CorpusVersion.
@@ -167,9 +167,9 @@ describe("updateCorpus — name/description, no CorpusVersion cut", () => {
       name: "Sales",
       changedBy: "u",
     });
-    const r = await w.readCorpus(colSlug("sales"));
-    if (!r.found) throw new Error("corpus vanished");
-    expect(r.description ?? "").toBe("");
+    const meta = await w.corpusMeta(colSlug("sales"));
+    if (!meta.found) throw new Error("corpus vanished");
+    expect(meta.description ?? "").toBe("");
   });
 
   it("an unchanged name+description is an idempotent no-op", async () => {

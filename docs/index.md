@@ -39,9 +39,10 @@ Three concepts, in order:
 1. **Document** — one markdown file. It has a stable slug, a title, and
    an append-only version history. Editing it in the browser creates a
    new version; nothing is ever silently overwritten.
-2. **Corpus** — a set of documents, assembled into a single body of
-   markdown. This is the unit an agent consumes. An agent that needs more
-   than one body of knowledge connects to more than one corpus.
+2. **Corpus** — a self-contained drive: a tree of folders and markdown
+   documents. This is the unit an agent consumes. Every document belongs
+   to exactly one corpus. Pages that are not ready for agents sit in
+   **Drafts**, the project's built-in unpublished space.
 3. **MCP endpoint** — one URL per project. An agent that authenticates
    to it can list your corpora and read their assembled markdown (and
    individual documents). Agents never write canonically — the most an

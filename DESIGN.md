@@ -3,7 +3,7 @@
 ## Product Context
 
 - **What this is:** Corpus — a Git-free canonical context store for teams. Non-engineers
-  write markdown documents, group them into ordered agent corpora, and agents
+  write markdown documents, group them into agent corpora, and agents
   consume those corpora over MCP.
 - **Who it's for:** Non-engineers on a team (ops, support, sales, marketing)
   who maintain the shared truth their agents read.
@@ -12,7 +12,7 @@
   Cloudflare Workers).
 
 **The memorable thing this system serves:** _you can see that one document
-feeds many agents — no copies._ Every decision below recedes so the single
+feeds many agents._ Every decision below recedes so the single
 blue linkage fan-out on the project graph is the loudest thing on screen.
 A system that is expressive everywhere would bury the one moment the product
 exists to deliver.
@@ -71,7 +71,7 @@ exists to deliver.
 ## Color
 
 - **Approach:** Restrained. A slate neutral ramp plus exactly ONE accent.
-  Color is spent almost entirely on the shared-linkage moment so it reads as
+  Color is spent almost entirely on the corpus-to-agent linkage moment so it reads as
   meaningful, never decorative.
 - **Neutrals (slate) — figure/ground is PER-PAGE (decided 2026-06-26):**
   - desk / default page bg `#f8fafc` (slate-50) — the ground for data-dense
@@ -90,10 +90,10 @@ exists to deliver.
   - ghost stroke `#cbd5e1` (slate-300)
   - secondary text `#64748b` (slate-500)
   - primary text `#0f172a` (slate-900)
-- **Accent (blue), reserved for two uses only — primary action + shared-linkage emphasis:**
+- **Accent (blue), reserved for two uses only — primary action + corpus-to-agent linkage emphasis:**
   - accent `#2563eb` (blue-600)
   - accent hover `#1d4ed8` (blue-700)
-  - accent wash `#eff6ff` (blue-50) — the "In N corpora" badge background
+  - accent wash `#eff6ff` (blue-50) — the corpus-to-agent linkage wash
 - **Two-blue family (intentional, not drift):** the marketing site
   (corpus-site) uses `#3b82f6` (blue-500) as the primary surface
   accent with `#2563eb` (blue-600) as the hover / primary-dark — a
@@ -149,8 +149,9 @@ exists to deliver.
 - **Document landing:** recently modified live documents appear above the
   folder browser; Activity stays a separate navigation destination. The
   project-root graph remains the empty-project onboarding surface.
-- **Graph:** its 3 fixed columns (Documents · Corpora · MCP) are computed
-  as a pure function of data.
+- **Graph:** the empty-project ghost graph has two fixed columns, Corpora →
+  Agents, computed as a pure function of data. A corpus may feed several
+  agents, and an agent may read two corpora.
 - **Max content width:** index/list pages fill the available main width
   (the house style — a primary action stays anchored to a full-width
   content panel, never flung to the far screen edge). Long-form prose
@@ -158,7 +159,7 @@ exists to deliver.
   measure (~max-w-5xl, ≈1024px) — a reading constraint, not a stylistic
   cap. The project graph always fills available main width.
 - **Border radius:** sm 4px (chips/badges) · md 6px (node cards, buttons,
-  inputs) · lg 8px (panels) · full 9999px (the "In N corpora" pill only).
+  inputs) · lg 8px (panels) · full 9999px (pill badges only).
 - **Responsive:** the document landing keeps recent rows in one column with
   truncation for long titles. The empty-project graph stacks vertically with
   connectors as left-rail brackets.

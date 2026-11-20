@@ -17,32 +17,23 @@ about X." Name them for the reader:
 - `release-reviewer` — the checklist a PR-review agent applies.
 - `support-bot` — product facts and tone for a customer-facing agent.
 
-Knowledge every agent needs (say `error-handling`) belongs in a corpus of
-its own — `company` or `engineering` — that agents connect to alongside
-their own. Many teams already work this way, with a company repository
-beside each project repository. Keep each document in one place; don't
-fork it per audience.
+Each document lives in exactly one corpus, so don't copy a document
+per audience. Shared knowledge (say `error-handling`) goes in its own
+corpus, and each agent connects to every corpus it needs. A
+`backend-agent` connected to `company` and `backend-agent` reads both.
+See [Corpora](./corpora.md#sharing-knowledge-between-corpora).
 
-## Keep the always-include set lean
+## Keep each corpus focused
 
-Each corpus has its own always-include budget (default 8,000
-tokens; raise it per corpus if you're feeding a larger context
-window). Past the budget the meter warns — a bloated always-include set
-dilutes the agent's attention and burns the window before it does any
-work. On-demand documents stay in `collection://<slug>/outline` and are
-pulled by path only when relevant.
+A corpus is a drive for one kind of reader. When one grows past what
+that reader needs, split it by task (`backend-agent-writing` vs
+`backend-agent-reviewing`), and move documents between corpora from the
+Corpus page. Moving takes effect on the agent's next request, and the
+history of each document moves with it.
 
-When a corpus gets heavy:
-
-- Split it by task (`backend-agent-writing` vs `backend-agent-reviewing`).
-- Move rarely-needed detail to on-demand (toggle Always include off).
-- Lead with the most important framing first — it's what the agent sees
-  before it decides what else to pull.
-
-"Always-include these few, plus a big on-demand library" is the common
-shape: toggle Always include on for the small set the agent must
-internalize, leave the rest on-demand. Both live in the same Corpus
-and the agent sees the outline of all of them.
+Name documents so the list reads well. The agent sees every path in
+alphabetical order, so a folder per topic (`policies/refunds.md`,
+`policies/returns.md`) makes the list easy to scan.
 
 ## Write documents for an agent reader
 
@@ -52,8 +43,8 @@ and the agent sees the outline of all of them.
   understand better than bare edicts.
 - Avoid implicit context ("as discussed last sprint"). The agent has
   only what's in the corpus.
-- Link related documents by relative path; the editor flags broken links and
-  agents can traverse the resolved link graph via the corpus outline.
+- Link related documents by relative path; the editor flags broken links.
+  An agent that follows a link reads the target with `read_document`.
 
 ## Use frontmatter as a control surface
 
@@ -68,16 +59,15 @@ Don't rely on remembering to say "read the corpus." Put it in the
 agent's standing instructions:
 
 - **Claude Code** — add a line to `CLAUDE.md`: _"At the start of any
-  task, work from the corpus you're connected to: read its
-  always-included guidance, browse its outline, and read
-  `docs/error-handling.md` when the task touches errors."_
+  task, work from the corpus you're connected to: list its documents,
+  and read `docs/error-handling.md` when the task touches errors."_
 - **Cursor / others** — the equivalent rules file.
 
-You can name a specific document by Corpus path — _"read
+You can name a specific document by its corpus path — _"read
 `docs/error-handling.md` from Corpus"_ — and the agent will pull just
-that one within the Connection's bound Corpus. Naming on-demand
-documents in standing instructions is how you keep prompts precise
-without bloating the always-include set.
+that one within the Connection's bound Corpus. Naming the documents that
+matter in standing instructions keeps prompts precise and tells the agent
+what to read first.
 
 Now every session starts from your canonical corpus, and updating it in
 Corpus updates every agent on the next read — no redeploy, no re-paste.
@@ -106,7 +96,8 @@ review changes before publishing.
 
 ## Separate stable from fast-moving
 
-Keep a small, rarely-changing core (`engineering-principles`) in a corpus
-of its own that many agents connect to, and put volatile specifics
-(`q3-migration-plan`) in the project corpus where they are relevant.
-Archive them when the work is done; the history stays.
+Keep rarely-changing knowledge (`engineering-principles`) in a corpus
+that every relevant agent connects to. Volatile specifics
+(`q3-migration-plan`) belong in the corpus of the team doing that work.
+When the work is done, move the document into Drafts, or into an archive
+corpus, without deleting its history.

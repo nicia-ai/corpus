@@ -38,6 +38,7 @@ import {
 } from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
 import { scopedExecutor } from "./scoped-executor";
+import { corpusIsServed } from "./store/domain/corpus-drive";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "./util";
 
 // Shared MCP responder: parse the JSON-RPC envelope (the trust
@@ -122,6 +123,9 @@ async function resolveScope(
   | Readonly<{ store: ReturnType<typeof storeFor>; members: readonly string[] }>
   | undefined
 > {
+  // The default corpus is the drafts space: never served, whatever a
+  // Connection row written before that rule may still say.
+  if (!corpusIsServed(ref.corpusSlug)) return undefined;
   const store = storeFor(env, ref.projectId);
   const members = await store.corpusMembers(ref.corpusSlug);
   return members === undefined ? undefined : { store, members };
@@ -336,19 +340,16 @@ export const api = new Hono<{ Bindings: Env }>()
       clientVersion: parsed.data.clientVersion,
       changedBy: scope.ref.userId,
     });
-    // A member is plainly updated; a non-member slug is created INTO the
-    // bound corpus (atomic save+attach, appended after the current
-    // members). `members` is a snapshot, so the create path re-decides
-    // inside its transaction: a slug that a racing create already landed
-    // in this corpus yields a retryable 409 (clientVersion decides),
-    // and only a slug existing OUTSIDE the corpus is `forbidden`.
-    const r = scope.members.has(slug)
-      ? await scope.store.saveDocument(save)
-      : await scope.store.createDocumentInCorpus(
-          save,
-          scope.ref.corpusSlug,
-          scope.members.size,
-        );
+    // `members` is a snapshot from the start of the request, so the write
+    // never trusts it: the DO decides inside its transaction, against
+    // where the document is NOW. A document in the bound corpus is
+    // updated; a wholly-new slug is created in the corpus's root; a slug
+    // that exists outside it — including one moved out a moment ago — is
+    // `forbidden`.
+    const r = await scope.store.saveDocumentInCorpus(
+      save,
+      scope.ref.corpusSlug,
+    );
     if (r.ok) return c.json({ ok: true, docVersion: r.docVersion });
     if ("forbidden" in r) return c.json({ error: "forbidden" }, 403);
     // The DO's authoritative UTF-8 byte cap (reachable when multi-byte

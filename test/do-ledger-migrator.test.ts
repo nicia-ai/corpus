@@ -38,9 +38,15 @@ describe("DO ledger Drizzle migrator", () => {
     // Hits content_blobs (blob dedup) + the DocumentVersion chain +
     // change_events (the save path appends a created event). If the
     // migrator hadn't run, this throws "no such table".
+    await store.createCorpus({
+      slug: colSlug("c"),
+      name: "C",
+      changedBy: "u",
+    });
     await store.saveDocument({
       slug: docSlug("alpha"),
       markdown: "# Alpha\nv1",
+      location: { corpusSlug: colSlug("c"), folderSlug: null },
       clientVersion: 0,
       changedBy: "u",
     });
@@ -50,12 +56,6 @@ describe("DO ledger Drizzle migrator", () => {
       clientVersion: 1,
       changedBy: "u",
     });
-    await store.createCorpus({
-      slug: colSlug("c"),
-      name: "C",
-      changedBy: "u",
-    });
-    await store.attachDocument(colSlug("c"), docSlug("alpha"), 2, "u");
 
     const snap = await store.getDocument(docSlug("alpha"));
     expect(snap?.docVersion).toBe(2);

@@ -47,12 +47,12 @@ export type ActivityDTO = Readonly<{
 }>;
 
 type ActivityStore = Readonly<{
-  corpusStructure: (slug: CorpusSlug) => Promise<
+  corpusOutline: (slug: CorpusSlug) => Promise<
     | { found: false }
     | {
         found: true;
         name: string;
-        members: readonly Readonly<{ slug: string; docVersion: number }>[];
+        documents: readonly Readonly<{ slug: string; docVersion: number }>[];
       }
   >;
 }>;
@@ -115,14 +115,24 @@ function describeEvent(
       return `${who(event.changedBy)} edited corpus ${event.corpusSlug}`;
     case "collection.attached": {
       const what = event.documentSlug ?? event.folderSlug ?? "a member";
-      return `${who(event.changedBy)} attached ${what} to ${event.corpusSlug}`;
+      return event.movedFrom === undefined
+        ? `${who(event.changedBy)} attached ${what} to ${event.corpusSlug}`
+        : `${who(event.changedBy)} moved ${what} into ${event.corpusSlug} from ${event.movedFrom}`;
     }
     case "collection.detached": {
       const what = event.documentSlug ?? event.folderSlug ?? "a member";
-      return `${who(event.changedBy)} detached ${what} from ${event.corpusSlug}`;
+      return event.movedTo === undefined
+        ? `${who(event.changedBy)} detached ${what} from ${event.corpusSlug}`
+        : `${who(event.changedBy)} moved ${what} out of ${event.corpusSlug} to ${event.movedTo}`;
     }
     case "collection.reordered":
-      return `${who(event.changedBy)} reordered ${event.corpusSlug}`;
+      return event.reason === "folder-tree-changed"
+        ? `${who(event.changedBy)} reorganized ${event.corpusSlug}`
+        : `${who(event.changedBy)} reordered ${event.corpusSlug}`;
+    case "collection.deleted":
+      return event.pages === "archive"
+        ? `${who(event.changedBy)} deleted corpus ${event.corpusSlug} and archived its pages`
+        : `${who(event.changedBy)} deleted corpus ${event.corpusSlug} and moved its pages to drafts`;
     case "read":
       return event.kind === "first"
         ? `${labelFor(event.callerRef).callerLabel} first read of ${event.corpusSlug}`
@@ -205,18 +215,23 @@ function tryProjectionInput(
   }
 }
 
+// Document events carry no corpus, only a slug, so a corpus's page shows
+// the ones for the documents it holds now — not every document in the
+// project.
 function includesActivityContext(
   evt: InstrumentationEvent,
   slug: CorpusSlug,
+  members: ReadonlySet<string>,
 ): boolean {
   return (
     ("corpusSlug" in evt && evt.corpusSlug === slug) ||
     evt.type === "caller.connected" ||
     evt.type === "prompt.answered" ||
-    evt.type === "document.created" ||
-    evt.type === "document.updated" ||
-    evt.type === "document.renamed" ||
-    evt.type === "document.archived"
+    ((evt.type === "document.created" ||
+      evt.type === "document.updated" ||
+      evt.type === "document.renamed" ||
+      evt.type === "document.archived") &&
+      members.has(evt.slug))
   );
 }
 
@@ -236,16 +251,17 @@ export async function buildCorpusActivity(
   }>,
 ): Promise<ActivityDTO> {
   const { slug, mcpUrl, store, log, resolveNames } = args;
-  const structure = await store.corpusStructure(slug);
+  const outline = await store.corpusOutline(slug);
   const currentVersions = new Map<string, number>();
   let contextName: string = slug;
-  if (structure.found) {
-    contextName = structure.name;
-    for (const m of structure.members) {
-      currentVersions.set(m.slug, m.docVersion);
+  if (outline.found) {
+    contextName = outline.name;
+    for (const d of outline.documents) {
+      currentVersions.set(d.slug, d.docVersion);
     }
   }
 
+  const members: ReadonlySet<string> = new Set(currentVersions.keys());
   const envelopes = await iterateAll(log);
   const inputs: ProjectionInput[] = [];
   for (const env of envelopes) {
@@ -307,7 +323,7 @@ export async function buildCorpusActivity(
       });
       continue;
     }
-    if (!includesActivityContext(evt, slug)) continue;
+    if (!includesActivityContext(evt, slug, members)) continue;
     if (display.length < RECENT_LIMIT) {
       display.push({ env, evt });
       if ("changedBy" in evt) authorIds.add(evt.changedBy);

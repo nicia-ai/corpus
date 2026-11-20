@@ -6,8 +6,10 @@ import { revokeEmbassiesForDocuments } from "@/control/embassies";
 import { entitlementsOf } from "@/control/entitlements";
 import { ValidationError } from "@/errors";
 import {
+  asCorpusSlug,
   asDocumentSlug,
   asFolderSlug,
+  type CorpusSlug,
   type DocumentSlug,
   type FolderSlug,
 } from "@/ids";
@@ -17,6 +19,7 @@ import {
   assertServerContext as srv,
   type ServerRequestContext,
 } from "@/lib/server-context";
+import { corpusIsServed } from "@/store/domain/corpus-drive";
 import { parseFrontmatter } from "@/store/domain/frontmatter";
 import {
   compact,
@@ -34,20 +37,21 @@ export type DocMeta = Readonly<{
   docVersion: number;
   size: number;
 }>;
-// Documents list row: DocMeta plus how many distinct agent corpora
-// the document is attached to (the product's shared-linkage signal).
+// Documents list row: DocMeta plus the corpus the document lives in (every
+// document lives in exactly one) and its corpus-relative path.
 export type DocListItem = Readonly<{
   slug: DocumentSlug;
   title: string;
   docVersion: number;
   size: number;
-  corpusCount: number;
+  corpusSlug: CorpusSlug;
   // Open suggestions awaiting review (agent or human proposals) — the
-  // documents-list badge, the sibling of corpusCount.
+  // documents-list badge.
   pendingSuggestions: number;
   filename: string;
+  // Relative to the corpus root.
   path: string;
-  // Stable slug of the document's single home folder; null = project root.
+  // Stable slug of the document's folder; null = directly in the corpus root.
   folderSlug: FolderSlug | null;
   updatedAt: string;
 }>;
@@ -78,6 +82,7 @@ export type SaveResult = Readonly<
   | { ok: true; docVersion: number }
   | { ok: false; conflict: true; currentVersion: number }
   | { ok: false; segmentCollision: true }
+  | { ok: false; unknownLocation: true }
   | { ok: false; rolledBack: true }
 >;
 
@@ -105,42 +110,70 @@ export const getDocuments = createServerFn({ method: "GET" })
 // The complete live slug + derived-path set — the editor's broken-link
 // linter and wikilink resolution need every document (the documents list
 // projection is capped; a partial set would flag real links as broken).
-export type DocLinkRef = Readonly<{ slug: string; path: string }>;
+export type DocLinkRef = Readonly<{
+  slug: string;
+  path: string;
+  corpusSlug: string;
+}>;
 
 export const getDocumentRefs = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .handler(async ({ context }): Promise<DocLinkRef[]> => {
     const refs = await storeOf(srv(context)).listDocumentRefs();
-    return refs.map((r) => ({ slug: r.slug, path: r.path }));
+    return refs.map((r) => ({
+      slug: r.slug,
+      path: r.path,
+      corpusSlug: r.corpusSlug,
+    }));
   });
 
-// One round trip for the documents list: heads + the flat attachment
-// edge list, joined to a distinct-corpus count per document.
-// Collapsed into a single server fn (not getDocuments + a counts call)
-// per the web-data-layer middleware-cost guidance.
+// Where a document lives: its corpus (named for people, not by slug) and
+// whether agents can read it. Backs the document page's back link and the
+// published / draft cue.
+export type DocumentLocation = Readonly<{
+  corpusSlug: CorpusSlug;
+  corpusName: string;
+  served: boolean;
+}>;
+
+export const getDocumentLocation = createServerFn({ method: "GET" })
+  .middleware([projectMiddleware])
+  .validator(z.object({ slug: z.string().min(1) }))
+  .handler(async ({ data, context }): Promise<DocumentLocation | undefined> => {
+    const store = storeOf(srv(context));
+    const [refs, corpora] = await Promise.all([
+      store.listDocumentRefs(),
+      store.listCorpora(),
+    ]);
+    const ref = refs.find((r) => r.slug === data.slug);
+    const corpus = corpora.find((c) => c.slug === ref?.corpusSlug);
+    if (ref === undefined || corpus === undefined) return undefined;
+    const corpusSlug = asCorpusSlug(corpus.slug);
+    return {
+      corpusSlug,
+      corpusName: corpus.name,
+      served: corpusIsServed(corpusSlug),
+    };
+  });
+
+// One round trip for the documents list: every live document with its
+// corpus and corpus-relative path, plus the open-suggestion counts.
+// Collapsed into a single server fn per the web-data-layer
+// middleware-cost guidance.
 export const getDocumentList = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
   .handler(async ({ context }): Promise<DocListItem[]> => {
     const store = storeOf(srv(context));
-    const [docs, members, pendingCounts] = await Promise.all([
+    const [docs, pendingCounts] = await Promise.all([
       store.listDocuments(),
-      store.listResolvedMembers(),
       store.openSuggestionCounts(),
     ]);
-    // Count the distinct corpora each document resolves into —
-    // including membership via a linked folder, not just direct edges.
-    const contextsByDoc = new Map<string, Set<string>>();
-    for (const m of members) {
-      const set = contextsByDoc.get(m.documentSlug) ?? new Set<string>();
-      set.add(m.corpusSlug);
-      contextsByDoc.set(m.documentSlug, set);
-    }
     return docs.map((d) => ({
       slug: asDocumentSlug(d.slug),
       title: d.title,
       docVersion: d.docVersion,
       size: d.size,
-      corpusCount: contextsByDoc.get(d.slug)?.size ?? 0,
+      corpusSlug: asCorpusSlug(d.corpusSlug),
       pendingSuggestions: pendingCounts[d.slug] ?? 0,
       filename: d.filename,
       path: d.path,
@@ -198,9 +231,15 @@ export const saveDocument = createServerFn({ method: "POST" })
         .min(1)
         .refine((v) => !v.includes("/"), "filename cannot contain a path")
         .optional(),
-      // Create directly in this folder, atomically with the save (the "New
-      // document in this folder" deep link). Only meaningful on create.
-      folderSlug: z.string().min(1).optional(),
+      // Where a NEW document is created, atomically with the save: a corpus
+      // and optionally a folder of it. Absent = the default corpus (drafts).
+      // Only meaningful on create.
+      location: z
+        .object({
+          corpusSlug: z.string().min(1),
+          folderSlug: z.string().min(1).nullish(),
+        })
+        .optional(),
       clientVersion: z.number().int().nonnegative(),
     }),
   )
@@ -229,10 +268,16 @@ export const saveDocument = createServerFn({ method: "POST" })
         markdown: data.markdown,
         title: data.title,
         filename: data.filename,
-        folderSlug:
-          data.folderSlug === undefined
+        location:
+          data.location === undefined
             ? undefined
-            : asFolderSlug(data.folderSlug),
+            : {
+                corpusSlug: asCorpusSlug(data.location.corpusSlug),
+                folderSlug:
+                  data.location.folderSlug == null
+                    ? null
+                    : asFolderSlug(data.location.folderSlug),
+              },
         clientVersion: data.clientVersion,
         changedBy: changedBy(c),
       }),
@@ -244,6 +289,7 @@ export const saveDocument = createServerFn({ method: "POST" })
     if ("segmentCollision" in r) {
       return { ok: false, segmentCollision: true };
     }
+    if ("unknownLocation" in r) return { ok: false, unknownLocation: true };
     // The DO's authoritative UTF-8 byte cap — same boundary treatment as
     // the frontmatter check above (validation kind → HTTP 400).
     if ("tooLarge" in r) throw new ValidationError(MARKDOWN_TOO_LARGE_MESSAGE);
@@ -273,7 +319,7 @@ export const renameDocument = createServerFn({ method: "POST" })
 
 // First-class filename rename — distinct from renameDocument (title).
 // A basename, not a path: `/` is rejected (moving between folders is
-// placeDocumentInFolder's job). Surfaces a same-folder name clash so
+// moveDocument's job). Surfaces a same-folder name clash so
 // the UI can explain it.
 export type FilenameResult = Readonly<
   { ok: true } | { ok: false; reason: "missing" | "segment-collision" }

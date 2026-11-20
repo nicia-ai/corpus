@@ -60,6 +60,12 @@ export const projectStatsSchema: z.ZodType<ProjectStats> = z.object({
     includedByTwoOrMoreCorpora: count,
   }),
   sameFilenamePairsAcrossCorpora: count,
+  layout: z.object({
+    corporaWithRoot: count,
+    documentsOutsideRoots: count,
+    legacyDirectLinks: count,
+    legacyFolderLinks: count,
+  }),
   links: z.object({ resolved: count, crossCorpus: count }),
 });
 

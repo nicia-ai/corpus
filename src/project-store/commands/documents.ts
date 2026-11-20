@@ -1,24 +1,23 @@
 import {
-  asCorpusSlug,
   asDocumentSlug,
   asFolderSlug,
+  type CorpusSlug,
   type DocumentSlug,
+  type FolderSlug,
 } from "../../ids";
 import {
   type AppliedFrom,
-  collectionFolderTreeChanged,
   documentArchived,
   documentChange,
-  documentDetached,
   documentFilenameChanged,
   documentRenamed,
 } from "../../store/domain/change-events";
+import { DEFAULT_CORPUS_SLUG } from "../../store/domain/default-corpus";
 import { resolveTitle } from "../../store/domain/frontmatter";
 import {
   basename,
   defaultFilename,
   normalizeSlug,
-  pathSegments,
   stripExtension,
 } from "../../store/domain/paths";
 import { deriveSearchText } from "../../store/domain/search";
@@ -35,10 +34,17 @@ import type {
   RenameDocumentInput,
   RenameFilenameInput,
   RenameFilenameResult,
+  SaveDocumentInput,
 } from "../contracts";
 
 import { maintainAnchorsOnSave } from "./anchoring";
-import { folderTreeFanOutChanges } from "./folder-fanout";
+import {
+  corpusOfDocument,
+  corpusTreeChanged,
+  resolveCorpusFolder,
+} from "./corpus-tree";
+import { ensureDefaultCorpusCommand } from "./ensure-default-corpus";
+import { checkedPathSegments } from "./untrusted-path";
 
 // Internal control-flow sentinel: thrown inside the import write() to
 // abort (roll back) the whole atomic unit on a folder/document segment
@@ -52,8 +58,8 @@ export class ImportAbort extends Error {
 }
 
 // Same sentinel pattern as ImportAbort, for saveDocumentCommand's narrower
-// case: a caller-supplied filename on a brand-new document collides with
-// an existing sibling's filename at the project root.
+// case: a brand-new document's filename collides with an existing sibling
+// segment in the folder it is being created in.
 export class FilenameCollision extends Error {
   constructor() {
     super("segment-collision");
@@ -79,13 +85,11 @@ export type SaveDocumentCommandInput = Readonly<{
   markdown: string;
   title?: string;
   filename?: string;
-  // The folder this document lives in (null = project root). Scopes the
-  // brand-new-filename collision check to the correct sibling namespace,
-  // since filename uniqueness is per-folder (the path is folder ancestry +
-  // filename), not global. Defaults to root for the editor / REST-create
-  // paths, which never folder-place; the import path passes its resolved
-  // target folder.
-  folderSlug?: string | null;
+  // Where a NEW document is created — required when there is no head,
+  // because a document never exists outside a corpus: creation and
+  // placement are one step. Always a folder under a corpus root (callers
+  // resolve it through `resolveCorpusFolder`). Inert on an update.
+  folderSlug?: FolderSlug;
   clientVersion: number;
   changedBy: string;
   // Set only by the apply-suggestion path: the durable origin recorded on
@@ -107,19 +111,17 @@ export async function saveDocumentCommand(
   const head = await ctx.u.docs.find(input.slug);
   const filename =
     input.filename ?? head?.filename ?? defaultFilename(input.slug);
-  // Only a brand-new document with a caller-chosen (not auto-derived)
-  // filename can collide: the auto-default is always free (it's derived
-  // from the already-unique slug), and an existing document keeps its own
-  // filename slot unless renamed via renameFilenameCommand, which already
-  // guards this. The collision scope is the document's own folder sibling
-  // namespace (root for editor/REST create; the resolved target folder for
-  // a folder-placed import) — filename uniqueness is per-folder, not global.
-  if (head === undefined && input.filename !== undefined) {
-    const occupant = await ctx.u.folders.documentAt(
-      input.folderSlug ?? null,
-      filename,
-    );
-    if (occupant !== undefined) throw new FilenameCollision();
+  // An existing document keeps its own filename slot unless renamed via
+  // renameFilenameCommand, which guards that itself. A new one must find
+  // its slot free in the folder it is created in — checked before any
+  // write so the failure path writes nothing.
+  if (head === undefined) {
+    if (input.folderSlug === undefined) {
+      throw new Error("a new document must be created in a corpus folder");
+    }
+    if (await ctx.u.folders.slotOccupied(input.folderSlug, filename)) {
+      throw new FilenameCollision();
+    }
   }
   const title = resolveTitle({
     markdown: input.markdown,
@@ -164,6 +166,9 @@ export async function saveDocumentCommand(
       changedBy: input.changedBy,
     }),
   );
+  if (head === undefined && input.folderSlug !== undefined) {
+    await ctx.u.folders.rehomeDocument(input.slug, input.folderSlug);
+  }
   // Maintain block ids + rebase open comment anchors onto this new version,
   // in the same transaction (no-op unless the document has open threads).
   await maintainAnchorsOnSave(ctx, {
@@ -188,6 +193,50 @@ export async function saveDocumentCommand(
     result: { docVersion },
     changes: [change],
     rollbackAfterRecord: input.__failAfterWrites === true,
+  };
+}
+
+export type SaveOrCreateResult = Readonly<
+  { docVersion: number } | { unknownLocation: true }
+>;
+
+// The web / REST save entry. An existing document is a plain save. A new
+// one is created at `location` (the default corpus's root when none is
+// given — the drafts space, materialized on demand), and the corpus it
+// joined gets a fresh snapshot. `unknownLocation` = the named corpus or
+// folder does not exist (nothing is written).
+export async function saveOrCreateDocumentCommand(
+  ctx: ProjectCommandContext,
+  input: SaveDocumentInput,
+): Promise<CommandOutcome<SaveOrCreateResult>> {
+  if ((await ctx.u.docs.find(input.slug)) !== undefined) {
+    return saveDocumentCommand(ctx, input);
+  }
+  const location = input.location ?? {
+    corpusSlug: DEFAULT_CORPUS_SLUG,
+    folderSlug: null,
+  };
+  const ensured =
+    location.corpusSlug === DEFAULT_CORPUS_SLUG
+      ? await ensureDefaultCorpusCommand(ctx, input.changedBy)
+      : undefined;
+  const folderSlug = await resolveCorpusFolder(ctx.u, location);
+  if (folderSlug === undefined) {
+    return { result: { unknownLocation: true }, changes: [] };
+  }
+  const saved = await saveDocumentCommand(ctx, { ...input, folderSlug });
+  return {
+    ...saved,
+    changes: [
+      ...(ensured?.changes ?? []),
+      ...saved.changes,
+      ...(await corpusTreeChanged(
+        ctx,
+        [location.corpusSlug],
+        input.changedBy,
+        "membership",
+      )),
+    ],
   };
 }
 
@@ -259,7 +308,11 @@ export async function renameFilenameCommand(
     changedBy: input.changedBy,
     changedAt: ctx.now,
   });
-  const fanout = await folderTreeFanOutChanges(ctx.u, input.changedBy, ctx.now);
+  const corpusSlug = await corpusOfDocument(ctx.u, input.slug);
+  const fanout =
+    corpusSlug === undefined
+      ? []
+      : await corpusTreeChanged(ctx, [corpusSlug], input.changedBy, "paths");
   return {
     result: { ok: true },
     changes: [change, ...fanout],
@@ -279,46 +332,21 @@ export async function archiveOneDocumentCommand(
     return { result: { archived: false }, changes: [] };
   }
 
-  const folderAncestors = await ctx.u.folders.documentFolderAncestorSlugs(
-    input.slug,
-  );
+  // Read before archiving: an archived document keeps its folder, but the
+  // corpus it leaves must be known to snapshot it without the document.
+  const corpusSlug = await corpusOfDocument(ctx.u, input.slug);
   await ctx.u.docs.archive(node, ctx.now);
-  const changes: DomainChange[] = [];
-  const directHandled = new Set<string>();
-
-  for (const cs of await ctx.u.cols.collectionsIncluding(input.slug)) {
-    const corpusSlug = asCorpusSlug(cs);
-    const position = await ctx.u.cols.detach(corpusSlug, input.slug);
-    if (position === undefined) continue;
-    await ctx.corpus.snapshot(ctx.u, corpusSlug, input.changedBy, ctx.now);
-    directHandled.add(corpusSlug);
-    changes.push(
-      documentDetached({
-        corpusSlug,
-        documentSlug: input.slug,
-        position,
-        changedBy: input.changedBy,
-        changedAt: ctx.now,
-      }),
-    );
-  }
-
-  if (folderAncestors.length > 0) {
-    const folderLinked =
-      await ctx.u.cols.collectionsIncludingFolders(folderAncestors);
-    for (const cs of folderLinked) {
-      if (directHandled.has(cs)) continue;
-      const corpusSlug = asCorpusSlug(cs);
-      await ctx.corpus.snapshot(ctx.u, corpusSlug, input.changedBy, ctx.now);
-      changes.push(
-        collectionFolderTreeChanged({
-          corpusSlug,
-          changedBy: input.changedBy,
-          changedAt: ctx.now,
-        }),
-      );
-    }
-  }
+  const changes: DomainChange[] =
+    corpusSlug === undefined
+      ? []
+      : [
+          ...(await corpusTreeChanged(
+            ctx,
+            [corpusSlug],
+            input.changedBy,
+            "membership",
+          )),
+        ];
 
   changes.push(
     documentArchived({
@@ -349,21 +377,31 @@ export async function archiveDocumentsCommand(
   return { result: { archived }, changes };
 }
 
+// One uploaded file, at a path relative to `corpusSlug`'s root. Missing
+// folders are created under the root; a path already holding a live
+// document becomes a new version of it. The caller snapshots the corpus
+// once for the whole upload.
 export async function importDocumentAtPathCommand(
   ctx: ProjectCommandContext,
-  input: Readonly<{ path: string; markdown: string; changedBy: string }>,
+  input: Readonly<{
+    corpusSlug: CorpusSlug;
+    path: string;
+    markdown: string;
+    changedBy: string;
+  }>,
 ): Promise<CommandOutcome<ImportDocResult>> {
-  const segments = pathSegments(input.path);
+  const segments = checkedPathSegments(input.path);
   const filename = basename(input.path);
   if (filename === "" || segments.length === 0) {
-    return {
-      result: { ok: false, reason: "invalid-path" },
-      changes: [],
-    };
+    return { result: { ok: false, reason: "invalid-path" }, changes: [] };
   }
-  const dir = segments.slice(0, -1);
+  const rootSlug = await ctx.u.cols.rootFolderSlug(input.corpusSlug);
+  if (rootSlug === undefined) {
+    return { result: { ok: false, reason: "missing-corpus" }, changes: [] };
+  }
   const ensured = await ctx.u.folders.ensureFolderPath(
-    dir,
+    rootSlug,
+    segments.slice(0, -1),
     ctx.now,
     (name, taken) => asFolderSlug(normalizeSlug(name, taken)),
   );
@@ -372,35 +410,34 @@ export async function importDocumentAtPathCommand(
 
   const existing = await ctx.u.folders.documentAt(folderSlug, filename);
   let slug: DocumentSlug;
-  let created: boolean;
   if (existing !== undefined) {
     slug = asDocumentSlug(existing.slug);
-    created = false;
   } else {
     const taken = new Set((await ctx.u.docs.listAll()).map((d) => d.slug));
     slug = asDocumentSlug(normalizeSlug(input.path, taken));
-    created = true;
   }
-
-  const head = await ctx.u.docs.find(slug);
-  const saved = await saveDocumentCommand(ctx, {
-    slug,
-    markdown: input.markdown,
-    filename,
-    folderSlug,
-    clientVersion: head?.docVersion ?? 0,
-    changedBy: input.changedBy,
-  });
-  const placed = await ctx.u.folders.placeDocument(slug, folderSlug);
-  if (!placed.ok) throw new ImportAbort("segment-collision");
+  let saved;
+  try {
+    saved = await saveDocumentCommand(ctx, {
+      slug,
+      markdown: input.markdown,
+      filename,
+      folderSlug,
+      clientVersion: existing?.docVersion ?? 0,
+      changedBy: input.changedBy,
+    });
+  } catch (err) {
+    if (err instanceof FilenameCollision) {
+      throw new ImportAbort("segment-collision");
+    }
+    throw err;
+  }
   return {
     result: {
       ok: true,
       slug,
       docVersion: saved.result.docVersion,
-      created,
-      folderSlug,
-      createdFolders: ensured.created,
+      created: existing === undefined,
     },
     changes: saved.changes,
   };

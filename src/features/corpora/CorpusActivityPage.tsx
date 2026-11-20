@@ -11,6 +11,7 @@ import { Section } from "@/components/ui/Section";
 import { cardClass, EmptyState, listSurface } from "@/components/ui/Surface";
 import { textLinkClass } from "@/components/ui/text-link";
 import type { CorpusSlug, ProjectId } from "@/ids";
+import { humanize } from "@/lib/changes-format";
 import { cn } from "@/lib/cn";
 import type {
   ActivityAgentRow,
@@ -394,7 +395,7 @@ function EventTypeBadge({
         isRead ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-600",
       )}
     >
-      {type}
+      {humanize(type)}
     </span>
   );
 }

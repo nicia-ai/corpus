@@ -3,7 +3,6 @@ import { FileText } from "lucide-react";
 import { memo, useState } from "react";
 
 import { fieldInputClass } from "@/components/Field";
-import { CorpusCountBadge } from "@/components/ui/CorpusCountBadge";
 import type { DocumentSlug, ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
 import type { DocListItem } from "@/lib/server/documents";
@@ -82,7 +81,6 @@ function DocRowComponent({
               {doc.pendingSuggestions} pending
             </span>
           )}
-          {doc.corpusCount > 0 && <CorpusCountBadge count={doc.corpusCount} />}
         </div>
         <div className="flex items-center gap-2 text-sm tabular-nums text-slate-400">
           <span className="shrink-0">

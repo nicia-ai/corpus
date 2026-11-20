@@ -56,11 +56,27 @@ function build(feed: readonly InstrumentationEvent[]) {
     slug: SLUG,
     mcpUrl: "https://corpus.test/mcp",
     store: {
-      corpusStructure: () =>
+      corpusOutline: () =>
         Promise.resolve({
           found: true as const,
+          corpus: SLUG,
           name: "Galileo Wiki",
-          members: [{ slug: "wiki-index", docVersion: 3 }],
+          documents: [
+            {
+              slug: "wiki-index",
+              path: "wiki-index.md",
+              title: "Galileo Wiki — Index",
+              docVersion: 3,
+              links: [],
+            },
+            {
+              slug: "wiki-log",
+              path: "wiki-log.md",
+              title: "Galileo Wiki — Log",
+              docVersion: 1,
+              links: [],
+            },
+          ],
         }),
     },
     log,
@@ -126,5 +142,30 @@ describe("buildCorpusActivity name resolution", () => {
     expect(readRow?.description).toBe(
       "API key · 613d25bd… first read of galileo-wiki",
     );
+  });
+});
+
+describe("buildCorpusActivity scope", () => {
+  it("shows document events only for documents this corpus holds", async () => {
+    const dto = await build([
+      events.documentUpdated({
+        slug: "wiki-index",
+        docVersion: 3,
+        title: "Galileo Wiki — Index",
+        contentHash: "hash-a",
+        changedBy: ALICE_ID,
+      }),
+      events.documentCreated({
+        slug: "some-other-corpus-page",
+        docVersion: 1,
+        title: "Elsewhere",
+        contentHash: "hash-x",
+        changedBy: ALICE_ID,
+      }),
+    ]);
+    const text = dto.recentActivity.map((r) => r.description).join("\n");
+    expect(text).toContain("wiki-index");
+    expect(text).not.toContain("some-other-corpus-page");
+    expect(dto.recentActivity).toHaveLength(1);
   });
 });

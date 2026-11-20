@@ -13,7 +13,7 @@ import {
   PRODUCT_VERSION,
   sortedBundleFolders,
 } from "../../store/domain/bundle";
-import { DEFAULT_COLLECTION_DELIVERY } from "../../store/domain/collection-expand";
+import { corpusOfRootFolderSlug } from "../../store/domain/corpus-drive";
 import { defaultFilename } from "../../store/domain/paths";
 import { deriveSearchText } from "../../store/domain/search";
 import { collectionVersionSnapshot } from "../../store/domain/versions";
@@ -21,6 +21,8 @@ import { compact, DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS } from "../../util";
 import type { CommandOutcome, ProjectCommandContext } from "../command";
 import { corpusSnapshotMembers } from "../command";
 import type { ProjectUnit } from "../unit";
+
+import { layOutAsDrivesCommand } from "./drive-layout";
 
 export type ImportBundleCommandResult = Readonly<
   | { ok: true; documents: number; corpora: number }
@@ -93,31 +95,46 @@ export async function importBundleCommand(
     a.slug.localeCompare(b.slug),
   )) {
     if (d.folderSlug !== null) {
-      await ctx.u.folders.placeDocument(asDocumentSlug(d.slug), d.folderSlug);
+      await ctx.u.folders.rehomeDocument(
+        asDocumentSlug(d.slug),
+        asFolderSlug(d.folderSlug),
+      );
     }
   }
 
+  // The contract cannot carry an archive flag, so an archived page exports
+  // as an ordinary document with no folder. In a drive-shaped bundle (it
+  // has corpus roots) every live document sits under a root, so a folderless
+  // one can only be such a page: it comes back archived, not as a live
+  // document in no corpus. (An older bundle has no roots; there a folderless
+  // document is a project-root page, and the layout below puts it in drafts.)
+  if (
+    bundle.manifest.folders.some(
+      (f) => corpusOfRootFolderSlug(f.slug) !== undefined,
+    )
+  ) {
+    for (const d of bundle.manifest.documents) {
+      if (d.folderSlug !== null) continue;
+      const node = await ctx.u.docs.find(asDocumentSlug(d.slug));
+      if (node !== undefined) await ctx.u.docs.archive(node, ctx.now);
+    }
+  }
+
+  const membership = new Map<string, readonly string[]>();
   for (const slug of Object.keys(bundle.collections).sort()) {
     const colFile = bundle.collections[slug];
     if (colFile === undefined) continue;
     const colSlug = asCorpusSlug(slug);
-    await ctx.u.cols.createCorpus({
+    const colNode = await ctx.u.cols.createCorpus({
       slug: colSlug,
       name: colFile.name,
       description: colFile.description,
-      alwaysIncludeBudgetTokens: colFile.alwaysIncludeBudgetTokens,
     });
-    const colNode = await ctx.u.cols.findCorpus(colSlug);
-    if (colNode === undefined) continue;
     const members = collectionMembersOf(colFile.members);
-    for (const m of members) {
-      await ctx.u.cols.attach(
-        colSlug,
-        asDocumentSlug(m.documentSlug),
-        m.position,
-        m.delivery ?? DEFAULT_COLLECTION_DELIVERY,
-      );
-    }
+    membership.set(
+      colSlug,
+      members.map((m) => m.documentSlug),
+    );
     await ctx.u.versions.appendCollectionVersion(
       colNode.id,
       collectionVersionSnapshot({
@@ -130,13 +147,25 @@ export async function importBundleCommand(
     );
   }
 
+  // The bundle carries folders and member lists but no corpus → root
+  // link, and an older export has documents in several corpora or in
+  // none. Land it as drives by the same rule the project migration uses:
+  // a bundle exported from a drive-shaped project already has every
+  // document under a root folder (recognized by its reserved slug), so
+  // this only re-links the roots and the round trip stays byte-identical.
+  // The bundle's own snapshots were appended verbatim above and are kept.
+  const laidOut = await layOutAsDrivesCommand(ctx, {
+    membership,
+    snapshot: false,
+  });
+
   return {
     result: {
       ok: true,
       documents: Object.keys(bundle.documents).length,
       corpora: Object.keys(bundle.collections).length,
     },
-    changes: [],
+    changes: laidOut.changes,
   };
 }
 
@@ -193,30 +222,26 @@ export async function exportBundleProjection(
     };
   }
 
-  const colMeta = new Map<
-    string,
-    { name: string; description?: string; alwaysIncludeBudgetTokens: number }
-  >();
+  const colMeta = new Map<string, { name: string; description?: string }>();
   for (const c of await u.cols.listAll()) {
     colMeta.set(c.slug, c);
   }
+  // Members are always the live tree under the corpus root (the snapshot
+  // supplies only the version number), so the bundle can never lag a
+  // move. The contract still requires a budget per collection; corpora no
+  // longer have one, so the contract's default is written.
   const colRows = await u.versions.latestCollectionVersions();
-  const folderLinked = new Set(await u.cols.collectionsWithFolderLinks());
   const colEntries = await Promise.all(
     colRows.map(async (c) => {
       const meta = colMeta.get(c.collectionSlug);
-      const members = folderLinked.has(c.collectionSlug)
-        ? corpusSnapshotMembers(
-            (await resolvedViews(u, asCorpusSlug(c.collectionSlug))) ?? [],
-          )
-        : c.members;
+      const members = corpusSnapshotMembers(
+        (await resolvedViews(u, asCorpusSlug(c.collectionSlug))) ?? [],
+      );
       return compact({
         slug: c.collectionSlug,
         name: meta?.name ?? c.collectionSlug,
         description: meta?.description,
-        alwaysIncludeBudgetTokens:
-          meta?.alwaysIncludeBudgetTokens ??
-          DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS,
+        alwaysIncludeBudgetTokens: DEFAULT_ALWAYS_INCLUDE_BUDGET_TOKENS,
         collectionVersion: c.collectionVersion,
         members: bundleMembersOf(members),
       });

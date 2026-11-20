@@ -39,10 +39,11 @@ Each grant includes the ones before it.
 | **Suggest** | Read it and propose an edit. You review the proposal and accept or reject it.        |
 | **Edit**    | Read it and write it directly, as many times as needed. Each write is a new version. |
 
-Direct editing is only available while the page is **not served by a
-corpus**. The moment a page is attached to a corpus, an Edit link behaves
-as Suggest: writes are refused with a `403` that tells the agent to propose
-instead, so nothing reaches an agent consumer without review. See
+Direct editing is only available while the page is in **Drafts**, where
+new and shared pages start. The moment a page is moved into a named corpus,
+it is published to the agents connected to that corpus, and an Edit link
+behaves as Suggest: writes are refused with a `403` that tells the agent to
+propose instead, so nothing reaches an agent consumer without review. See
 [Corpora](./corpora.md).
 
 ## Create a link
@@ -298,5 +299,5 @@ agent re-fetches, merges Priya's change into the list, and retries.
 
 **6. Who did what.** The page's version history labels each version "Priya's
 Claude Code" or "Sam's Claude Code". When the page is ready to publish, Priya
-attaches it to a corpus. From then on both links propose instead of writing, and
+moves it into a corpus. From then on both links propose instead of writing, and
 she reviews each change before it reaches the agents that read the corpus.

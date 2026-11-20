@@ -22,11 +22,6 @@ export async function listResources(
   return ok(id, {
     resources: [
       ...collections.map((c) => ({
-        uri: `${COLLECTION_URI}${c.slug}`,
-        name: c.name,
-        mimeType: "text/markdown",
-      })),
-      ...collections.map((c) => ({
         uri: `${COLLECTION_URI}${c.slug}${OUTLINE_SUFFIX}`,
         name: `${c.name} — outline`,
         mimeType: "application/json",
@@ -64,14 +59,6 @@ export async function readResource(
           }),
         },
       ],
-    });
-  }
-  if (uri.startsWith(COLLECTION_URI)) {
-    const slug = asCorpusSlug(uri.slice(COLLECTION_URI.length));
-    const r = await exec.readCorpus(slug);
-    if (!r.found) return err(id, ERR.NOT_FOUND, `unknown collection: ${uri}`);
-    return ok(id, {
-      contents: [{ uri, mimeType: "text/markdown", text: r.corpus }],
     });
   }
   if (uri.startsWith(DOCUMENT_URI)) {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { asFolderSlug } from "../src/ids";
+import { asFolderSlug, type FolderSlug } from "../src/ids";
 
-import { docSlug, freshStore } from "./_helpers";
+import { colSlug, docSlug, freshStore } from "./_helpers";
 
 // Each test gets a fresh project id → a clean ProjectStore instance.
 const freshProject = () => freshStore("save");
@@ -193,25 +193,45 @@ describe("saveDocument — caller-chosen filename on create", () => {
 // The "New document in this folder" path: creation + folder placement ride
 // ONE transaction, so the document never briefly lands at the root and a
 // collision leaves nothing behind.
+const WORKSPACE_CORPUS = colSlug("docs");
+
+async function freshWorkspace(): Promise<ReturnType<typeof freshProject>> {
+  const store = freshProject();
+  await store.createCorpus({
+    slug: WORKSPACE_CORPUS,
+    name: "Docs",
+    changedBy: "alice",
+  });
+  return store;
+}
+
 describe("saveDocument — atomic create in a folder", () => {
   async function newFolder(
     store: ReturnType<typeof freshProject>,
     name: string,
-    parent: ReturnType<typeof asFolderSlug> | null = null,
+    parent: FolderSlug | null = null,
   ) {
-    const f = await store.createFolder(name, parent);
+    const f = await store.createFolder(name, {
+      corpusSlug: WORKSPACE_CORPUS,
+      folderSlug: parent,
+    });
     if (!f.ok) throw new Error(`folder ${name} create failed`);
     return asFolderSlug(f.slug);
   }
 
+  const inFolder = (folderSlug: FolderSlug | null) => ({
+    corpusSlug: WORKSPACE_CORPUS,
+    folderSlug,
+  });
+
   it("lands the new document directly in the target folder", async () => {
-    const store = freshProject();
+    const store = await freshWorkspace();
     const folder = await newFolder(store, "guides");
 
     const r = await store.saveDocument({
       slug: docSlug("onboarding"),
       markdown: "# Onboarding",
-      folderSlug: folder,
+      location: inFolder(folder),
       clientVersion: 0,
       changedBy: "alice",
     });
@@ -220,11 +240,12 @@ describe("saveDocument — atomic create in a folder", () => {
     const row = (await store.listDocuments()).find(
       (d) => d.slug === docSlug("onboarding"),
     );
+    expect(row?.corpusSlug).toBe(WORKSPACE_CORPUS);
     expect(row?.folderSlug).toBe(folder);
   });
 
   it("scopes the filename collision per folder — same name in another folder is fine", async () => {
-    const store = freshProject();
+    const store = await freshWorkspace();
     const a = await newFolder(store, "a");
     const b = await newFolder(store, "b");
 
@@ -232,7 +253,7 @@ describe("saveDocument — atomic create in a folder", () => {
       slug: docSlug("a-notes"),
       markdown: "# A",
       filename: "notes.md",
-      folderSlug: a,
+      location: inFolder(a),
       clientVersion: 0,
       changedBy: "alice",
     });
@@ -240,7 +261,7 @@ describe("saveDocument — atomic create in a folder", () => {
       slug: docSlug("b-notes"),
       markdown: "# B",
       filename: "notes.md",
-      folderSlug: b,
+      location: inFolder(b),
       clientVersion: 0,
       changedBy: "alice",
     });
@@ -248,14 +269,14 @@ describe("saveDocument — atomic create in a folder", () => {
   });
 
   it("rejects a filename already taken in the same folder and writes nothing", async () => {
-    const store = freshProject();
+    const store = await freshWorkspace();
     const folder = await newFolder(store, "shared");
 
     await store.saveDocument({
       slug: docSlug("first"),
       markdown: "# First",
       filename: "readme.md",
-      folderSlug: folder,
+      location: inFolder(folder),
       clientVersion: 0,
       changedBy: "alice",
     });
@@ -263,7 +284,7 @@ describe("saveDocument — atomic create in a folder", () => {
       slug: docSlug("second"),
       markdown: "# Second",
       filename: "readme.md",
-      folderSlug: folder,
+      location: inFolder(folder),
       clientVersion: 0,
       changedBy: "alice",
     });
@@ -272,22 +293,23 @@ describe("saveDocument — atomic create in a folder", () => {
     expect(await store.getDocument(docSlug("second"))).toBeUndefined();
   });
 
-  it("ignores folderSlug on an UPDATE — placement is create-only, not a move", async () => {
-    const store = freshProject();
+  it("ignores location on an UPDATE — placement is create-only, not a move", async () => {
+    const store = await freshWorkspace();
     const folder = await newFolder(store, "dest");
 
-    // Create at root (no folderSlug).
+    // Create at the corpus root (no folder).
     await store.saveDocument({
       slug: docSlug("stay"),
       markdown: "# Stay",
+      location: inFolder(null),
       clientVersion: 0,
       changedBy: "alice",
     });
-    // Update carrying folderSlug: must NOT relocate the document.
+    // Update carrying a location: must NOT relocate the document.
     const r = await store.saveDocument({
       slug: docSlug("stay"),
       markdown: "# Stay v2",
-      folderSlug: folder,
+      location: inFolder(folder),
       clientVersion: 1,
       changedBy: "alice",
     });
@@ -300,22 +322,35 @@ describe("saveDocument — atomic create in a folder", () => {
   });
 
   it("rolls back the placement guard when the filename collides with a sibling FOLDER", async () => {
-    const store = freshProject();
+    const store = await freshWorkspace();
     const parent = await newFolder(store, "parent");
     // A subfolder whose name equals the doc's filename-to-be. The document
     // filename check (documents only) misses this, so the cross-type
-    // collision is caught by placeDocument inside the same transaction.
+    // collision is caught by the placement inside the same transaction.
     await newFolder(store, "readme.md", parent);
 
     const r = await store.saveDocument({
       slug: docSlug("readme"),
       markdown: "# Readme",
       filename: "readme.md",
-      folderSlug: parent,
+      location: inFolder(parent),
       clientVersion: 0,
       changedBy: "alice",
     });
     expect(r).toEqual({ ok: false, segmentCollision: true });
     expect(await store.getDocument(docSlug("readme"))).toBeUndefined();
+  });
+
+  it("refuses a location whose corpus does not exist, writing nothing", async () => {
+    const store = freshProject();
+    const r = await store.saveDocument({
+      slug: docSlug("orphan"),
+      markdown: "# Orphan",
+      location: { corpusSlug: colSlug("missing"), folderSlug: null },
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+    expect(r).toEqual({ ok: false, unknownLocation: true });
+    expect(await store.getDocument(docSlug("orphan"))).toBeUndefined();
   });
 });

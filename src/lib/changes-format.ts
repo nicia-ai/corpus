@@ -2,9 +2,22 @@
 // page and the dashboard's recent-activity list so the two render the
 // stored vocabulary identically.
 
-// Event names are the internal dotted vocabulary (`corpus.attached`);
+// Stored `collection.*` events predate the product word "corpus"; a few
+// read better as what happened to a page than as a bare verb.
+const EVENT_LABELS: Readonly<Record<string, string>> = {
+  "collection.created": "Corpus created",
+  "collection.updated": "Corpus edited",
+  "collection.deleted": "Corpus deleted",
+  "collection.attached": "Page added to corpus",
+  "collection.detached": "Page left corpus",
+  "collection.reordered": "Corpus reorganized",
+};
+
+// Event names are the internal dotted vocabulary (`document.created`);
 // render them as words without changing the stored value.
 export function humanize(eventType: string): string {
+  const label = EVENT_LABELS[eventType];
+  if (label !== undefined) return label;
   const words = eventType
     .replace(/[._-]/g, " ")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")

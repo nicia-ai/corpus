@@ -166,18 +166,36 @@ export function McpSetupPage({
   // Corpus: every panel below would render a partial broken state
   // (BackLink to a 404'd /corpora/<slug>, empty ApiKeysSection,
   // missing AgentPromptSection). Stop early with a single clear card so
-  // the owner can correct the link or jump back to /corpora.
+  // the owner can correct the link or jump back to Documents.
   if (corpus !== undefined && col !== undefined && !col.found) {
     return (
       <div className="pb-12">
         <BackLink
-          to="/p/$projectId/corpora"
+          to="/p/$projectId/documents"
           projectId={projectId}
-          label="Corpora"
+          label="Documents"
         />
         <PageHeader
           title="Corpus not found"
           subtitle={`No corpus named ${corpus} in this project. It may have been renamed or deleted.`}
+        />
+      </div>
+    );
+  }
+
+  // Drafts is never read by an agent; there is nothing to connect.
+  if (corpus !== undefined && col?.found === true && !col.served) {
+    return (
+      <div className="pb-12">
+        <BackLink
+          to="/p/$projectId/corpora/$slug"
+          projectId={projectId}
+          slug={asCorpusSlug(corpus)}
+          label={col.name}
+        />
+        <PageHeader
+          title={`${col.name} can’t be connected`}
+          subtitle="Pages here are not shared with agents. Move a page into a corpus to publish it, then connect that corpus."
         />
       </div>
     );
@@ -196,7 +214,7 @@ export function McpSetupPage({
           kind: "corpus",
           slug: asCorpusSlug(corpus),
           serverName: corpusServerName(corpus),
-          title: `Connect ${corpus}`,
+          title: `Connect ${col?.found === true ? col.name : corpus}`,
           subtitle: `${CORPUS_SCOPE_PROMISE} Edit the corpus anytime; agents see the change on their next call.`,
         } as const);
   const snippet = tool.snippet(url, auth, mode.serverName);
@@ -205,16 +223,16 @@ export function McpSetupPage({
     <div className="pb-12">
       {mode.kind === "generic" ? (
         <BackLink
-          to="/p/$projectId/corpora"
+          to="/p/$projectId/documents"
           projectId={projectId}
-          label="Corpora"
+          label="Documents"
         />
       ) : (
         <BackLink
           to="/p/$projectId/corpora/$slug"
           projectId={projectId}
           slug={mode.slug}
-          label={mode.slug}
+          label={col?.found === true ? col.name : mode.slug}
         />
       )}
       <PageHeader title={mode.title} subtitle={mode.subtitle} />
@@ -222,8 +240,8 @@ export function McpSetupPage({
       {/* Left: how to connect (endpoint + auth choice). Right: the exact
           thing to paste for the chosen client. Config on the left, the
           result on the right — same split as the corpus builder. */}
-      <div className="grid items-start gap-8 lg:grid-cols-2 lg:gap-10">
-        <div className="space-y-6">
+      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-2 lg:gap-10">
+        <div className="min-w-0 space-y-6">
           <div>
             <div className="mb-2 text-sm font-medium text-slate-500">
               MCP endpoint
@@ -284,7 +302,7 @@ export function McpSetupPage({
           </div>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <Tabs
             ariaLabel="MCP client"
             value={tool.id}
@@ -412,8 +430,8 @@ function ApiKeysSection({
     <div className="mt-4">
       {connection === undefined ? (
         <EmptyState>
-          No Connection for this corpus yet. Click "Connect this corpus" on the
-          corpus page first.
+          No connection for this corpus yet. Open the corpus and click Connect
+          first.
         </EmptyState>
       ) : (
         <ApiKeyManager

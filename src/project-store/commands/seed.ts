@@ -1,36 +1,20 @@
 import { asCorpusSlug, asDocumentSlug } from "../../ids";
-import {
-  EXAMPLE_ATTACHMENTS,
-  EXAMPLE_COLLECTIONS,
-  EXAMPLE_DOCS,
-} from "../../sample-project";
-import { DEFAULT_COLLECTION_DELIVERY } from "../../store/domain/collection-expand";
-import {
-  DEFAULT_CORPUS_SLUG,
-  isDefaultCorpusSlug,
-} from "../../store/domain/default-corpus";
+import { EXAMPLE_COLLECTIONS, EXAMPLE_DOCS } from "../../sample-project";
+import { isDefaultCorpusSlug } from "../../store/domain/default-corpus";
 import type { DomainChange, ProjectCommandContext } from "../command";
 import type { SeedResult } from "../contracts";
 
-import { attachDocumentCommand, createCorpusCommand } from "./corpora";
+import { createCorpusCommand } from "./corpora";
+import { corpusTreeChanged, ensureCorpusRoot } from "./corpus-tree";
 import { saveDocumentCommand } from "./documents";
 
+// Seedable = nothing in it yet: no document, and no corpus other than the
+// (necessarily empty, since there is no document) default one.
 async function projectIsSeedable(ctx: ProjectCommandContext): Promise<boolean> {
   const { u } = ctx;
-  const [docs, cols] = await Promise.all([u.docs.list(1), u.cols.list(1)]);
+  const [docs, cols] = await Promise.all([u.docs.list(1), u.cols.list(2)]);
   if (docs.length > 0) return false;
-  if (cols.length === 0) return true;
-  const onlyCol = cols[0];
-  if (
-    cols.length === 1 &&
-    onlyCol !== undefined &&
-    isDefaultCorpusSlug(asCorpusSlug(onlyCol.slug))
-  ) {
-    const entries = await u.cols.entries(DEFAULT_CORPUS_SLUG);
-    if (entries === undefined) return false;
-    return entries.documents.length === 0 && entries.folders.length === 0;
-  }
-  return false;
+  return cols.every((c) => isDefaultCorpusSlug(asCorpusSlug(c.slug)));
 }
 
 export async function seedExampleCommand(
@@ -48,33 +32,30 @@ export async function seedExampleCommand(
     };
   }
   const changes: DomainChange[] = [];
-  for (const d of EXAMPLE_DOCS) {
-    const saved = await saveDocumentCommand(ctx, {
-      slug: asDocumentSlug(d.slug),
-      title: d.title,
-      markdown: d.markdown,
-      clientVersion: 0,
-      changedBy,
-    });
-    changes.push(...saved.changes);
-  }
   for (const c of EXAMPLE_COLLECTIONS) {
+    const corpusSlug = asCorpusSlug(c.slug);
     const created = await createCorpusCommand(ctx, {
-      slug: asCorpusSlug(c.slug),
+      slug: corpusSlug,
       name: c.name,
+      description: c.description,
       changedBy,
     });
     changes.push(...created.changes);
-  }
-  for (const a of EXAMPLE_ATTACHMENTS) {
-    const attached = await attachDocumentCommand(ctx, {
-      corpusSlug: asCorpusSlug(a.corpusSlug),
-      documentSlug: asDocumentSlug(a.documentSlug),
-      position: a.position,
-      delivery: DEFAULT_COLLECTION_DELIVERY,
-      changedBy,
-    });
-    changes.push(...attached.changes);
+    const rootSlug = await ensureCorpusRoot(ctx, corpusSlug);
+    for (const d of EXAMPLE_DOCS.filter((doc) => doc.corpusSlug === c.slug)) {
+      const saved = await saveDocumentCommand(ctx, {
+        slug: asDocumentSlug(d.slug),
+        title: d.title,
+        markdown: d.markdown,
+        ...(rootSlug === undefined ? {} : { folderSlug: rootSlug }),
+        clientVersion: 0,
+        changedBy,
+      });
+      changes.push(...saved.changes);
+    }
+    changes.push(
+      ...(await corpusTreeChanged(ctx, [corpusSlug], changedBy, "membership")),
+    );
   }
   return { result: { seeded: true }, changes };
 }

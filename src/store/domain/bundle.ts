@@ -5,7 +5,7 @@ import { alwaysIncludeBudgetTokensZ, sha256 } from "../../util";
 import {
   corpusDelivery,
   DEFAULT_COLLECTION_DELIVERY,
-} from "./collection-expand";
+} from "./collection-delivery";
 import type { CollectionMember } from "./versions";
 
 // The portable collection bundle — the cross-product alignment contract

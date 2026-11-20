@@ -1,14 +1,28 @@
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_CORPUS_SLUG } from "../src/store/domain/default-corpus";
+
 import { colSlug, docSlug, freshStore } from "./_helpers";
 
 const freshProject = () => freshStore("upload");
 const by = "uploader";
+const KB = colSlug("kb");
+const TEAM = colSlug("team");
+const DOCS = colSlug("docs");
+
+// Every upload test works inside one corpus; the default corpus has its own
+// describe below.
+async function freshKb(): Promise<ReturnType<typeof freshProject>> {
+  const store = freshProject();
+  await store.createCorpus({ slug: KB, name: "KB", changedBy: by });
+  return store;
+}
 
 describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () => {
   it("a fresh path creates ancestor folders + the document", async () => {
-    const store = freshProject();
+    const store = await freshKb();
     const r = await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "guide/setup/intro.md",
       markdown: "# Intro\nwelcome",
       changedBy: by,
@@ -18,8 +32,6 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
       slug: "guide-setup-intro",
       docVersion: 1,
       created: true,
-      folderSlug: "setup",
-      createdFolders: ["guide", "setup"],
     });
 
     const folders = await store.listFolders();
@@ -27,15 +39,23 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
     expect(folders).toHaveLength(2);
     expect(byName.get("guide")?.parentSlug).toBe(null);
     expect(byName.get("setup")?.parentSlug).toBe(byName.get("guide")?.slug);
+    expect(folders.every((f) => f.corpusSlug === KB)).toBe(true);
 
     const head = await store.getDocument(docSlug("guide-setup-intro"));
     expect(head?.markdown).toContain("welcome");
     expect(head?.docVersion).toBe(1);
+    expect(await store.documentLocation(docSlug("guide-setup-intro"))).toEqual({
+      slug: "guide-setup-intro",
+      corpusSlug: KB,
+      path: "guide/setup/intro.md",
+      folderSlug: byName.get("setup")?.slug,
+    });
   });
 
   it("re-uploading the same path bumps the version (idempotent, no dup)", async () => {
-    const store = freshProject();
+    const store = await freshKb();
     const first = await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "a/b/note.md",
       markdown: "v1",
       changedBy: by,
@@ -43,6 +63,7 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
     expect(first).toMatchObject({ ok: true, docVersion: 1, created: true });
 
     const second = await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "a/b/note.md",
       markdown: "v2",
       changedBy: by,
@@ -52,9 +73,6 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
       slug: "a-b-note",
       docVersion: 2,
       created: false,
-      folderSlug: "b",
-      // Folders reused by name on re-upload — nothing newly created.
-      createdFolders: [],
     });
 
     expect((await store.listDocumentRefs()).map((r) => r.slug)).toEqual([
@@ -67,13 +85,15 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
   });
 
   it("sibling files reuse the same ancestor folders by name", async () => {
-    const store = freshProject();
+    const store = await freshKb();
     await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "docs/api/auth.md",
       markdown: "auth",
       changedBy: by,
     });
     await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "docs/api/users.md",
       markdown: "users",
       changedBy: by,
@@ -85,30 +105,30 @@ describe("bulk folder upload — importDocumentAtPath (one atomic tx each)", () 
     );
   });
 
-  it("batch import reports created / updated / failed", async () => {
+  it("an upload into a missing corpus is refused, nothing written", async () => {
     const store = freshProject();
-    const summary = await store.importDocuments(
-      [
-        { path: "p/one.md", markdown: "1" },
-        { path: "p/two.md", markdown: "2" },
-        { path: "p/one.md", markdown: "1b" },
-      ],
-      by,
-    );
-    expect(summary).toEqual({ created: 2, updated: 1, failed: [] });
-    expect(await store.listFolders()).toHaveLength(1);
+    const r = await store.importDocumentAtPath({
+      corpusSlug: colSlug("ghost"),
+      path: "a.md",
+      markdown: "a",
+      changedBy: by,
+    });
+    expect(r).toEqual({ ok: false, reason: "missing-corpus" });
+    expect(await store.listDocumentRefs()).toEqual([]);
   });
 });
 
 describe("bulk folder upload — segment collisions roll back atomically", () => {
   it("a directory segment colliding with an existing document is rejected, nothing written", async () => {
-    const store = freshProject();
+    const store = await freshKb();
     await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "notes.md",
       markdown: "# Notes",
       changedBy: by,
     });
     const r = await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "notes.md/inner.md",
       markdown: "inner",
       changedBy: by,
@@ -122,20 +142,24 @@ describe("bulk folder upload — segment collisions roll back atomically", () =>
   });
 
   it("a file whose name collides with a sibling folder rolls back the half-written document", async () => {
-    const store = freshProject();
-    const f = await store.createFolder("foo", null);
+    const store = await freshKb();
+    const f = await store.createFolder("foo", {
+      corpusSlug: KB,
+      folderSlug: null,
+    });
     expect(f.ok).toBe(true);
 
     const r = await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "foo",
       markdown: "would shadow the folder",
       changedBy: by,
     });
     expect(r).toEqual({ ok: false, reason: "segment-collision" });
 
-    // saveDocumentBody ran before placement failed; the throw must have
+    // The document write ran before placement failed; the throw must have
     // rolled the whole unit back — no document, no version, no blob.
-    expect((await store.listDocumentRefs()).map((r) => r.slug)).toEqual([]);
+    expect(await store.listDocumentRefs()).toEqual([]);
     expect(await store.versionCount(docSlug("foo"))).toBe(0);
     expect(await store.getDocument(docSlug("foo"))).toBeUndefined();
     expect(await store.listFolders()).toHaveLength(1);
@@ -145,11 +169,12 @@ describe("bulk folder upload — segment collisions roll back atomically", () =>
 // Filename uniqueness is a per-folder sibling namespace (derived path =
 // folder ancestry + filename), so the same filename may live in different
 // folders. The import path must scope its brand-new-filename collision
-// check to the document's target folder, not always the project root.
+// check to the document's target folder, not always the corpus root.
 describe("bulk folder upload — filename collision is folder-scoped", () => {
   it("a folder-placed import may reuse a filename that a ROOT document holds", async () => {
-    const store = freshProject();
+    const store = await freshKb();
     await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "index.md",
       markdown: "# Root index",
       changedBy: by,
@@ -158,16 +183,12 @@ describe("bulk folder upload — filename collision is folder-scoped", () => {
     // `wiki/index.md` lives in the `wiki` folder — a different sibling
     // namespace from the root `index.md`, so it must be accepted.
     const r = await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "wiki/index.md",
       markdown: "# Wiki index",
       changedBy: by,
     });
-    expect(r).toMatchObject({
-      ok: true,
-      slug: "wiki-index",
-      created: true,
-      folderSlug: "wiki",
-    });
+    expect(r).toMatchObject({ ok: true, slug: "wiki-index", created: true });
 
     expect((await store.listDocumentRefs()).map((r) => r.slug).sort()).toEqual([
       "index",
@@ -182,19 +203,21 @@ describe("bulk folder upload — filename collision is folder-scoped", () => {
   });
 
   it("the same filename lands in two different folders", async () => {
-    const store = freshProject();
+    const store = await freshKb();
     const a = await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "a/readme.md",
       markdown: "A",
       changedBy: by,
     });
     const b = await store.importDocumentAtPath({
+      corpusSlug: KB,
       path: "b/readme.md",
       markdown: "B",
       changedBy: by,
     });
-    expect(a).toMatchObject({ ok: true, slug: "a-readme", folderSlug: "a" });
-    expect(b).toMatchObject({ ok: true, slug: "b-readme", folderSlug: "b" });
+    expect(a).toMatchObject({ ok: true, slug: "a-readme" });
+    expect(b).toMatchObject({ ok: true, slug: "b-readme" });
     expect((await store.listDocumentRefs()).map((r) => r.slug).sort()).toEqual([
       "a-readme",
       "b-readme",
@@ -202,153 +225,142 @@ describe("bulk folder upload — filename collision is folder-scoped", () => {
   });
 });
 
-// The link TARGET (the whole folder vs. the individual documents) is
-// derived by the DO from what the import actually created — never from a
-// client flag — so these assert behavior per upload shape. Uploads link
-// as reference-tier, so membership is read via corpusMembers (the
-// resolved set); readCorpus.documents lists core-tier only.
-describe("bulk folder upload — importDocumentsAndLink (derived link target)", () => {
-  it("a loose file at the root links the document, not a folder", async () => {
+// Destination modes: the default corpus (drafts), an existing corpus, or a
+// new one named by the uploader. Paths are always relative to the corpus
+// root the upload lands in.
+describe("bulk folder upload — importIntoCorpus (destination modes)", () => {
+  it("default mode lands in the drafts corpus and reports created / updated / failed", async () => {
     const store = freshProject();
-    const r = await store.importDocumentsAndLink({
-      entries: [{ path: "readme.md", markdown: "# R" }],
-      link: { mode: "new", name: "Sales" },
+    const result = await store.importIntoCorpus({
+      entries: [
+        { path: "p/one.md", markdown: "1" },
+        { path: "p/two.md", markdown: "2" },
+        { path: "p/one.md", markdown: "1b" },
+      ],
+      destination: { mode: "default" },
       changedBy: by,
     });
-    expect(r.summary).toEqual({ created: 1, updated: 0, failed: [] });
-    expect(r.linkedTo).toBe("sales");
+    expect(result).toEqual({
+      summary: { created: 2, updated: 1, failed: [] },
+      corpusSlug: DEFAULT_CORPUS_SLUG,
+    });
+    expect(await store.listFolders()).toHaveLength(1);
+    expect(await store.corpusMembers(DEFAULT_CORPUS_SLUG)).toEqual([
+      "p-one",
+      "p-two",
+    ]);
+  });
+
+  it("new mode creates the named corpus and links the readme at its root", async () => {
+    const store = freshProject();
+    const result = await store.importIntoCorpus({
+      entries: [{ path: "readme.md", markdown: "# R" }],
+      destination: { mode: "new", name: "Sales" },
+      changedBy: by,
+    });
+    expect(result?.summary).toEqual({ created: 1, updated: 0, failed: [] });
+    expect(result?.corpusSlug).toBe("sales");
     // No wrapper folder synthesized for a single root-level file.
     expect(await store.listFolders()).toHaveLength(0);
     expect(await store.corpusMembers(colSlug("sales"))).toEqual(["readme"]);
   });
 
-  it("links the uploaded documents to an existing corpus, in upload order", async () => {
+  it("existing mode adds the uploaded documents to that corpus, in upload order", async () => {
     const store = freshProject();
-    await store.createCorpus({
-      slug: colSlug("team"),
-      name: "Team",
-      changedBy: by,
-    });
-    const r = await store.importDocumentsAndLink({
+    await store.createCorpus({ slug: TEAM, name: "Team", changedBy: by });
+    const result = await store.importIntoCorpus({
       entries: [
         { path: "one.md", markdown: "1" },
         { path: "two.md", markdown: "2" },
       ],
-      link: { mode: "existing", slug: colSlug("team") },
+      destination: { mode: "existing", slug: TEAM },
       changedBy: by,
     });
-    expect(r.linkedTo).toBe("team");
-    expect(await store.corpusMembers(colSlug("team"))).toEqual(["one", "two"]);
+    expect(result?.corpusSlug).toBe(TEAM);
+    expect(await store.corpusMembers(TEAM)).toEqual(["one", "two"]);
   });
 
-  it("a fresh wrapper folder is linked live — later additions join too", async () => {
+  it("existing mode for a missing corpus imports nothing", async () => {
     const store = freshProject();
-    const r = await store.importDocumentsAndLink({
-      entries: [{ path: "guide/intro.md", markdown: "i" }],
-      link: { mode: "new", name: "Docs" },
+    const result = await store.importIntoCorpus({
+      entries: [{ path: "one.md", markdown: "1" }],
+      destination: { mode: "existing", slug: colSlug("gone") },
       changedBy: by,
     });
-    expect(r.linkedTo).toBe("docs");
+    expect(result).toBeUndefined();
+    expect(await store.listDocumentRefs()).toEqual([]);
+  });
 
-    // A document added to the freshly-created folder later is in the
-    // corpus automatically — the live-folder guarantee.
+  it("a nested upload into a new corpus holds only its own entries", async () => {
+    const store = freshProject();
+    // Another corpus already has `docs/old.md` at the same corpus-relative path.
+    await store.createCorpus({ slug: TEAM, name: "Team", changedBy: by });
     await store.importDocumentAtPath({
+      corpusSlug: TEAM,
+      path: "docs/old.md",
+      markdown: "o",
+      changedBy: by,
+    });
+    const result = await store.importIntoCorpus({
+      entries: [{ path: "docs/proj/a.md", markdown: "a" }],
+      destination: { mode: "new", name: "Proj" },
+      changedBy: by,
+    });
+    expect(result?.corpusSlug).toBe("proj");
+    expect(await store.corpusMembers(colSlug("proj"))).toEqual(["docs-proj-a"]);
+    expect(await store.corpusMembers(TEAM)).toEqual(["docs-old"]);
+  });
+
+  it("a later addition under the same folder joins the corpus", async () => {
+    const store = freshProject();
+    await store.importIntoCorpus({
+      entries: [{ path: "guide/intro.md", markdown: "i" }],
+      destination: { mode: "new", name: "Docs" },
+      changedBy: by,
+    });
+    await store.importDocumentAtPath({
+      corpusSlug: DOCS,
       path: "guide/extra.md",
       markdown: "e",
       changedBy: by,
     });
-    const members = await store.corpusMembers(colSlug("docs"));
-    expect([...(members ?? [])].sort()).toEqual(["guide-extra", "guide-intro"]);
-  });
-
-  it("a fresh wrapper nested under an existing folder links the wrapper, not the parent", async () => {
-    const store = freshProject();
-    // Pre-existing `docs` folder with an unrelated document.
-    await store.importDocumentAtPath({
-      path: "docs/old.md",
-      markdown: "o",
-      changedBy: by,
-    });
-    // Upload creates a fresh `docs/proj` wrapper.
-    const r = await store.importDocumentsAndLink({
-      entries: [{ path: "docs/proj/a.md", markdown: "a" }],
-      link: { mode: "new", name: "Proj" },
-      changedBy: by,
-    });
-    expect(r.linkedTo).toBe("proj");
-
-    // Only the fresh wrapper's subtree is linked — `docs/old.md` is not
-    // pulled in — and it is live for later additions under `docs/proj`.
-    await store.importDocumentAtPath({
-      path: "docs/proj/b.md",
-      markdown: "b",
-      changedBy: by,
-    });
-    const members = await store.corpusMembers(colSlug("proj"));
-    expect([...(members ?? [])].sort()).toEqual(["docs-proj-a", "docs-proj-b"]);
-  });
-
-  it("merging into a pre-existing folder links the documents, not the folder (not live)", async () => {
-    const store = freshProject();
-    await store.importDocumentAtPath({
-      path: "docs/old.md",
-      markdown: "o",
-      changedBy: by,
-    });
-    const r = await store.importDocumentsAndLink({
-      entries: [{ path: "docs/new.md", markdown: "n" }],
-      link: { mode: "new", name: "Fresh" },
-      changedBy: by,
-    });
-    expect(r.linkedTo).toBe("fresh");
-    // The pre-existing sibling `docs/old.md` is NOT pulled in...
-    expect(await store.corpusMembers(colSlug("fresh"))).toEqual(["docs-new"]);
-    // ...and the link is NOT live: a later addition to `docs` does not join.
-    await store.importDocumentAtPath({
-      path: "docs/another.md",
-      markdown: "x",
-      changedBy: by,
-    });
-    expect(await store.corpusMembers(colSlug("fresh"))).toEqual(["docs-new"]);
+    expect([...((await store.corpusMembers(DOCS)) ?? [])].sort()).toEqual([
+      "guide-extra",
+      "guide-intro",
+    ]);
   });
 
   it("re-uploading the same documents to the same corpus adds no duplicates", async () => {
     const store = freshProject();
-    await store.createCorpus({
-      slug: colSlug("team"),
-      name: "Team",
-      changedBy: by,
-    });
-    const link = { mode: "existing", slug: colSlug("team") } as const;
-    await store.importDocumentsAndLink({
+    await store.createCorpus({ slug: TEAM, name: "Team", changedBy: by });
+    const destination = { mode: "existing", slug: TEAM } as const;
+    await store.importIntoCorpus({
       entries: [{ path: "one.md", markdown: "1" }],
-      link,
+      destination,
       changedBy: by,
     });
-    // Re-upload (new version) and re-link to the same corpus.
-    const again = await store.importDocumentsAndLink({
+    // Re-upload (new version) to the same corpus.
+    const again = await store.importIntoCorpus({
       entries: [{ path: "one.md", markdown: "1b" }],
-      link,
+      destination,
       changedBy: by,
     });
-    expect(again.summary).toEqual({ created: 0, updated: 1, failed: [] });
-    // attachMany's present-set dedup: the document stays a single member.
-    expect(await store.corpusMembers(colSlug("team"))).toEqual(["one"]);
+    expect(again?.summary).toEqual({ created: 0, updated: 1, failed: [] });
+    expect(await store.corpusMembers(TEAM)).toEqual(["one"]);
   });
 
-  it("entries spanning more than one top folder link the documents", async () => {
+  it("entries spanning more than one top folder all land in the corpus", async () => {
     const store = freshProject();
-    const r = await store.importDocumentsAndLink({
+    const result = await store.importIntoCorpus({
       entries: [
         { path: "a/x.md", markdown: "x" },
         { path: "b/y.md", markdown: "y" },
       ],
-      link: { mode: "new", name: "Mixed" },
+      destination: { mode: "new", name: "Mixed" },
       changedBy: by,
     });
-    expect(r.summary.created).toBe(2);
-    expect(r.linkedTo).toBe("mixed");
-    // No single fresh wrapper covers both, so the documents are linked.
+    expect(result?.summary.created).toBe(2);
+    expect(result?.corpusSlug).toBe("mixed");
     expect(
       [...((await store.corpusMembers(colSlug("mixed"))) ?? [])].sort(),
     ).toEqual(["a-x", "b-y"]);

@@ -78,10 +78,9 @@ async function setup(): Promise<
     clientVersion: 0,
     changedBy: ownerUserId,
   });
-  await store.attachDocument(
-    conn.corpusSlug,
+  await store.moveDocument(
     docSlug(MEMBER_SLUG),
-    0,
+    { corpusSlug: conn.corpusSlug, folderSlug: null },
     ownerUserId,
   );
   await store.saveDocument({

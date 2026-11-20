@@ -9,9 +9,20 @@ Structure → "Refresh now" (platform admin only, writes an `admin_audit` row
 with action `project.stats_refresh`).
 
 Pure aggregation: `src/store/domain/project-stats.ts`. DO read:
-`src/project-store/project-stats.ts`. Membership is the RESOLVED membership
-(direct `includes` + folder expansion via `includes_folder`), the same
-resolver every other surface uses.
+`src/project-store/project-stats.ts`.
+
+**Two shapes.** Since corpora became drives a document is in exactly one
+corpus (the root it sits under), so `inTwoOrMoreCorpora`, the direct/folder
+inclusion counters, `coreMembers`/`referenceMembers` and
+`orderDiffersFromLexicalPath` are 0/false on a laid-out project. They are
+kept, computed from the STORED pre-drive edges with the old resolver
+(`src/store/domain/legacy-corpus-shape.ts`), so an operator can inspect a
+project BEFORE its one-time layout migration runs. For that reason
+`statsSnapshot()` reads the DO's unit directly and never triggers the
+migration (keeper: `test/project-stats.test.ts`, "does not migrate it").
+Membership is the union of both shapes: legacy-resolved members, then
+documents under the corpus's root. `layout` tells which shape a project is
+in. Schema version 2 added `layout`.
 
 ## Reading it with wrangler
 
@@ -83,7 +94,16 @@ and `attempted_at`.
 - `orderDiffersFromLexicalPath`: resolved order is not plain lexical order of
   member paths
 
-`folders`
+`layout` (how far the project is from the drive layout; all zero except
+`corporaWithRoot` = corpora once laid out)
+
+- `corporaWithRoot`: corpora that have their root folder
+- `documentsOutsideRoots`: live documents under no root (un-migrated)
+- `legacyDirectLinks`, `legacyFolderLinks`: stored pre-drive `includes` and
+  non-root `includes_folder` edges still in the graph
+
+`folders` (corpus roots are hidden: a folder directly under a root is
+top-level)
 
 - `total`, `maxDepth` (a top-level folder has depth 1), `topLevel`
 - `includedByTwoOrMoreCorpora`: folders directly linked by 2+ corpora

@@ -6,7 +6,6 @@ import type {
   ProposalResult,
   SuggestCreateInput,
 } from "../project-store/commands/suggestions";
-import type { CollectionDelivery } from "../store/domain/collection-expand";
 import type { VerifyResult } from "../store/domain/verify";
 
 // The per-request MCP executor port. `callerRef` carries the namespaced
@@ -23,27 +22,16 @@ export type McpExecutor = Readonly<{
       description?: string;
     }[]
   >;
+  // The bound Corpus's documents in path order. `path` is relative to the
+  // Corpus root — the only path an agent ever sees.
   listDocuments: () => Promise<
     readonly {
       slug: string;
       title: string;
       docVersion: number;
       size: number;
-      path?: string;
-      delivery?: CollectionDelivery;
+      path: string;
     }[]
-  >;
-  readCorpus: (slug: CorpusSlug) => Promise<
-    | { found: false }
-    | {
-        found: true;
-        corpus: string;
-        documents: readonly {
-          slug: string;
-          docVersion: number;
-          size: number;
-        }[];
-      }
   >;
   corpusMembers: (slug: CorpusSlug) => Promise<readonly string[] | undefined>;
   getDocument: (
@@ -64,7 +52,6 @@ export type McpExecutor = Readonly<{
           path: string;
           title: string;
           docVersion: number;
-          delivery?: CollectionDelivery;
           links: readonly {
             target: string;
             kind: "path" | "wiki";
@@ -86,17 +73,21 @@ export type McpExecutor = Readonly<{
   // into per-hunk suggestions); `baseDocVersion` is the version the agent
   // read — a mismatch with head yields the `conflict` result so the agent
   // re-reads rather than proposing blind. `callerRef` is the enforced
-  // author on both (see scoped-executor).
+  // author on both (see scoped-executor). `inCorpus` is NOT caller data:
+  // the scoped executor overwrites it with its bound Corpus, and the DO
+  // re-checks inside the write that the document is in that Corpus NOW —
+  // a document moved out since the request began is `missing`.
   suggestEdit: (
     callerRef: CallerRef,
     slug: DocumentSlug,
     proposedMarkdown: string,
     baseDocVersion: number,
+    inCorpus?: CorpusSlug,
   ) => Promise<CreateSuggestionResult>;
   // suggestCreate proposes a NEW document (slug or Corpus path that resolves
   // to nothing + baseDocVersion 0 at the tool layer). A human apply creates
-  // the document and attaches it to the proposing connection's bound
-  // Corpus as `reference`. `originCollectionSlug` is NOT caller data:
+  // the document in the proposing connection's bound Corpus, at the
+  // proposed Corpus-relative path. `originCollectionSlug` is NOT caller data:
   // the scoped executor overwrites it with its bound Corpus — it is
   // optional here only so the port and the DO method share one shape.
   suggestCreate: (
@@ -105,9 +96,12 @@ export type McpExecutor = Readonly<{
   ) => Promise<CreateDocProposalResult>;
   // Only the exact callerRef that created a proposal can retrieve its
   // result. The scoped executor pins identity and the DO re-checks ownership.
+  // `inCorpus` is pinned by the scoped executor like `suggestEdit`'s: the DO
+  // re-checks the proposal still belongs to that corpus, now.
   proposalResult: (
     callerRef: CallerRef,
     proposalId: number,
+    inCorpus?: CorpusSlug,
   ) => Promise<ProposalResult>;
   // Proposal-scoped conversation only. The DO accepts a reply when this
   // caller created the still-open proposal; general document comments are
@@ -116,5 +110,6 @@ export type McpExecutor = Readonly<{
     callerRef: CallerRef,
     proposalId: number,
     body: string,
+    inCorpus?: CorpusSlug,
   ) => Promise<AddSuggestionMessageResult>;
 }>;

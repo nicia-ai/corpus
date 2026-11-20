@@ -38,7 +38,11 @@ export type DocumentReviewResult = Readonly<{
   // The viewing user's id, so the client can tell its own writes' echoes from
   // genuine remote changes (web writes stamp this same id as the actor).
   viewerId: string;
-  docRefs: readonly Readonly<{ slug: string; path: string }>[];
+  docRefs: readonly Readonly<{
+    slug: string;
+    path: string;
+    corpusSlug: string;
+  }>[];
 }>;
 
 export type DocumentHistoryResult = Readonly<{
@@ -129,7 +133,11 @@ export const getDocumentReview = createServerFn({ method: "GET" })
         names: Object.fromEntries(suggestionNames),
       },
       viewerId: changedBy(c),
-      docRefs: docRefs.map((ref) => ({ slug: ref.slug, path: ref.path })),
+      docRefs: docRefs.map((ref) => ({
+        slug: ref.slug,
+        path: ref.path,
+        corpusSlug: ref.corpusSlug,
+      })),
     };
   });
 

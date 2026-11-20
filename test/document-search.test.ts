@@ -5,7 +5,7 @@ import { asFolderSlug } from "@/ids";
 import { toSafeFulltextQuery } from "@/store/domain/search";
 import type { CorpusStore } from "@/store/handle";
 
-import { docSlug, freshStore } from "./_helpers";
+import { colSlug, docSlug, freshStore } from "./_helpers";
 
 // Full-text search over live document heads via TypeGraph's FTS5 index:
 // tokenized so multi-word queries match non-adjacent terms, bm25-ranked (not
@@ -94,16 +94,27 @@ describe("searchDocuments", () => {
     expect(hit?.snippet).toContain("<mark>brown</mark>");
   });
 
-  it("returns the document's derived path", async () => {
+  it("returns the document's path relative to its corpus", async () => {
     const store = freshProject();
-    const folder = await store.createFolder("wiki", null);
+    const corpusSlug = colSlug("wiki-docs");
+    await store.createCorpus({
+      slug: corpusSlug,
+      name: "Wiki",
+      changedBy: "alice",
+    });
+    const folder = await store.createFolder("wiki", {
+      corpusSlug,
+      folderSlug: null,
+    });
     if (!folder.ok) throw new Error("folder create failed");
-    await seed(store, "concept", "# Concept\nself-serve onboarding");
-    await store.placeDocumentInFolder(
-      docSlug("concept"),
-      asFolderSlug(folder.slug),
-      "alice",
-    );
+    const saved = await store.saveDocument({
+      slug: docSlug("concept"),
+      markdown: "# Concept\nself-serve onboarding",
+      location: { corpusSlug, folderSlug: asFolderSlug(folder.slug) },
+      clientVersion: 0,
+      changedBy: "alice",
+    });
+    expect(saved.ok).toBe(true);
     const hits = await store.searchDocuments("self-serve");
     expect(hits[0]?.path).toBe("wiki/concept.md");
   });

@@ -14,7 +14,7 @@ import type {
   SuggestionHunkRow,
   SuggestionStatus,
 } from "../../db";
-import { ConflictError } from "../../errors";
+import { ConflictError, ValidationError } from "../../errors";
 import {
   asCorpusSlug,
   asDocumentSlug,
@@ -23,22 +23,31 @@ import {
   type CorpusSlug,
   type DocumentSlug,
 } from "../../ids";
+import { DEFAULT_CORPUS_SLUG } from "../../store/domain/default-corpus";
 import { resolveTitle } from "../../store/domain/frontmatter";
 import {
   basename,
+  defaultFilename,
   normalizeSlug,
-  pathSegments,
   stripExtension,
 } from "../../store/domain/paths";
 import { markdownTooLarge } from "../../util";
 import {
   type CommandOutcome,
   commandOutcome,
+  type DomainChange,
   type ProjectCommandContext,
 } from "../command";
+import type { ProjectUnit } from "../unit";
 
-import { attachDocumentsToCorpusCommand } from "./corpora";
+import {
+  corpusOfDocument,
+  corpusTreeChanged,
+  ensureCorpusRoot,
+} from "./corpus-tree";
 import { saveDocumentCommand } from "./documents";
+import { ensureDefaultCorpusCommand } from "./ensure-default-corpus";
+import { checkedPathSegments } from "./untrusted-path";
 
 export type { SuggestionStatus } from "../../db";
 
@@ -127,6 +136,10 @@ export type CreateSuggestionInput = Readonly<{
   // The transport the proposal came through. Optional here so direct/test
   // callers don't have to care; real paths set it (web fn → web, MCP → mcp).
   channel?: CallerChannel;
+  // Set by a corpus-scoped caller (MCP): the document must be in this
+  // corpus at write time, or it is `missing` — indistinguishable from a
+  // document that does not exist.
+  inCorpus?: CorpusSlug | undefined;
 }>;
 
 export type CreateSuggestionResult = Readonly<
@@ -150,6 +163,12 @@ export async function createSuggestionCommand(
   }
   const head = await ctx.u.docs.find(input.slug);
   if (head === undefined || head.archivedAt !== undefined) {
+    return commandOutcome({ ok: false, reason: "missing" });
+  }
+  if (
+    input.inCorpus !== undefined &&
+    (await corpusOfDocument(ctx.u, input.slug)) !== input.inCorpus
+  ) {
     return commandOutcome({ ok: false, reason: "missing" });
   }
   if (head.docVersion !== input.clientVersion) {
@@ -245,18 +264,33 @@ export async function createDocProposalCommand(
   if (markdownTooLarge(input.proposedMarkdown)) {
     return commandOutcome({ ok: false, reason: "too-large" });
   }
-  const segments = input.path === undefined ? [] : pathSegments(input.path);
+  // An agent's path is untrusted: one that escapes the corpus is `invalid`.
+  let segments: string[];
+  try {
+    segments = input.path === undefined ? [] : checkedPathSegments(input.path);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return commandOutcome({ ok: false, reason: "invalid" });
+    }
+    throw error;
+  }
   const path = segments.length === 0 ? undefined : segments.join("/");
   if (input.slug === undefined && path === undefined) {
     return commandOutcome({ ok: false, reason: "invalid" });
   }
   // A proposal must be appliable when accepted: reject a path whose
-  // slot is already occupied project-wide — by a document OR a sibling
-  // folder of that name (the cross-type namespace rule) — instead of
-  // filing a proposal that can only ever go stale at apply. A missing
-  // folder chain means the slot is free.
+  // slot is already occupied in the corpus it will be created in — by a
+  // document OR a sibling folder of that name (the cross-type namespace
+  // rule) — instead of filing a proposal that can only ever go stale at
+  // apply. A missing folder chain means the slot is free.
   if (path !== undefined) {
-    const dirFolder = await ctx.u.folders.folderAt(segments.slice(0, -1));
+    const rootSlug = await ctx.u.cols.rootFolderSlug(
+      input.originCollectionSlug ?? DEFAULT_CORPUS_SLUG,
+    );
+    const dirFolder =
+      rootSlug === undefined
+        ? undefined
+        : await ctx.u.folders.folderAt(rootSlug, segments.slice(0, -1));
     if (
       dirFolder !== undefined &&
       (await ctx.u.folders.slotOccupied(dirFolder, basename(path)))
@@ -267,7 +301,15 @@ export async function createDocProposalCommand(
   let slug: DocumentSlug;
   if (input.slug !== undefined) {
     slug = input.slug;
-    if ((await ctx.u.docs.find(slug)) !== undefined) {
+    // Only a document in the corpus this proposal is for can conflict with
+    // it. A slug that exists in another corpus or in drafts must not be
+    // observable from here (an agent would learn it exists), so it is filed
+    // like any other; a clash is settled by a person at apply time.
+    if (
+      (await ctx.u.docs.find(slug)) !== undefined &&
+      (input.originCollectionSlug === undefined ||
+        (await corpusOfDocument(ctx.u, slug)) === input.originCollectionSlug)
+    ) {
       return commandOutcome({ ok: false, reason: "taken" });
     }
   } else {
@@ -296,6 +338,9 @@ export async function createDocProposalCommand(
 export type CreateProposalView = Readonly<{
   id: number;
   slug: string;
+  // The corpus the document will be created in when accepted, and its
+  // path inside that corpus.
+  corpusSlug: string;
   path: string | null;
   title: string;
   proposedMarkdown: string;
@@ -311,6 +356,7 @@ export function createProposalView(
     documentSlug: string;
     proposedMarkdown: string;
     proposedPath: string | null;
+    originCollectionSlug: string | null;
     createdBy: string;
     channel: CallerChannel;
     createdAt: string;
@@ -324,6 +370,7 @@ export function createProposalView(
   return {
     id: row.id,
     slug: row.documentSlug,
+    corpusSlug: row.originCollectionSlug ?? DEFAULT_CORPUS_SLUG,
     path: row.proposedPath,
     title: resolveTitle({ markdown: row.proposedMarkdown, fallback }),
     proposedMarkdown: row.proposedMarkdown,
@@ -345,7 +392,29 @@ export type AddSuggestionMessageInput = Readonly<{
   // the same transaction as the insert. A guessed proposal id is indistinct
   // from a missing one and can never become a cross-caller write.
   expectedCreatedBy?: string;
+  // A corpus-scoped caller (MCP): the proposal must still belong to this
+  // corpus when the reply is written — see `proposalInCorpus`.
+  inCorpus?: CorpusSlug | undefined;
 }>;
+
+// Is this proposal, NOW, inside `corpusSlug`? An edit proposal follows its
+// document (which may have been moved out since it was filed); a create
+// proposal belongs to the corpus it was filed for. A scoped caller treats
+// "no" exactly like "no such proposal".
+export async function proposalInCorpus(
+  u: ProjectUnit,
+  proposal: Readonly<{
+    documentSlug: string;
+    originCollectionSlug: string | null;
+    baseDocVersion: number;
+  }>,
+  corpusSlug: CorpusSlug,
+): Promise<boolean> {
+  return proposal.baseDocVersion === CREATE_PROPOSAL_BASE_VERSION
+    ? proposal.originCollectionSlug === corpusSlug
+    : (await corpusOfDocument(u, asDocumentSlug(proposal.documentSlug))) ===
+        corpusSlug;
+}
 
 export type AddSuggestionMessageResult = Readonly<
   | { ok: true; messageId: number; documentSlug: DocumentSlug }
@@ -360,7 +429,9 @@ export async function addSuggestionMessageCommand(
   if (
     proposal === undefined ||
     (input.expectedCreatedBy !== undefined &&
-      proposal.createdBy !== input.expectedCreatedBy)
+      proposal.createdBy !== input.expectedCreatedBy) ||
+    (input.inCorpus !== undefined &&
+      !(await proposalInCorpus(ctx.u, proposal, input.inCorpus)))
   ) {
     return commandOutcome({ ok: false, reason: "missing" });
   }
@@ -395,13 +466,12 @@ export type ApplyCreateProposalResult = Readonly<
   | { ok: false; reason: "taken" }
 >;
 
-// Materialize an accepted create-proposal: folder placement + document
-// creation follow importDocumentAtPathCommand's semantics (missing
-// folders are created, matching what the REST/CLI import does for the
-// same path), the save carries `appliedFrom` provenance, and the created
-// document is attached to the proposing connection's bound Corpus as
-// `reference` — never the always-include tier, which stays a curator
-// decision.
+// Materialize an accepted create-proposal: the document is created in the
+// proposing connection's bound Corpus, at the proposed corpus-relative
+// path (missing folders are created, as an upload to the same path would),
+// and the save carries `appliedFrom` provenance. A proposal with no origin
+// — or whose corpus has since been deleted — lands in the default corpus:
+// the document is still created, as a draft, never outside a corpus.
 export async function applyCreateProposalCommand(
   ctx: ProjectCommandContext,
   input: ApplyCreateProposalInput,
@@ -426,19 +496,38 @@ export async function applyCreateProposalCommand(
   };
   if ((await ctx.u.docs.find(slug)) !== undefined) return taken();
 
-  const segments = s.proposedPath === null ? [] : pathSegments(s.proposedPath);
+  const changes: DomainChange[] = [];
+  const origin =
+    s.originCollectionSlug === null
+      ? undefined
+      : asCorpusSlug(s.originCollectionSlug);
+  let corpusSlug = origin ?? DEFAULT_CORPUS_SLUG;
+  let rootSlug = await ensureCorpusRoot(ctx, corpusSlug);
+  if (rootSlug === undefined) {
+    corpusSlug = DEFAULT_CORPUS_SLUG;
+    changes.push(
+      ...(await ensureDefaultCorpusCommand(ctx, input.appliedBy)).changes,
+    );
+    rootSlug = await ensureCorpusRoot(ctx, corpusSlug);
+  }
+  if (rootSlug === undefined) {
+    throw new Error("create-proposal apply: the default corpus has no root");
+  }
+
+  const segments =
+    s.proposedPath === null ? [] : checkedPathSegments(s.proposedPath);
   const filename =
-    segments.length === 0 ? undefined : basename(s.proposedPath ?? "");
+    segments.length === 0
+      ? defaultFilename(slug)
+      : basename(s.proposedPath ?? "");
   const ensured = await ctx.u.folders.ensureFolderPath(
+    rootSlug,
     segments.slice(0, -1),
     ctx.now,
     (name, takenSlugs) => asFolderSlug(normalizeSlug(name, takenSlugs)),
   );
   if (!ensured.ok) return taken();
-  if (
-    filename !== undefined &&
-    (await ctx.u.folders.slotOccupied(ensured.folderSlug, filename))
-  ) {
+  if (await ctx.u.folders.slotOccupied(ensured.folderSlug, filename)) {
     // A document — or a folder claiming the name since the proposal was
     // filed — occupies the slot: mark stale before any write.
     return taken();
@@ -447,42 +536,21 @@ export async function applyCreateProposalCommand(
   const saved = await saveDocumentCommand(ctx, {
     slug,
     markdown: s.proposedMarkdown,
-    ...(filename !== undefined ? { filename } : {}),
-    // Scope the save path's own filename-collision check to the folder
-    // this document is about to be placed in — a root document sharing
-    // the filename is not a collision (paths.ts: per-folder namespace).
+    filename,
     folderSlug: ensured.folderSlug,
     clientVersion: 0,
     changedBy: input.appliedBy,
     appliedFrom: { suggestionId: s.id, by: s.createdBy, channel: s.channel },
   });
-  const changes = [...saved.changes];
-  if (ensured.folderSlug !== null) {
-    const placed = await ctx.u.folders.placeDocument(slug, ensured.folderSlug);
-    // The slot pre-check above covers every known collision, so a
-    // placement failure here is a bug — throw so the whole transaction
-    // (document, version, blob, events) rolls back, never committing an
-    // unplaced orphan behind a soft "taken" result.
-    if (!placed.ok) {
-      throw new Error(
-        `create-proposal apply: placement failed (${placed.reason})`,
-      );
-    }
-  }
-  if (s.originCollectionSlug !== null) {
-    // The proposing connection's Corpus may have been deleted since; a
-    // vanished corpus makes the attach a no-op (attachMany returns
-    // nothing), so the document is still created — only the attach is
-    // skipped. attachDocumentsToCorpusCommand computes the end position
-    // itself, so we don't project the members just to count them.
-    const attached = await attachDocumentsToCorpusCommand(ctx, {
-      corpusSlug: asCorpusSlug(s.originCollectionSlug),
-      documentSlugs: [slug],
-      delivery: "reference",
-      changedBy: input.appliedBy,
-    });
-    changes.push(...attached.changes);
-  }
+  changes.push(
+    ...saved.changes,
+    ...(await corpusTreeChanged(
+      ctx,
+      [corpusSlug],
+      input.appliedBy,
+      "membership",
+    )),
+  );
   // saveDocumentCommand staled every open proposal for this slug
   // (including this one); resolve() then records THIS one's true outcome.
   await ctx.u.suggestions.resolve({

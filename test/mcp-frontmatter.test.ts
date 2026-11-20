@@ -28,7 +28,6 @@ function executor(): McpExecutor {
     replyToProposal: unused,
     listCorpora: unused,
     listDocuments: unused,
-    readCorpus: unused,
     corpusMembers: unused,
     verifyHistory: unused,
     corpusOutline: unused,

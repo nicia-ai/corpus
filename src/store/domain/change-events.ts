@@ -1,14 +1,7 @@
 import { z } from "zod";
 
-import type {
-  CallerChannel,
-  CorpusSlug,
-  DocumentSlug,
-  FolderSlug,
-} from "../../ids";
+import type { CallerChannel, CorpusSlug, DocumentSlug } from "../../ids";
 import { alwaysIncludeBudgetTokensZ, compact } from "../../util";
-
-import type { CollectionDelivery } from "./collection-expand";
 
 // The change-event vocabulary — the single source of event-type
 // strings, so callers stay typed instead of hand-building literals. The
@@ -24,12 +17,18 @@ export const DOCUMENT_EVENT_TYPES = [
 ] as const;
 export type DocumentEventType = (typeof DOCUMENT_EVENT_TYPES)[number];
 
+// `attached` / `detached` now mean a document MOVED into / out of a
+// corpus (membership is "under the corpus root"; there is no attaching).
+// `reordered` survives only as the coarse "this corpus's tree changed"
+// signal. Rows written under the older meanings (attach, detach, drag
+// reorder, delivery flips) share these kinds and still decode.
 export const COLLECTION_EVENT_TYPES = [
   "collection.created",
   "collection.updated",
   "collection.attached",
   "collection.detached",
   "collection.reordered",
+  "collection.deleted",
 ] as const;
 export type CollectionEventType = (typeof COLLECTION_EVENT_TYPES)[number];
 
@@ -180,13 +179,15 @@ export function documentArchived(
 export const CollectionMetadataSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
-  alwaysIncludeBudgetTokens: alwaysIncludeBudgetTokensZ,
+  // Written by edits made before corpora lost their budget; kept so those
+  // rows still decode. New edits omit it.
+  alwaysIncludeBudgetTokens: alwaysIncludeBudgetTokensZ.optional(),
 });
 export type CollectionMetadata = Readonly<
   z.infer<typeof CollectionMetadataSchema>
 >;
 
-// A collection name/description/budget edit. Membership is unchanged,
+// A collection name/description edit. Membership is unchanged,
 // so no new CollectionVersion is cut — this is head-node metadata only.
 // `before`/`after` carry every editable field every time so a consumer
 // diffs `before` vs `after` rather than re-reading the node.
@@ -226,11 +227,20 @@ export function collectionCreated(
   };
 }
 
-export function documentDetached(
+// Why a document left or joined a corpus. `moved` is a person moving it
+// between corpora; `single-corpus-layout` is the one-time layout pass
+// resolving a document that used to sit in several corpora.
+export const MEMBERSHIP_REASON_MOVED = "moved";
+export const MEMBERSHIP_REASON_LAYOUT = "single-corpus-layout";
+
+// A document moved between corpora: one event on the corpus it left, one
+// on the corpus it joined, each naming the other side.
+export function documentMovedOut(
   args: Readonly<{
     corpusSlug: CorpusSlug;
     documentSlug: DocumentSlug;
-    position: number;
+    toCorpusSlug: CorpusSlug;
+    reason: typeof MEMBERSHIP_REASON_MOVED | typeof MEMBERSHIP_REASON_LAYOUT;
     changedBy: string;
     changedAt: string;
   }>,
@@ -239,141 +249,54 @@ export function documentDetached(
     kind: "collection.detached",
     collectionSlug: args.corpusSlug,
     documentSlug: args.documentSlug,
-    before: { position: args.position },
+    after: { reason: args.reason, movedTo: args.toCorpusSlug },
     changedBy: args.changedBy,
     changedAt: args.changedAt,
   };
 }
 
-// A bulk re-order of a whole collection — one event for the collection,
-// not per moved document (the snapshot pins the new order).
-export function collectionReordered(
-  args: Readonly<{
-    corpusSlug: CorpusSlug;
-    order: readonly string[];
-    changedBy: string;
-    changedAt: string;
-  }>,
-): CollectionChange {
-  return {
-    kind: "collection.reordered",
-    collectionSlug: args.corpusSlug,
-    after: { order: args.order },
-    changedBy: args.changedBy,
-    changedAt: args.changedAt,
-  };
-}
-
-// Presence of `previousPosition` is the attached-vs-reordered rule, in
-// one place.
-export function documentAttached(
+export function documentMovedIn(
   args: Readonly<{
     corpusSlug: CorpusSlug;
     documentSlug: DocumentSlug;
-    position: number;
-    previousPosition: number | undefined;
-    changedBy: string;
-    changedAt: string;
-  }>,
-): CollectionChange {
-  const reordered = args.previousPosition !== undefined;
-  const kind: CollectionEventType = reordered
-    ? "collection.reordered"
-    : "collection.attached";
-  return compact({
-    kind,
-    collectionSlug: args.corpusSlug,
-    documentSlug: args.documentSlug,
-    before: reordered ? { position: args.previousPosition } : undefined,
-    after: { position: args.position },
-    changedBy: args.changedBy,
-    changedAt: args.changedAt,
-  });
-}
-
-// Folder→collection link attached or re-positioned. Membership-affecting
-// (the resolved expansion changes), so the DO cuts a fresh
-// CollectionVersion exactly like a document attach. `folderSlug` rides in
-// before/after for the audit ledger; subscribers re-pull the expanded
-// corpus.
-export function folderAttached(
-  args: Readonly<{
-    corpusSlug: CorpusSlug;
-    folderSlug: FolderSlug;
-    position: number;
-    previousPosition: number | undefined;
-    changedBy: string;
-    changedAt: string;
-  }>,
-): CollectionChange {
-  const reordered = args.previousPosition !== undefined;
-  const kind: CollectionEventType = reordered
-    ? "collection.reordered"
-    : "collection.attached";
-  return compact({
-    kind,
-    collectionSlug: args.corpusSlug,
-    before: reordered
-      ? { position: args.previousPosition, folderSlug: args.folderSlug }
-      : undefined,
-    after: { position: args.position, folderSlug: args.folderSlug },
-    changedBy: args.changedBy,
-    changedAt: args.changedAt,
-  });
-}
-
-export function folderDetached(
-  args: Readonly<{
-    corpusSlug: CorpusSlug;
-    folderSlug: FolderSlug;
-    position: number;
+    fromCorpusSlug: CorpusSlug;
     changedBy: string;
     changedAt: string;
   }>,
 ): CollectionChange {
   return {
-    kind: "collection.detached",
+    kind: "collection.attached",
     collectionSlug: args.corpusSlug,
-    before: { position: args.position, folderSlug: args.folderSlug },
+    documentSlug: args.documentSlug,
+    after: { reason: MEMBERSHIP_REASON_MOVED, movedFrom: args.fromCorpusSlug },
     changedBy: args.changedBy,
     changedAt: args.changedAt,
   };
 }
 
-// A delivery-tier flip (core ↔ reference) on a collection member. Like a
-// reorder it changes the resolved corpus a connection receives (a doc
-// moves between the always-included core and the pull-on-demand
-// reference set) without touching any document, so it reuses
-// `collection.reordered` — subscribers re-pull. `documentSlug`/`folderSlug`
-// identify the flipped member; `delivery` is the new tier.
-export function collectionDeliveryChanged(
+export function collectionDeleted(
   args: Readonly<{
     corpusSlug: CorpusSlug;
-    documentSlug?: DocumentSlug;
-    folderSlug?: FolderSlug;
-    delivery: CollectionDelivery;
+    name: string;
+    pages: "archive" | "move-to-default";
     changedBy: string;
     changedAt: string;
   }>,
 ): CollectionChange {
-  return compact({
-    kind: "collection.reordered" as const,
+  return {
+    kind: "collection.deleted",
     collectionSlug: args.corpusSlug,
-    documentSlug: args.documentSlug,
-    after: compact({
-      reason: "delivery-changed",
-      delivery: args.delivery,
-      folderSlug: args.folderSlug,
-    }),
+    before: { name: args.name },
+    after: { pages: args.pages },
     changedBy: args.changedBy,
     changedAt: args.changedAt,
-  });
+  };
 }
 
-// A folder rename/move changes the path-space → every folder-linking
-// collection's resolved expansion may differ even though no document
-// changed. v1 is a coarse fan-out to those collections; this is the
-// per-collection audit event.
+// Something inside a corpus's tree changed its paths or its document set
+// (a folder renamed or moved, a document placed, renamed or archived)
+// without any single document's bytes changing. The per-corpus audit
+// event subscribers re-pull the outline on.
 export function collectionFolderTreeChanged(
   args: Readonly<{
     corpusSlug: CorpusSlug;

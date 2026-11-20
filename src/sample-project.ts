@@ -12,21 +12,18 @@
 // data, not a trust boundary); seedExample lifts them to branded ids
 // via asDocumentSlug / asCorpusSlug at write time.
 
+// Every document belongs to exactly one corpus.
 export type ExampleDoc = Readonly<{
   slug: string;
   title: string;
   markdown: string;
+  corpusSlug: string;
 }>;
 
 export type ExampleCorpus = Readonly<{
   slug: string;
   name: string;
-}>;
-
-export type ExampleAttachment = Readonly<{
-  corpusSlug: string;
-  documentSlug: string;
-  position: number;
+  description: string;
 }>;
 
 export type ExampleAgent = Readonly<{ slug: string; name: string }>;
@@ -154,45 +151,76 @@ Pausing or canceling stops future kits immediately — no refund
 needed, no charge for skipped months.
 `;
 
-// Order matters at write time only for attachments (position is
-// explicit); document and corpus arrays are written sequentially
-// in the order below.
+const SUPPORT_PLAYBOOK_MD = `# Support Playbook
+
+How the support desk answers Marlow customers. Company-wide facts —
+the product, the refund policy, the brand voice — live in the company
+corpus; this corpus holds only what is specific to support.
+
+## First reply
+
+Answer within one business day. Lead with what happens next, not with
+an apology.
+
+## Escalate when
+
+- A kit arrived damaged twice in a row.
+- A customer asks for a refund outside the 30-day window.
+- Anything involving a payment dispute.
+
+Escalations go to the support lead with the order number and the
+customer's own words.
+`;
+
+const COMPANY_CORPUS = "company";
+const SUPPORT_CORPUS = "support-desk";
+
+// Two corpora, one audience each: what the whole company knows, and what
+// one team works from. An agent that needs both connects to both — no
+// page sits in two corpora.
+export const EXAMPLE_COLLECTIONS: readonly ExampleCorpus[] = [
+  {
+    slug: COMPANY_CORPUS,
+    name: "Company",
+    description: "What every Marlow agent should know.",
+  },
+  {
+    slug: SUPPORT_CORPUS,
+    name: "Support desk",
+    description: "How the support team works.",
+  },
+];
+
 export const EXAMPLE_DOCS: readonly ExampleDoc[] = [
   {
     slug: "refund-policy",
     title: "Refund Policy",
     markdown: REFUND_POLICY_MD,
-  },
-  { slug: "product", title: "Product", markdown: PRODUCT_MD },
-  { slug: "brand-voice", title: "Brand Voice", markdown: BRAND_VOICE_MD },
-];
-
-export const EXAMPLE_COLLECTIONS: readonly ExampleCorpus[] = [
-  { slug: "support-agent", name: "Support" },
-  { slug: "sales-agent", name: "Sales" },
-];
-
-// Corpus slugs keep the historical `-agent` suffix (identity:
-// the seed + bundle key on it); only the display names dropped it.
-export const EXAMPLE_ATTACHMENTS: readonly ExampleAttachment[] = [
-  {
-    corpusSlug: "support-agent",
-    documentSlug: "refund-policy",
-    position: 1,
+    corpusSlug: COMPANY_CORPUS,
   },
   {
-    corpusSlug: "sales-agent",
-    documentSlug: "refund-policy",
-    position: 1,
+    slug: "product",
+    title: "Product",
+    markdown: PRODUCT_MD,
+    corpusSlug: COMPANY_CORPUS,
   },
-  // product before brand-voice so an agent reading the corpus
-  // meets product details before tone guidance.
-  { corpusSlug: "sales-agent", documentSlug: "product", position: 2 },
-  { corpusSlug: "sales-agent", documentSlug: "brand-voice", position: 3 },
+  {
+    slug: "brand-voice",
+    title: "Brand Voice",
+    markdown: BRAND_VOICE_MD,
+    corpusSlug: COMPANY_CORPUS,
+  },
+  {
+    slug: "support-playbook",
+    title: "Support Playbook",
+    markdown: SUPPORT_PLAYBOOK_MD,
+    corpusSlug: SUPPORT_CORPUS,
+  },
 ];
 
 // The agent tier is illustrative — shown in the ghost-preview graph
-// only. The seed deliberately does not write agents.
+// only. The seed deliberately does not write agents. The support bot
+// connects to both corpora: that is how knowledge reaches two audiences.
 export const EXAMPLE_AGENTS: readonly ExampleAgent[] = [
   { slug: "customer-support-bot", name: "Customer Support Bot" },
   { slug: "cold-outbound-agent", name: "Cold Outbound Agent" },
@@ -200,7 +228,8 @@ export const EXAMPLE_AGENTS: readonly ExampleAgent[] = [
 ];
 
 export const EXAMPLE_AGENT_LINKS: readonly ExampleAgentLink[] = [
-  { corpusSlug: "support-agent", agentSlug: "customer-support-bot" },
-  { corpusSlug: "sales-agent", agentSlug: "cold-outbound-agent" },
-  { corpusSlug: "sales-agent", agentSlug: "sales-assistant" },
+  { corpusSlug: COMPANY_CORPUS, agentSlug: "customer-support-bot" },
+  { corpusSlug: SUPPORT_CORPUS, agentSlug: "customer-support-bot" },
+  { corpusSlug: COMPANY_CORPUS, agentSlug: "cold-outbound-agent" },
+  { corpusSlug: COMPANY_CORPUS, agentSlug: "sales-assistant" },
 ];

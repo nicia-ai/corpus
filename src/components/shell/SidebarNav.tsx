@@ -1,10 +1,9 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import {
   FileText,
   History,
   type LucideIcon,
   Settings,
-  Share2,
   Users,
 } from "lucide-react";
 
@@ -23,11 +22,18 @@ type NavEntry = Readonly<{
   label: string;
   icon: LucideIcon;
   ownerOnly?: boolean;
+  // Routes that live under this entry in the product model but not in
+  // the URL tree (a corpus page is part of Documents).
+  alsoActiveUnder?: readonly string[];
 }>;
 
 const NAV: readonly NavEntry[] = [
-  { to: "/p/$projectId/documents", label: "Documents", icon: FileText },
-  { to: "/p/$projectId/corpora", label: "Corpora", icon: Share2 },
+  {
+    to: "/p/$projectId/documents",
+    label: "Documents",
+    icon: FileText,
+    alsoActiveUnder: ["/p/$projectId/corpora", "/p/$projectId/connectors"],
+  },
   { to: "/p/$projectId/activity", label: "Activity", icon: History },
   { to: "/p/$projectId/team", label: "Team", icon: Users },
   {
@@ -47,24 +53,28 @@ export function SidebarNav({
   isOwner: boolean;
   onNavigate?: () => void;
 }>): React.ReactElement {
+  const matchRoute = useMatchRoute();
+  const isActive = (entry: NavEntry): boolean =>
+    [entry.to, ...(entry.alsoActiveUnder ?? [])].some(
+      (to) => matchRoute({ to, params: { projectId }, fuzzy: true }) !== false,
+    );
   return (
     <nav aria-label="Primary" className="space-y-0.5">
       {NAV.filter((n) => !n.ownerOnly || isOwner).map((n) => {
         const Icon = n.icon;
+        const active = isActive(n);
         return (
           <Link
             key={n.to}
             to={n.to}
             params={{ projectId }}
             onClick={onNavigate}
-            activeProps={{
-              className:
-                "flex min-h-11 items-center gap-3 rounded-md bg-blue-50 px-3 py-2 text-base font-medium text-blue-700",
-            }}
-            inactiveProps={{
-              className:
-                "flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-base text-slate-600 hover:bg-slate-200 hover:text-slate-900",
-            }}
+            aria-current={active ? "page" : undefined}
+            className={
+              active
+                ? "flex min-h-11 items-center gap-3 rounded-md bg-blue-50 px-3 py-2 text-base font-medium text-blue-700"
+                : "flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-base text-slate-600 hover:bg-slate-200 hover:text-slate-900"
+            }
           >
             <Icon className="size-4 shrink-0" />
             {n.label}
