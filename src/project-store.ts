@@ -157,6 +157,7 @@ import {
   SocketAttachment,
   type SocketMeta,
 } from "./project-store/presence";
+import { projectStatsProjection } from "./project-store/project-stats";
 import {
   corpusMembersProjection,
   corpusMetaProjection,
@@ -186,6 +187,7 @@ import {
 import { chooseImportLinkTarget } from "./store/domain/import-link";
 import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
+import type { ProjectStats } from "./store/domain/project-stats";
 import type { RetentionPolicy } from "./store/domain/retention";
 import { deriveSearchText } from "./store/domain/search";
 import type { VerifyResult } from "./store/domain/verify";
@@ -873,6 +875,12 @@ export class ProjectStore extends DurableObject<Env> {
 
   async usageSnapshot(): Promise<ProjectUsageSnapshot> {
     return usageSnapshotProjection(await this.read());
+  }
+
+  // Structural counts for operators (no content, names, or ids). Read-only
+  // and off the boot path: only the admin refresh and the daily cron call it.
+  async statsSnapshot(): Promise<ProjectStats> {
+    return projectStatsProjection(await this.read(), this.parsedLinksByHash);
   }
 
   // Single-corpus head-node lookup — for callers that need
