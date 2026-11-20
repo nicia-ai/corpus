@@ -6,8 +6,8 @@ sidebar:
 ---
 
 A **document** is one markdown file. It is the atom of your canonical
-corpus: written once, versioned forever, shared across as many corpora
-as you like.
+corpus: written once, versioned forever, and read by every agent
+connected to its corpus.
 
 ## Creating a document
 
