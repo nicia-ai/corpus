@@ -30,6 +30,7 @@ import {
   embassySection,
   embassySuggest,
 } from "./embassy/http";
+import { ValidationError } from "./errors";
 import {
   asDocumentSlug,
   asProjectId,
@@ -37,6 +38,7 @@ import {
   callerRefFromOAuth,
 } from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
+import { checkedPathSegments } from "./project-store/commands/untrusted-path";
 import { scopedExecutor } from "./scoped-executor";
 import { corpusIsServed } from "./store/domain/corpus-drive";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "./util";
@@ -200,12 +202,18 @@ async function verifyOAuthJwt(
   }
 }
 
+const MAX_PUSH_PATH_LENGTH = 1_024;
+
 const DocPushBody = z.object({
   // First-gate length cap; the DO's UTF-8 byte check is the authority
   // (multi-byte text can pass this and still come back `tooLarge`).
   markdown: markdownBodyZ,
   clientVersion: z.number().int().nonnegative(),
   title: z.string().optional(),
+  // Where a NEW document goes, relative to the key's corpus (missing folders
+  // are created). Absent = the corpus top level. Ignored for a document that
+  // already exists; checked with `checkedPathSegments` before the write.
+  path: z.string().min(1).max(MAX_PUSH_PATH_LENGTH).optional(),
 });
 
 // True when the push body failed ONLY because the markdown blew the
@@ -299,12 +307,14 @@ export const api = new Hono<{ Bindings: Env }>()
     if (scope instanceof Response) return scope;
     const docs = await scope.store.listDocuments();
     return c.json({
+      corpus: { projectId: scope.ref.projectId, slug: scope.ref.corpusSlug },
       documents: docs
         .filter((d) => scope.members.has(d.slug))
         .map((d) => ({
           slug: d.slug,
           title: d.title,
           docVersion: d.docVersion,
+          path: d.path,
         })),
     });
   })
@@ -333,6 +343,16 @@ export const api = new Hono<{ Bindings: Env }>()
         ? c.json({ error: MARKDOWN_TOO_LARGE_MESSAGE }, 413)
         : c.json({ error: "invalid body" }, 400);
     }
+    if (parsed.data.path !== undefined) {
+      try {
+        checkedPathSegments(parsed.data.path);
+      } catch (error) {
+        if (error instanceof ValidationError) {
+          return c.json({ error: error.message }, 400);
+        }
+        throw error;
+      }
+    }
     const save = compact({
       slug: asDocumentSlug(slug),
       markdown: parsed.data.markdown,
@@ -349,15 +369,27 @@ export const api = new Hono<{ Bindings: Env }>()
     const r = await scope.store.saveDocumentInCorpus(
       save,
       scope.ref.corpusSlug,
+      parsed.data.path,
     );
     if (r.ok) return c.json({ ok: true, docVersion: r.docVersion });
-    if ("forbidden" in r) return c.json({ error: "forbidden" }, 403);
+    if ("forbidden" in r) {
+      // An UPDATE (clientVersion > 0) of a document that is not in this
+      // corpus — never was, or was moved out — answers exactly like a
+      // document that does not exist. Only a CREATE can still observe a
+      // taken slug (it cannot be created), which stays a 403.
+      return parsed.data.clientVersion > 0
+        ? c.json({ error: "not found" }, 404)
+        : c.json({ error: "forbidden" }, 403);
+    }
     // The DO's authoritative UTF-8 byte cap (reachable when multi-byte
     // markdown passes the length gate above).
     if ("tooLarge" in r) {
       return c.json({ error: MARKDOWN_TOO_LARGE_MESSAGE }, 413);
     }
     if ("conflict" in r) {
+      // Head version 0 = there is no such document: an update of a slug that
+      // does not exist reads exactly like an update of one outside the corpus.
+      if (r.currentVersion === 0) return c.json({ error: "not found" }, 404);
       return c.json(
         { ok: false, conflict: true, currentVersion: r.currentVersion },
         409,

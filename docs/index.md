@@ -1,13 +1,16 @@
 ---
 title: What is Corpus?
-description: A Git-free canonical store for the markdown your AI agents read. Write it once, group it into a corpus, point your agent at it over MCP.
+description: A canonical store for the markdown your AI agents read. Write it once, group it into a corpus, point your agent at it over MCP.
 sidebar:
   order: 1
   label: What is Corpus?
 ---
 
-Corpus is a shared, Git-free home for the markdown your AI agents
-need to do good work.
+Corpus is a shared home for the markdown your AI agents need to do
+good work. Keep it in git if you like: Corpus adds a browser editor for
+people without repository access, agent changes that arrive as proposals a
+person accepts change by change, and `corpus pull --all` to land the approved
+files in your repository.
 
 You write documents in a web editor — coding standards, architecture
 notes, API conventions, runbooks, product decisions — group them into a

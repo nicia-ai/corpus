@@ -80,6 +80,7 @@ import {
   importDocumentAtPathCommand,
   MarkdownTooLarge,
   renameDocumentCommand,
+  createInCorpusAtPathCommand,
   renameFilenameCommand,
   saveDocumentCommand,
   saveOrCreateDocumentCommand,
@@ -1238,9 +1239,15 @@ export class ProjectStore extends DurableObject<Env> {
   //   - slug is new → created in the bound corpus's root. If that corpus
   //     vanished under us nothing is written (fail-closed 403): a scoped
   //     create can never land a document outside its own scope.
+  //
+  // `path` (corpus-relative, optional) says where a NEW document goes:
+  // missing folders are created under the corpus root, the last segment is
+  // its file name; absent = the corpus top level. It is untrusted input
+  // and checked here (`checkedPathSegments`); an existing document ignores it.
   async saveDocumentInCorpus(
     input: SaveDocumentInput,
     corpusSlug: CorpusSlug,
+    path?: string,
   ): Promise<CreateInCorpusResult> {
     const now = new Date().toISOString();
     try {
@@ -1253,6 +1260,16 @@ export class ProjectStore extends DurableObject<Env> {
           (await corpusOfDocument(ctx.u, input.slug)) !== corpusSlug
         ) {
           return { result: { forbidden: true }, changes: [] };
+        }
+        if (head === undefined && path !== undefined) {
+          const created = await createInCorpusAtPathCommand(ctx, {
+            ...input,
+            corpusSlug,
+            path,
+          });
+          return created.result === undefined
+            ? { result: { forbidden: true }, changes: [] }
+            : { result: created.result, changes: created.changes };
         }
         const saved = await saveOrCreateDocumentCommand(ctx, {
           ...input,

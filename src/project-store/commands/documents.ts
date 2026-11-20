@@ -1,3 +1,4 @@
+import { ValidationError } from "../../errors";
 import {
   asDocumentSlug,
   asFolderSlug,
@@ -233,6 +234,48 @@ export async function saveOrCreateDocumentCommand(
       ...(await corpusTreeChanged(
         ctx,
         [location.corpusSlug],
+        input.changedBy,
+        "membership",
+      )),
+    ],
+  };
+}
+
+// Create a NEW document in `corpusSlug` at a corpus-relative `path` (REST
+// create). Missing folders are created under the corpus root; the last
+// segment is the file name. `result: undefined` = the corpus is gone, nothing
+// is written. A name already taken by a sibling is a `FilenameCollision`
+// (the whole unit rolls back).
+export async function createInCorpusAtPathCommand(
+  ctx: ProjectCommandContext,
+  input: SaveDocumentInput & Readonly<{ corpusSlug: CorpusSlug; path: string }>,
+): Promise<CommandOutcome<Readonly<{ docVersion: number }> | undefined>> {
+  const segments = checkedPathSegments(input.path);
+  const filename = segments.at(-1);
+  if (filename === undefined) {
+    throw new ValidationError("A path must name a file.");
+  }
+  const rootSlug = await ctx.u.cols.rootFolderSlug(input.corpusSlug);
+  if (rootSlug === undefined) return { result: undefined, changes: [] };
+  const ensured = await ctx.u.folders.ensureFolderPath(
+    rootSlug,
+    segments.slice(0, -1),
+    ctx.now,
+    (name, taken) => asFolderSlug(normalizeSlug(name, taken)),
+  );
+  if (!ensured.ok) throw new FilenameCollision();
+  const saved = await saveDocumentCommand(ctx, {
+    ...input,
+    filename,
+    folderSlug: ensured.folderSlug,
+  });
+  return {
+    result: saved.result,
+    changes: [
+      ...saved.changes,
+      ...(await corpusTreeChanged(
+        ctx,
+        [input.corpusSlug],
         input.changedBy,
         "membership",
       )),

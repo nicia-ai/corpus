@@ -150,6 +150,19 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     expect(slugs).not.toContain(OUTSIDER_SLUG);
   });
 
+  it("lists each member's path and the bound corpus identity, nothing outside it", async () => {
+    const token = await mintKey();
+    const body: {
+      corpus: { projectId: string; slug: string };
+      documents: readonly { slug: string; path: string }[];
+    } = await (await call("/api/v1/docs", token)).json();
+    expect(body.documents).toEqual([
+      expect.objectContaining({ slug: MEMBER_SLUG, path: `${MEMBER_SLUG}.md` }),
+    ]);
+    expect(body.corpus.projectId).toEqual(expect.any(String));
+    expect(body.corpus.slug).toEqual(expect.any(String));
+  });
+
   it("404s a document outside the bound corpus (no existence leak)", async () => {
     const token = await mintKey();
     expect((await call(`/api/v1/docs/${OUTSIDER_SLUG}`, token)).status).toBe(
@@ -157,11 +170,25 @@ describe("CLI REST surface (/api/v1/docs)", () => {
     );
   });
 
-  it("403s a write to a document outside the bound corpus", async () => {
+  it("404s an update of a document outside the bound corpus, like one that does not exist", async () => {
+    const token = await mintKey();
+    const outside = await call(`/api/v1/docs/${OUTSIDER_SLUG}`, token, {
+      markdown: "tamper",
+      clientVersion: 1,
+    });
+    const nowhere = await call("/api/v1/docs/never-existed", token, {
+      markdown: "tamper",
+      clientVersion: 1,
+    });
+    expect(outside.status).toBe(nowhere.status);
+    expect(outside.status).toBe(404);
+  });
+
+  it("403s a CREATE that names a slug already taken outside the bound corpus", async () => {
     const token = await mintKey();
     const r = await call(`/api/v1/docs/${OUTSIDER_SLUG}`, token, {
       markdown: "tamper",
-      clientVersion: 1,
+      clientVersion: 0,
     });
     expect(r.status).toBe(403);
   });

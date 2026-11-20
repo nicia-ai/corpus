@@ -66,7 +66,8 @@ version history.
   without exposing human identity or granting access to document comments.
   Agents still cannot resolve feedback or apply a proposal; unrelated review
   state remains off-MCP.
-- **CLI** — a standalone Git-free `pull`/`push` tool
+- **CLI** — a standalone `pull`/`push` tool, plus `pull --all` to write the whole
+  corpus into any directory (for example a git repository, from CI)
   (`npm install -g @nicia-ai/corpus-cli`, then `corpus setup`) over a
   corpus-scoped REST surface (`/api/v1/docs`), for editing documents
   from a terminal or CI with the same optimistic-concurrency contract as

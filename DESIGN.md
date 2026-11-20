@@ -2,7 +2,7 @@
 
 ## Product Context
 
-- **What this is:** Corpus — a Git-free canonical context store for teams. Non-engineers
+- **What this is:** Corpus — a canonical context store for teams. Non-engineers
   write markdown documents, group them into agent corpora, and agents
   consume those corpora over MCP.
 - **Who it's for:** Non-engineers on a team (ops, support, sales, marketing)

@@ -17,7 +17,7 @@ version, and curate markdown documents; group them into corpora;
 hand agents a single live, approved source over MCP. They review agent
 proposals, never let an agent auto-write.
 
-**Secondary — engineers** running the Git-free CLI (`pnpm corpus`) from a
+**Secondary — engineers** running the CLI (`pnpm corpus`) from a
 terminal or CI against the same optimistic-concurrency contract as the web
 editor. Same data, different surface.
 
@@ -27,7 +27,7 @@ propose edits a human accepts per hunk. They never see review state.
 
 ## Product Purpose
 
-Corpus is a Git-free canonical markdown context store for teams — the
+Corpus is a canonical markdown context store for teams — the
 canonical place a team keeps the documents its AI agents reason over. It is
 **not a prompt manager, not a vector database, and not a RAG pipeline**: it is
 the documents a team already has, made shared, versioned, and served as one
@@ -57,10 +57,12 @@ Documents, where recently modified documents — including newly created ones �
 are visible before the folder browser. Search and folders support finding the
 rest; Activity remains available when a curator needs the event history.
 
-People write and review in the web app. Engineers can use the Git-free CLI,
-and agents consume corpora over MCP with a credential bound to one corpus.
-Drafts, the built-in unpublished space, is never served. Moving a page into
-a corpus publishes it.
+People write and review in the web app. Engineers can use the CLI (including
+`corpus pull --all`, which writes the approved files into a repository), and
+agents consume corpora over MCP with a credential bound to one corpus. An
+agent that needs more than one body of knowledge connects to more than one
+corpus. Drafts, the built-in unpublished space, is never served. Moving a
+page into a corpus publishes it.
 
 ## Capabilities and Constraints
 

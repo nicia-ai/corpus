@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: A tiny, Git-free pull/push CLI for editing Corpus documents from your terminal or CI — authenticated by an API key and scoped to one corpus.
+description: A tiny pull/push CLI for editing Corpus documents from your terminal or CI — authenticated by an API key and scoped to one corpus.
 sidebar:
   order: 7
 ---
@@ -112,8 +112,9 @@ api-style-guide   v4   API Style Guide
 deploy-runbook    v2   Deploy Runbook
 ```
 
-Only the corpus's members appear — this is the same scope an agent sees
-over MCP.
+Only the documents in the corpus appear — this is the same scope an agent
+sees over MCP. A document that is moved to another corpus or to Drafts, or
+archived, drops out of the list.
 
 ### `pull <slug> [path]`
 
@@ -155,6 +156,105 @@ same conflict contract as the web editor — see
 On success, `push` updates the sidecar to the new version, so you can keep
 editing and pushing without a fresh `pull`.
 
+### `pull --all [dir] [--overwrite]`
+
+Write the **whole corpus** into a directory (default: the current directory),
+one file per document, at the document's path in the corpus (relative to the corpus root, the way an
+agent sees it), creating folders as
+needed and preserving each file's bytes exactly (including a missing trailing
+newline and CRLF line endings). The directory can be anywhere: Corpus assumes
+nothing about what surrounds it, and the files are an ordinary folder tree.
+
+```sh
+$ corpus pull --all ./agent-docs
+added 2, updated 1, removed 0, unchanged 5
++ runbooks/deploy.md
++ style/api.md
+~ readme.md
+```
+
+It is built to be run repeatedly (see [keeping a repository in sync from
+CI](#keep-a-repository-in-sync-from-ci)):
+
+- **Idempotent.** With nothing new upstream, a run writes nothing (not even the
+  state file), prints `up to date: N files in <dir>`, and exits `0`.
+- **Tracks only what it wrote.** Documents that left the corpus (moved to another corpus or to
+  Drafts, or archived) are deleted locally, and renamed or moved documents are moved, but only files recorded in
+  the [state file](#the-sync-state-file). Other files in the directory are never
+  touched. Folders left empty by a removal or move are not deleted.
+- **Cheap.** Unchanged documents (same version, same path) are not downloaded.
+- **Safe paths.** A document path that is absolute, contains `..`, `\`, or a
+  `.git` segment, or that collides with another path on a case-insensitive
+  filesystem is refused before anything is written (exit `1`).
+- **Do-nothing on failure.** Everything is fetched before the first write, so a
+  network or auth error leaves the directory as it was.
+
+Output is plain text, one path per line under the counts. There is no
+machine-readable mode; the exit code is the contract:
+
+| Exit | Meaning                                                                                                       |
+| ---- | ------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success, including "up to date" and locally edited files that were kept (see below).                          |
+| `1`  | Any other error: bad usage, missing config, unsafe path, a state file that is invalid or for another corpus.  |
+| `2`  | Conflicts: some local edits would have been overwritten and were left untouched. Everything else was applied. |
+| `3`  | Transport or auth error: the server was unreachable or refused the key.                                       |
+
+#### Local edits are never lost
+
+Before overwriting or deleting a tracked file, `pull --all` compares its bytes
+to the hash recorded when it last wrote the file:
+
+| Situation                                                   | Result                                          |
+| ----------------------------------------------------------- | ----------------------------------------------- |
+| Edited locally, upstream unchanged                          | Left alone and listed as `kept`. Exit `0`.      |
+| Edited locally, upstream changed (update, move, or removal) | **Conflict**: left untouched, listed, exit `2`. |
+| Untracked file at a path the corpus wants, different bytes  | **Conflict**: left untouched, listed, exit `2`. |
+| Untracked file at that path with identical bytes            | Adopted into the state file; not a conflict.    |
+| Tracked file deleted locally, upstream unchanged            | Restored.                                       |
+
+Non-conflicting files are still applied in the same run. To resolve a conflict,
+keep a copy of your version, run `corpus pull <slug> <path>` to take upstream's,
+reapply your edit, and `corpus push <slug> <path>`. Or re-run with
+`--overwrite`, which makes the directory match the corpus: it replaces every
+conflicting or locally edited file and deletes edited files that were removed
+upstream. Local edits are discarded, so commit or copy anything you want first.
+
+## The sync-state file
+
+`pull --all` records what it wrote in a single dotfile at the root of the
+directory, `.corpus.json`:
+
+```json
+{
+  "version": 1,
+  "corpus": { "projectId": "…", "slug": "ops" },
+  "files": [
+    {
+      "path": "runbooks/deploy.md",
+      "slug": "deploy-runbook",
+      "docVersion": 4,
+      "sha256": "…"
+    }
+  ]
+}
+```
+
+`slug` is the stable document identifier the REST API uses; it survives
+renames and moves. `sha256` is the hash of the bytes written. The file is
+serialized deterministically (fixed key order, files sorted by path, trailing
+newline), so committing it produces clean diffs, and it is rewritten only when
+something changed. Commit it alongside the documents: it is what lets the next
+run tell your edits from upstream's. A directory whose `.corpus.json` belongs to a
+different corpus is refused, so two corpora never mix; use one directory per
+corpus. Don't hand-edit it.
+
+**Relationship to the per-file sidecar.** Inside a `pull --all` directory the
+state file replaces the sidecar. Single-document `push <slug> <path>` and
+`pull <slug> <path>` on a tracked file read and update that file's entry in
+`.corpus.json` instead of writing a per-file sidecar, so the two
+never disagree. Files outside such a directory keep using sidecars exactly as
+before. (A file that already has a sidecar keeps using it.)
+
 ## The version sidecar
 
 Every pulled file gets a companion `<file>.corpus.json`:
@@ -170,9 +270,10 @@ artifact: leave it beside the markdown, and don't hand-edit it. A file with
 
 ## Creating documents
 
-Pushing a slug that doesn't exist yet **creates** it — and adds it to the
-corpus your key is bound to, so it shows up in `list` and is readable
-immediately:
+Pushing a slug that doesn't exist yet **creates** it — inside the corpus your
+key is bound to, at its top level, so it shows up in `list` and is readable
+immediately. (Move it into a folder afterwards from the web app. Over the
+[REST API](#rest-api) a create can also name a corpus-relative `path`.)
 
 ```sh
 $ printf '# Onboarding\n\nWelcome…\n' > onboarding.md
@@ -214,16 +315,64 @@ $EDITOR deploy-runbook.md            # make your changes
 corpus push deploy-runbook           # → new version, sidecar updated
 ```
 
+## Keep a repository in sync from CI
+
+Teams often keep markdown for their agents in a git repository. Corpus is where
+teammates edit; a scheduled job writes the corpus into the repository and
+commits what changed. Nothing about the repository layout is assumed: pick any
+directory. These steps work in any CI system:
+
+```sh
+npm install --global @nicia-ai/corpus-cli
+
+# CORPUS_URL and CORPUS_API_KEY come from the CI system's secret store.
+corpus pull --all agent-docs        # exit 2 = a local edit blocked an update
+
+git add agent-docs
+if ! git diff --cached --quiet; then
+  git commit -m "Sync from Corpus"
+  git push
+fi
+```
+
+Run it on a schedule. When nothing changed upstream the pull writes nothing,
+`git diff --cached` is empty, and no commit is made. Keep the CI job's
+exit-code handling: `2` means someone edited a synced file in the repository
+and upstream also changed it. The job stops (most CI systems stop on a non-zero
+exit) so a person can resolve it; the files that could be updated were. Use one
+API key per corpus and one directory per corpus.
+
+In GitHub Actions, paste the same steps into a workflow job after checkout
+and Node setup (set `CORPUS_URL` and `CORPUS_API_KEY` from secrets):
+
+```yaml
+- run: npm install --global @nicia-ai/corpus-cli
+- run: corpus pull --all agent-docs
+  env:
+    CORPUS_URL: ${{ secrets.CORPUS_URL }}
+    CORPUS_API_KEY: ${{ secrets.CORPUS_API_KEY }}
+- run: |
+    git add agent-docs
+    git diff --cached --quiet || {
+      git -c user.name=corpus-sync -c user.email=corpus-sync@users.noreply.github.com commit -m "Sync from Corpus"
+      git push
+    }
+```
+
+This only copies the corpus's current files into the repository. It does not
+push edits made in the repository back to Corpus (use `corpus push` for that),
+and Corpus does not mirror or write to git itself.
+
 ## REST API
 
 The CLI is a thin client over three endpoints under `/api/v1/docs`. Each
 takes the API key as a bearer token and is scoped to the key's corpus:
 
-| Method & path            | Does                                                               |
-| ------------------------ | ------------------------------------------------------------------ |
-| `GET /api/v1/docs`       | List the corpus's documents (`slug`, `title`, `docVersion`).       |
-| `GET /api/v1/docs/:slug` | Fetch one document's `markdown` + metadata. `404` if not a member. |
-| `PUT /api/v1/docs/:slug` | Write a new version. Body: `{ markdown, clientVersion, title? }`.  |
+| Method & path            | Does                                                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/docs`       | List the corpus's documents (`slug`, `title`, `docVersion`, `path`) plus the `corpus` identity (`projectId`, `slug`).         |
+| `GET /api/v1/docs/:slug` | Fetch one document's `markdown` + metadata. `404` if it is not in the corpus.                                                 |
+| `PUT /api/v1/docs/:slug` | Write a new version. Body: `{ markdown, clientVersion, title?, path? }`; `path` (corpus-relative) only places a NEW document. |
 
 ```sh
 curl -H "Authorization: Bearer $CORPUS_API_KEY" \
@@ -231,8 +380,12 @@ curl -H "Authorization: Bearer $CORPUS_API_KEY" \
 ```
 
 A `PUT` whose `clientVersion` is behind the server returns `409` with the
-`currentVersion`; a `PUT` to a slug that exists outside the bound corpus
-returns `403`. These are exactly the conflict and scope rules the CLI
+`currentVersion`. An update (`clientVersion` above 0) of a document that is not
+in the bound corpus — including one that was moved out — returns `404`, the
+same as a slug that does not exist. Creating a slug already taken outside the
+corpus returns `403`, and a `path` that leaves the corpus (`..`, an absolute
+path, `\`) returns `400`. A key can never read or write a document outside its
+corpus, Drafts included. These are the conflict and scope rules the CLI
 surfaces above.
 
 ## Portability
