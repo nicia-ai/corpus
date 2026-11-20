@@ -99,7 +99,6 @@ import {
   moveFolderCommand,
   renameFolderCommand,
 } from "./project-store/commands/folders";
-import { promoteDefaultCorpusCommand } from "./project-store/commands/promote-default";
 import { saveSectionCommand } from "./project-store/commands/sections";
 import { seedExampleCommand } from "./project-store/commands/seed";
 import {
@@ -784,12 +783,14 @@ export class ProjectStore extends DurableObject<Env> {
     let placed = 0;
     let conflicts = 0;
     let changed = false;
+    let promotedTo: CorpusSlug | undefined;
     for (let batches = 1; ; batches += 1) {
       const now = new Date().toISOString();
       const outcome = await this.transact(async (u) => {
         const out = await layOutAsDrivesCommand(this.commandContext(u, now), {
           snapshot: true,
           placementLimit,
+          promoteDefault,
         });
         await this.instrumentation().recordChanges(u, out.changes);
         return out;
@@ -797,10 +798,16 @@ export class ProjectStore extends DurableObject<Env> {
       placed += outcome.result.placed;
       conflicts += outcome.result.conflicts;
       changed ||= outcome.result.changed;
+      promotedTo = outcome.result.promotedTo ?? promotedTo;
       this.layoutTestSeam.afterBatch?.(batches);
       if (outcome.result.complete) break;
     }
-    if (promoteDefault) await this.promoteDefaultCorpus();
+    if (promotedTo !== undefined) {
+      await rebindDefaultCorpusConnections(connectControlDb(this.env.DB), {
+        projectId: this.projectId(),
+        to: promotedTo,
+      });
+    }
     await this.ctx.storage.put(DRIVE_LAYOUT_KEY, true);
     if (changed) {
       console.warn(
@@ -819,30 +826,6 @@ export class ProjectStore extends DurableObject<Env> {
     return projectId === ""
       ? false
       : defaultCorpusIsBound(connectControlDb(this.env.DB), projectId);
-  }
-
-  // The default corpus's pages become an ordinary served corpus (their
-  // credentials keep working) and the default corpus starts over as empty
-  // drafts. The DO half commits first; the control-plane half is one
-  // idempotent UPDATE, and both are retried together if the second fails
-  // (the layout marker is not written until it has succeeded).
-  private async promoteDefaultCorpus(): Promise<void> {
-    const now = new Date().toISOString();
-    // `transact`, not `write`: this runs INSIDE the layout gate that
-    // `write` waits on.
-    const promoted = await this.transact(async (u) => {
-      const result = await promoteDefaultCorpusCommand(
-        this.commandContext(u, now),
-        DRIVE_LAYOUT_ACTOR,
-      );
-      await this.instrumentation().recordChanges(u, result?.changes ?? []);
-      return result?.corpusSlug;
-    });
-    if (promoted === undefined) return;
-    await rebindDefaultCorpusConnections(connectControlDb(this.env.DB), {
-      projectId: this.projectId(),
-      to: promoted,
-    });
   }
 
   // Tear down all of this project's data (reconcile sweep, after a

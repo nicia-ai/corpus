@@ -552,40 +552,74 @@ describe("corpus-drive domain rules (pure)", () => {
     expect(["b", "B", "a"].sort(comparePaths)).toEqual(["B", "a", "b"]);
   });
 
-  it("plans the layout: earliest-created corpus wins, loose documents go to drafts, a document already under a root stays", () => {
-    const plan = planDriveLayout({
-      corpora: [
-        { slug: "late", createdAt: "2024-02-01T00:00:00.000Z" },
-        { slug: "early", createdAt: "2024-01-01T00:00:00.000Z" },
-      ],
+  it("plans the layout: a shared page goes where it is needed, loose pages go to drafts, a page already under a root stays", () => {
+    const corpora = [
+      { slug: "late", createdAt: "2024-02-01T00:00:00.000Z" },
+      { slug: "early", createdAt: "2024-01-01T00:00:00.000Z" },
+    ];
+    const both = {
+      slug: "both",
+      folderNames: ["x"],
+      homeCorpusSlug: undefined,
+      memberOf: ["late", "early"],
+    };
+    const none = {
+      slug: "none",
+      folderNames: [],
+      homeCorpusSlug: undefined,
+      memberOf: [],
+    };
+    const settled = {
+      slug: "settled",
+      folderNames: ["early-root"],
+      homeCorpusSlug: "early",
+      memberOf: ["early"],
+    };
+    // `early` already holds a page, `late` would be empty: `both` goes to late.
+    const needy = planDriveLayout({
+      corpora,
       defaultCorpusSlug: "default",
-      documents: [
-        {
-          slug: "both",
-          folderNames: ["x"],
-          homeCorpusSlug: undefined,
-          memberOf: ["late", "early"],
-        },
-        {
-          slug: "none",
-          folderNames: [],
-          homeCorpusSlug: undefined,
-          memberOf: [],
-        },
-        {
-          slug: "settled",
-          folderNames: ["early-root"],
-          homeCorpusSlug: "early",
-          memberOf: ["early"],
-        },
-      ],
+      documents: [both, none, settled],
     });
-    expect(plan.placements).toEqual([
-      { documentSlug: "both", corpusSlug: "early", folderNames: ["x"] },
+    expect(needy.placements).toEqual([
+      { documentSlug: "both", corpusSlug: "late", folderNames: ["x"] },
       { documentSlug: "none", corpusSlug: "default", folderNames: [] },
     ]);
-    expect(plan.conflicts).toEqual([
-      { documentSlug: "both", keptIn: "early", droppedFrom: ["late"] },
+    expect(needy.conflicts).toEqual([
+      { documentSlug: "both", keptIn: "late", droppedFrom: ["early"] },
     ]);
+    // Both corpora hold pages already: the earliest-created wins.
+    const settledLate = {
+      ...settled,
+      slug: "settled-late",
+      homeCorpusSlug: "late",
+    };
+    const plain = planDriveLayout({
+      corpora,
+      defaultCorpusSlug: "default",
+      documents: [both, settled, settledLate],
+    });
+    expect(plain.placements).toEqual([
+      { documentSlug: "both", corpusSlug: "early", folderNames: ["x"] },
+    ]);
+  });
+
+  it("settles shared pages over the whole project: two shared pages cannot both leave the one corpus that needed either", () => {
+    const corpora = [
+      { slug: "a", createdAt: "2024-01-01T00:00:00.000Z" },
+      { slug: "b", createdAt: "2024-01-02T00:00:00.000Z" },
+    ];
+    const doc = (slug: string) => ({
+      slug,
+      folderNames: [],
+      homeCorpusSlug: undefined,
+      memberOf: ["a", "b"],
+    });
+    const plan = planDriveLayout({
+      corpora,
+      defaultCorpusSlug: "default",
+      documents: [doc("s1"), doc("s2")],
+    });
+    expect(plan.placements.map((p) => p.corpusSlug).sort()).toEqual(["a", "b"]);
   });
 });

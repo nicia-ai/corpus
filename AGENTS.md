@@ -141,9 +141,13 @@ Existing projects are laid out as drives lazily, once, inside one
 `src/project-store/commands/drive-layout.ts`; marker
 `layout:corpus-drive:v1`, awaited by every DO read and write): each corpus
 gets a root, each member document is placed under it at its existing
-project path (earliest-created corpus wins a multi-corpus document, recorded
-in the activity log), loose documents go to Drafts. Bundle import uses the
-same rule. Keeper: `test/corpus-drive-migration.test.ts`.
+project path (a multi-corpus document goes to a corpus that would otherwise
+be empty, else the earliest-created, decided over the whole project and
+recorded in the activity log), loose documents go to Drafts. If a credential
+was bound to the default corpus, the pages it resolved (never the loose ones)
+are laid out into a named `general` corpus and the credential is re-pointed
+there. Bundle import uses the same placement rule. Keepers:
+`test/corpus-drive-migration.test.ts`, `test/corpus-drive-hardening.test.ts`.
 
 Entry points to read first:
 

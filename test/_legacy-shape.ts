@@ -163,3 +163,57 @@ export async function seedLegacyProject(store: Store): Promise<void> {
     inst.driveLayout = undefined;
   });
 }
+
+export type DirectLegacySpec = Readonly<{
+  // Corpus slugs in CREATION order (each gets a later `createdAt`).
+  corpora: readonly string[];
+  // Every document sits at the project root (no folder); `in` lists the
+  // corpora that include it directly.
+  documents: readonly Readonly<{ slug: string; in: readonly string[] }>[];
+}>;
+
+// A project in the pre-drive shape built straight in the graph: corpora in
+// the given creation order, root-level documents, direct `includes` edges.
+// Nothing goes through the public API, so the layout has not run yet; the
+// first read or write migrates it.
+export async function seedLegacyDirect(
+  store: Store,
+  spec: DirectLegacySpec,
+): Promise<void> {
+  for (const slug of spec.corpora) {
+    await runInDurableObject(store, async (instance) => {
+      const s = await (instance as unknown as LegacyInstance).ensureStore();
+      await s.nodes.Collection.create({ slug, name: slug });
+    });
+    // createdAt is a millisecond timestamp: keep the corpora apart.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  await runInDurableObject(store, async (instance) => {
+    const s = await (instance as unknown as LegacyInstance).ensureStore();
+    await s.transaction(async (tx) => {
+      const corpus = new Map<string, string>();
+      for (const node of await tx.nodes.Collection.find({ limit: 1_000 })) {
+        corpus.set(node.slug, node.id);
+      }
+      for (const doc of spec.documents) {
+        const node = await tx.nodes.Document.create({
+          slug: doc.slug,
+          title: doc.slug,
+          filename: `${doc.slug}.md`,
+          contentHash: `hash-${doc.slug}`,
+          docVersion: 1,
+          updatedAt: "2020-01-01T00:00:00.000Z",
+        });
+        for (const [i, owner] of doc.in.entries()) {
+          const from = corpus.get(owner);
+          if (from === undefined) throw new Error(`no corpus ${owner}`);
+          await tx.edges.includes.create(
+            { kind: "Collection", id: from },
+            { kind: "Document", id: node.id },
+            { position: i + 1, delivery: "core" },
+          );
+        }
+      }
+    });
+  });
+}

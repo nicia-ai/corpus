@@ -17,7 +17,12 @@ import {
   type LayoutPlacement,
   planDriveLayout,
 } from "../../store/domain/corpus-drive";
-import { DEFAULT_CORPUS_SLUG } from "../../store/domain/default-corpus";
+import {
+  DEFAULT_CORPUS_SLUG,
+  PROMOTED_DEFAULT_DESCRIPTION,
+  PROMOTED_DEFAULT_NAME,
+  PROMOTED_DEFAULT_SLUG,
+} from "../../store/domain/default-corpus";
 import { normalizeSlug } from "../../store/domain/paths";
 import type { FolderView } from "../../store/repos/folder-repo";
 import type {
@@ -26,6 +31,7 @@ import type {
   ProjectCommandContext,
 } from "../command";
 
+import { createCorpusCommand } from "./corpora";
 import { ensureCorpusRoot } from "./corpus-tree";
 import { ensureDefaultCorpusCommand } from "./ensure-default-corpus";
 
@@ -38,6 +44,9 @@ export type DriveLayoutResult = Readonly<{
   changed: boolean;
   placed: number;
   conflicts: number;
+  // Set when the default corpus's pages were laid out into an ordinary
+  // corpus (see `promoteDefault`): the slug the caller re-points credentials at.
+  promotedTo?: CorpusSlug;
   // True when this call finished the layout (roots linked, legacy links
   // dropped, leftovers removed, snapshots cut). False = a bounded batch of
   // placements was committed and the caller must call again.
@@ -95,6 +104,36 @@ function givenMembership(
     }
   }
   return (doc) => byDocument.get(doc.slug) ?? [];
+}
+
+// The corpus the default corpus's pages are laid out into when the project
+// served it. Created (empty, with its root) the first time; a corpus carrying
+// the marker description at the chosen slug is the one an earlier batch made
+// and is reused, so every batch and every retry agree. `undefined` = there is
+// no default corpus to promote.
+async function ensurePromotedCorpus(
+  ctx: ProjectCommandContext,
+  changes: DomainChange[],
+): Promise<CorpusSlug | undefined> {
+  if ((await ctx.u.cols.findCorpus(DEFAULT_CORPUS_SLUG)) === undefined) {
+    return undefined;
+  }
+  let slug = asCorpusSlug(PROMOTED_DEFAULT_SLUG);
+  for (let n = 2; ; n += 1) {
+    const existing = await ctx.u.cols.findCorpus(slug);
+    if (existing === undefined) {
+      const created = await createCorpusCommand(ctx, {
+        slug,
+        name: PROMOTED_DEFAULT_NAME,
+        description: PROMOTED_DEFAULT_DESCRIPTION,
+        changedBy: DRIVE_LAYOUT_ACTOR,
+      });
+      changes.push(...created.changes);
+      return slug;
+    }
+    if (existing.description === PROMOTED_DEFAULT_DESCRIPTION) return slug;
+    slug = asCorpusSlug(`${PROMOTED_DEFAULT_SLUG}-${String(n)}`);
+  }
 }
 
 // The folder tree as it was before the layout: every folder that does not
@@ -250,9 +289,24 @@ export async function layOutAsDrivesCommand(
     membership?: LayoutMembership;
     snapshot: boolean;
     placementLimit?: number;
+    // The project SERVED its default corpus (a credential was bound to it):
+    // the pages the default corpus resolved — and only those — are laid out
+    // into an ordinary named corpus instead, which the caller then binds the
+    // credentials to. Pages in no corpus are drafts and stay in the default
+    // corpus however many there are; a default corpus that resolved nothing
+    // gives an empty named corpus (the agent read nothing before, and reads
+    // nothing after). Nothing is moved afterwards: the pages are placed
+    // straight into their final corpus, so a crash between batches can never
+    // leave drafts where a retry would promote them.
+    promoteDefault?: boolean;
   }>,
 ): Promise<CommandOutcome<DriveLayoutResult>> {
-  const [corpora, paths, memberOf, folderViews] = await Promise.all([
+  const changes: DomainChange[] = [];
+  const promoted =
+    options.promoteDefault === true
+      ? await ensurePromotedCorpus(ctx, changes)
+      : undefined;
+  const [listed, paths, storedOf, folderViews] = await Promise.all([
     ctx.u.cols.listByCreation(),
     ctx.u.folders.allDocumentPaths(),
     options.membership === undefined
@@ -260,6 +314,24 @@ export async function layOutAsDrivesCommand(
       : Promise.resolve(givenMembership(options.membership)),
     ctx.u.folders.listAll(),
   ]);
+  // The promoted corpus stands in for the default corpus: same age (so it
+  // ranks where the default corpus did), and it inherits what the default
+  // corpus resolved.
+  const defaultAge = listed.find((c) => c.slug === DEFAULT_CORPUS_SLUG);
+  const corpora = listed.map((c) =>
+    promoted !== undefined && c.slug === promoted && defaultAge !== undefined
+      ? { ...c, createdAt: defaultAge.createdAt }
+      : c,
+  );
+  const memberOf: typeof storedOf = (doc) => [
+    ...new Set(
+      storedOf(doc).map((slug) =>
+        promoted !== undefined && slug === DEFAULT_CORPUS_SLUG
+          ? promoted
+          : slug,
+      ),
+    ),
+  ];
   const corpusOfRoot = new Map(
     corpora.map((c) => [corpusRootFolderSlug(c.slug) as string, c.slug]),
   );
@@ -290,7 +362,6 @@ export async function layOutAsDrivesCommand(
     ? legacyFolders(folderViews, new Set(corpusOfRoot.keys()))
     : [];
 
-  const changes: DomainChange[] = [];
   const usesDefault =
     batch.some((p) => p.corpusSlug === DEFAULT_CORPUS_SLUG) ||
     legacy.length > 0;
@@ -392,8 +463,12 @@ export async function layOutAsDrivesCommand(
     }
   }
   const progress = { placed: batch.length, conflicts: conflicts.length };
+  const promotedField = promoted === undefined ? {} : { promotedTo: promoted };
   if (!complete) {
-    return { result: { changed: true, ...progress, complete }, changes };
+    return {
+      result: { changed: true, ...progress, ...promotedField, complete },
+      changes,
+    };
   }
 
   const linksDropped = await ctx.u.cols.dropLegacyLinks();
@@ -410,7 +485,7 @@ export async function layOutAsDrivesCommand(
     linksDropped === 0 &&
     leftovers.length === 0
   ) {
-    return { result: UNCHANGED, changes: [] };
+    return { result: { ...UNCHANGED, ...promotedField }, changes: [] };
   }
   if (options.snapshot) {
     for (const corpusSlug of rootOf.keys()) {
@@ -422,5 +497,8 @@ export async function layOutAsDrivesCommand(
       );
     }
   }
-  return { result: { changed: true, ...progress, complete }, changes };
+  return {
+    result: { changed: true, ...progress, ...promotedField, complete },
+    changes,
+  };
 }

@@ -6,7 +6,8 @@ import type { GraphHandle } from "../handle";
 
 import { findAll } from "./paginate";
 
-// Slugs per `bulkFindByIndex` statement; see `findMany`.
+// Slugs per `bulkFindByIndex` statement. Each input binds several
+// parameters and a Durable Object's SQLite allows 100 per statement.
 const FIND_MANY_CHUNK = 25;
 
 export type DocumentNode = Node<typeof Document>;

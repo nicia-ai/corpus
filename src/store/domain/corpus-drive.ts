@@ -170,9 +170,9 @@ export function byCreation(a: LayoutCorpus, b: LayoutCorpus): number {
   return comparePaths(a.createdAt, b.createdAt) || comparePaths(a.slug, b.slug);
 }
 
-// A document already under a corpus root stays put. Any other goes to the
-// earliest-created corpus that resolved it (ties broken by slug), or to
-// the default corpus when none did, at its existing project path.
+// A document already under a corpus root stays put. A document one corpus
+// resolved goes there; one several resolved goes where it is needed most
+// (see below); one none resolved goes to the default corpus, at its existing project path.
 export function planDriveLayout(
   input: Readonly<{
     corpora: readonly LayoutCorpus[];
@@ -183,14 +183,48 @@ export function planDriveLayout(
   const creationRank = new Map(
     [...input.corpora].sort(byCreation).map((c, rank) => [c.slug, rank]),
   );
-  const placements: LayoutPlacement[] = [];
-  const conflicts: LayoutConflict[] = [];
-  for (const doc of input.documents) {
-    if (doc.homeCorpusSlug !== undefined) continue;
-    const owners = [...new Set(doc.memberOf)]
+  const ownersOf = (doc: LayoutDocument): readonly string[] =>
+    [...new Set(doc.memberOf)]
       .filter((slug) => creationRank.has(slug))
       .sort((a, b) => (creationRank.get(a) ?? 0) - (creationRank.get(b) ?? 0));
-    const [keptIn = input.defaultCorpusSlug, ...droppedFrom] = owners;
+  const pending = input.documents.filter((d) => d.homeCorpusSlug === undefined);
+
+  // A corpus that already holds a page — one placed earlier, or one that is
+  // the only resolver of a page — will not be empty, whatever happens to the
+  // shared pages. Shared pages (several resolvers) are then settled over the
+  // whole project, fewest choices first: each goes to a corpus that would
+  // otherwise have no pages at all, else to the earliest-created resolver.
+  // So two shared pages cannot both leave the one corpus that needed either.
+  const populated = new Set<string>(
+    input.documents.flatMap((d) =>
+      d.homeCorpusSlug === undefined ? [] : [d.homeCorpusSlug],
+    ),
+  );
+  for (const doc of pending) {
+    const owners = ownersOf(doc);
+    if (owners.length === 1) populated.add(owners[0] ?? "");
+  }
+  const kept = new Map<string, string>();
+  const shared = pending
+    .filter((d) => ownersOf(d).length > 1)
+    .sort(
+      (a, b) =>
+        ownersOf(a).length - ownersOf(b).length || comparePaths(a.slug, b.slug),
+    );
+  for (const doc of shared) {
+    const owners = ownersOf(doc);
+    const choice = owners.find((slug) => !populated.has(slug)) ?? owners[0];
+    if (choice === undefined) continue;
+    kept.set(doc.slug, choice);
+    populated.add(choice);
+  }
+
+  const placements: LayoutPlacement[] = [];
+  const conflicts: LayoutConflict[] = [];
+  for (const doc of pending) {
+    const owners = ownersOf(doc);
+    const keptIn = kept.get(doc.slug) ?? owners[0] ?? input.defaultCorpusSlug;
+    const droppedFrom = owners.filter((slug) => slug !== keptIn);
     placements.push({
       documentSlug: doc.slug,
       corpusSlug: keptIn,

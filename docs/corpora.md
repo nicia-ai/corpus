@@ -119,5 +119,9 @@ time they are opened:
 - Each existing corpus keeps its documents, under a root folder for that
   corpus. Each document keeps its path inside it.
 - Documents that were in no corpus move to Drafts.
-- A document that was in two or more corpora stays in the earliest-created
-  one. The activity log records the move.
+- A document that was in two or more corpora goes to one of them: a corpus
+  that would otherwise have no pages if there is one, otherwise the
+  earliest-created. The activity log records where it went.
+- If an agent was connected to the old default corpus, the pages that corpus
+  held become a corpus called **General** and the agent stays connected to
+  it. Pages that were in no corpus stay in Drafts and are never shared.

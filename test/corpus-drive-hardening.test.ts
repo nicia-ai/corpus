@@ -34,6 +34,7 @@ import {
   AUTHOR,
   BETA,
   type LegacyInstance,
+  seedLegacyDirect,
   seedLegacyProject,
   SHARED,
   type Store,
@@ -350,23 +351,23 @@ describe("a project that served its default corpus", () => {
     return { org, store, db };
   }
 
-  it("keeps it served: the pages become a named corpus, the credentials follow, drafts start empty", async () => {
+  it("re-points the credential at an empty General corpus when the default corpus resolved nothing, and drafts stay drafts", async () => {
     const { org, store, db } = await seedBound(true);
 
     const located = new Map(
       (await store.listDocuments()).map((d) => [d.slug, d] as const),
     );
-    const loose = located.get("loose");
-    expect(loose?.corpusSlug).not.toBe(DEFAULT_CORPUS_SLUG);
-    const promoted = asCorpusSlug(loose?.corpusSlug ?? "");
-    expect(await store.corpusMembers(promoted)).toEqual(["loose"]);
-    expect(await store.isDocumentServed(docSlug("loose"))).toBe(true);
-    expect(await store.corpusMembers(DEFAULT_CORPUS_SLUG)).toEqual([]);
-    expect((await store.corpusMeta(promoted)).found).toBe(true);
+    // `loose` was in no corpus: it is a draft, in the default corpus.
+    expect(located.get("loose")?.corpusSlug).toBe(DEFAULT_CORPUS_SLUG);
+    expect(await store.isDocumentServed(docSlug("loose"))).toBe(false);
 
     const rows = await listProjectConnections(db, org.projectId);
-    expect(rows.map((r) => r.corpusSlug)).toEqual([promoted]);
-    // Still resolvable: nothing is left bound to drafts.
+    expect(rows).toHaveLength(1);
+    const promoted = rows[0]?.corpusSlug ?? asCorpusSlug("");
+    expect(promoted).not.toBe(DEFAULT_CORPUS_SLUG);
+    expect((await store.corpusMeta(promoted)).found).toBe(true);
+    // The agent read nothing before and reads nothing after.
+    expect(await store.corpusMembers(promoted)).toEqual([]);
     expect(
       await db
         .select({ id: connection.id })
@@ -688,4 +689,142 @@ describe("bundle import never leaves a live document outside every root", () => 
     }
     expect(members.sort()).toEqual(live.map((d) => d.slug).sort());
   });
+});
+
+describe("the production case: a served default corpus beside many unattached pages", () => {
+  const UNATTACHED = 40;
+  const unattached = Array.from({ length: UNATTACHED }, (_, i) => ({
+    slug: `loose-${String(i)}`,
+    in: [] as string[],
+  }));
+
+  async function seedProduction(
+    resolvedByDefault: readonly string[],
+    batchSize?: number,
+  ) {
+    const org = await createOrg(await signUp("drive-prod"), "Org prod");
+    const store = storeFor(env, org.projectId);
+    await seedLegacyDirect(store, {
+      corpora: [DEFAULT_CORPUS_SLUG],
+      documents: [
+        ...unattached,
+        ...resolvedByDefault.map((slug) => ({
+          slug,
+          in: [DEFAULT_CORPUS_SLUG as string],
+        })),
+      ],
+    });
+    const db = connectControlDb(env.DB);
+    await db.insert(connection).values({
+      organizationId: org.organizationId,
+      projectId: org.projectId,
+      collectionSlug: DEFAULT_CORPUS_SLUG,
+      name: "default",
+      isDefaultForCollection: true,
+    });
+    if (batchSize !== undefined) {
+      await inDo(store, (_s, inst) => {
+        inst.layoutTestSeam.batchSize = batchSize;
+        return Promise.resolve();
+      });
+    }
+    return { org, store, db };
+  }
+
+  async function expectNothingPublished(
+    store: Store,
+    db: ReturnType<typeof connectControlDb>,
+    projectId: Parameters<typeof listProjectConnections>[1],
+    publishedSlugs: readonly string[],
+  ) {
+    const refs = await store.listDocumentRefs();
+    expect(refs).toHaveLength(UNATTACHED + publishedSlugs.length);
+    for (const ref of refs.filter((r) => r.slug.startsWith("loose-"))) {
+      expect(`${ref.slug}: ${ref.corpusSlug}`).toBe(
+        `${ref.slug}: ${DEFAULT_CORPUS_SLUG}`,
+      );
+      expect(await store.isDocumentServed(docSlug(ref.slug))).toBe(false);
+    }
+    const [row] = await listProjectConnections(db, projectId);
+    const bound = row?.corpusSlug ?? asCorpusSlug("");
+    expect(bound).not.toBe(DEFAULT_CORPUS_SLUG);
+    // What the Connection can read is exactly the pages that were resolved
+    // members of the default corpus before: never a draft.
+    expect([...((await store.corpusMembers(bound)) ?? [])].sort()).toEqual(
+      [...publishedSlugs].sort(),
+    );
+  }
+
+  it("zero members: all pages stay in Drafts, the Connection reads an empty General", async () => {
+    const { org, store, db } = await seedProduction([]);
+    expect(await store.listDocumentRefs()).toHaveLength(UNATTACHED);
+    await expectNothingPublished(store, db, org.projectId, []);
+  });
+
+  it("some members: only those are promoted; the unattached pages stay drafts", async () => {
+    const { org, store, db } = await seedProduction(["kept-1", "kept-2"]);
+    expect(await store.listDocumentRefs()).toHaveLength(UNATTACHED + 2);
+    await expectNothingPublished(store, db, org.projectId, [
+      "kept-1",
+      "kept-2",
+    ]);
+  });
+
+  it("survives crashes between batches and after the last one: a retry never promotes drafts", async () => {
+    const { org, store, db } = await seedProduction(["kept-1"], 7);
+    let calls = 0;
+    await inDo(store, (_s, inst) => {
+      inst.layoutTestSeam.afterBatch = () => {
+        calls += 1;
+        // After the first batch, and again after a later batch.
+        if (calls === 1 || calls === 3) throw new Error("simulated crash");
+      };
+      return Promise.resolve();
+    });
+    let failures = 0;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const outcome = await failureOf(store, (i) => i.listDocumentRefs());
+      if (outcome === "no error") break;
+      failures += 1;
+    }
+    expect(failures).toBe(2);
+    await expectNothingPublished(store, db, org.projectId, ["kept-1"]);
+  });
+});
+
+describe("shared pages go where they are needed", () => {
+  const shared = (order: readonly [string, string]) => ({
+    corpora: order,
+    documents: [
+      { slug: "big-1", in: ["big"] },
+      { slug: "big-2", in: ["big"] },
+      { slug: "both", in: ["big", "small"] },
+    ],
+  });
+
+  for (const order of [
+    ["big", "small"],
+    ["small", "big"],
+  ] as const) {
+    it(`a three-page and a one-page corpus sharing one page end with two and one (${order.join(" then ")} created first)`, async () => {
+      const store = freshStore("drive-shared");
+      await seedLegacyDirect(store, shared(order));
+      const refs = await store.listDocumentRefs();
+      const per = (slug: string) =>
+        refs
+          .filter((r) => r.corpusSlug === slug)
+          .map((r) => r.slug)
+          .sort();
+      expect(per("big")).toEqual(["big-1", "big-2"]);
+      expect(per("small")).toEqual(["both"]);
+      const moved = (await store.recentChanges(100)).filter(
+        (c) =>
+          c.eventType === "collection.detached" && c.documentSlug === "both",
+      );
+      expect(moved.map((c) => c.corpusSlug)).toEqual(["big"]);
+      expect(JSON.parse(moved[0]?.afterJson ?? "{}")).toMatchObject({
+        movedTo: "small",
+      });
+    });
+  }
 });
