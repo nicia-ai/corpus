@@ -13,10 +13,10 @@ import {
 import { entitlementsForRequest } from "@/control/entitlements";
 import { resolveProjectById } from "@/control/project-resolution";
 import { storeFor } from "@/control/store-for";
-import { grantAllows, type EmbassyGrant } from "@/embassy/grant";
 import { embassyGoneHtml, embassyPageHtml } from "@/embassy/html";
 import { embassyPath } from "@/embassy/url";
 import { QuotaExceededError } from "@/errors";
+import { grantAllows, type Grant } from "@/grant";
 import { asEmbassyId, callerRefFromEmbassy } from "@/ids";
 import type {
   SaveSharedDraftResult,
@@ -117,11 +117,7 @@ type WritePrep =
 
 // Agents read the 403 body; an edit link the owner switched to review must
 // say where the change goes now instead.
-function forbidden(
-  c: EnvC,
-  held: EmbassyGrant,
-  needed: EmbassyGrant,
-): Response {
+function forbidden(c: EnvC, held: Grant, needed: Grant): Response {
   if (needed === "edit" && held === "suggest") {
     return c.text(
       "edit access withdrawn: the owner asked to review changes. POST the full proposed markdown to this URL + /suggest instead.",
@@ -131,7 +127,7 @@ function forbidden(
   return c.text("forbidden", 403);
 }
 
-async function prepareWrite(c: EnvC, needed: EmbassyGrant): Promise<WritePrep> {
+async function prepareWrite(c: EnvC, needed: Grant): Promise<WritePrep> {
   const row = await liveEmbassy(c, c.req.param("token"));
   if (row === undefined)
     return { ok: false, response: c.text("not found", 404) };
@@ -157,7 +153,7 @@ async function prepareWrite(c: EnvC, needed: EmbassyGrant): Promise<WritePrep> {
 async function claimWrite(
   c: EnvC,
   prep: Extract<WritePrep, { ok: true }>,
-  needed: EmbassyGrant,
+  needed: Grant,
 ): Promise<Response | undefined> {
   const reserved = await reserveEmbassyWrite(prep.db, {
     id: prep.row.id,

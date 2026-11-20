@@ -111,6 +111,27 @@ export type SaveSharedSectionResult =
 export type CreateInCorpusResult =
   SaveResult | Readonly<{ ok: false; forbidden: true }>;
 
+// A new document created at a corpus-relative path with a server-derived
+// slug (the REST create): the slug it got, or why nothing was written.
+export type CreateAtPathResult = Readonly<
+  | { ok: true; slug: string; docVersion: number }
+  | Exclude<CreateInCorpusResult, { ok: true }>
+>;
+
+// Removing a document from a corpus by archiving it.
+export type ArchiveInCorpusResult = Readonly<
+  | { ok: true }
+  | { ok: false; notFound: true }
+  | { ok: false; conflict: true; currentVersion: number }
+>;
+
+// Moving a document to another path of its own corpus.
+export type MoveToPathResult = Readonly<
+  | { ok: true; changed: boolean }
+  | { ok: false; notFound: true }
+  | { ok: false; segmentCollision: true }
+>;
+
 // A live document's place: the corpus it is in and its path inside that
 // corpus. `folderSlug` is null when it sits directly in the corpus root.
 export type DocumentLocation = Readonly<{

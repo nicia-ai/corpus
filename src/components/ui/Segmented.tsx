@@ -36,14 +36,25 @@ export function Segmented<T extends string>({
   value,
   onChange,
   ariaLabel,
+  activation = "automatic",
 }: Readonly<{
   options: readonly Option<T>[];
   value: T;
   onChange: (next: T) => void;
   ariaLabel: string;
+  // "manual" moves focus with the arrow keys and changes the value only on
+  // Space/Enter, for a control whose change is a server write.
+  activation?: "automatic" | "manual";
 }>): React.ReactElement {
   const handleKey = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
-    const index = options.findIndex((option) => option.value === value);
+    const index =
+      activation === "manual"
+        ? Array.from(
+            event.currentTarget.parentElement?.querySelectorAll(
+              'button[role="tab"]',
+            ) ?? [],
+          ).indexOf(event.currentTarget)
+        : options.findIndex((option) => option.value === value);
     if (index < 0) return;
     const last = options.length - 1;
     const next = nextOptionIndex(event.key, index, last);
@@ -51,7 +62,7 @@ export function Segmented<T extends string>({
     const option = options[next];
     if (option === undefined) return;
     event.preventDefault();
-    if (next !== index) onChange(option.value);
+    if (activation === "automatic" && next !== index) onChange(option.value);
     event.currentTarget.parentElement
       ?.querySelectorAll<HTMLButtonElement>('button[role="tab"]')
       [next]?.focus();

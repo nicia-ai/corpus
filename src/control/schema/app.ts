@@ -7,7 +7,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-import { EMBASSY_GRANTS } from "../../embassy/grant";
+import { GRANTS } from "../../grant";
 
 import { organization, user } from "./better-auth";
 
@@ -122,6 +122,12 @@ export const apiKey = sqliteTable(
     name: text("name").notNull(),
     tokenHash: text("token_hash").notNull(),
     tokenPrefix: text("token_prefix").notNull(),
+    // What this credential may do to its corpus: the same read < suggest < edit
+    // rule a share link carries. It lives on the key, not the Connection, because
+    // a Connection also serves OAuth/MCP credentials and may hold several keys
+    // of different power (a read-only CI key beside an editing one). Rows
+    // written before grants existed keep today's behavior: edit.
+    grant: text("grant", { enum: GRANTS }).notNull().default("edit"),
     createdAt,
   },
   (t) => [uniqueIndex("api_key_token_hash_idx").on(t.tokenHash)],
@@ -226,7 +232,7 @@ export const embassy = sqliteTable(
       .references(() => project.id, { onDelete: "cascade" }),
     documentSlug: text("document_slug").notNull(),
     label: text("label").notNull().default("Shared link"),
-    grant: text("grant", { enum: EMBASSY_GRANTS }).notNull(),
+    grant: text("grant", { enum: GRANTS }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
     fetchCount: integer("fetch_count").notNull().default(0),

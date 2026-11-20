@@ -101,3 +101,83 @@ that every relevant agent connects to. Volatile specifics
 (`q3-migration-plan`) belong in the corpus of the team doing that work.
 When the work is done, move the document into Drafts, or into an archive
 corpus, without deleting its history.
+
+## Round trip a git repository through CI
+
+Teams keep the markdown their agents read in a git repository that engineers
+and their agents also edit. Two CI jobs keep it and Corpus in step, using one
+directory (`agent-docs` below) and one key per corpus. Use a `suggest` key if
+changes made in git should be reviewed in Corpus before they land (recommended),
+or an `edit` key to apply them directly. See [Grants](./cli.md#grants).
+
+**On every merge to the main branch**, send the repository's changes to Corpus:
+
+```sh
+npm install --global @nicia-ai/corpus-cli
+# CORPUS_URL and CORPUS_API_KEY come from the CI system's secret store.
+corpus push --all agent-docs
+```
+
+**On a schedule** (say every 15 minutes), bring Corpus's changes into the
+repository and commit them:
+
+```sh
+corpus pull --all agent-docs
+git add agent-docs
+if ! git diff --cached --quiet; then
+  git commit -m "Sync from Corpus"
+  git push
+fi
+```
+
+In GitHub Actions (checkout and Node setup omitted):
+
+```yaml
+on:
+  push:
+    branches: [main]
+    paths: ["agent-docs/**"]
+  schedule:
+    - cron: "*/15 * * * *"
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    env:
+      CORPUS_URL: ${{ secrets.CORPUS_URL }}
+      CORPUS_API_KEY: ${{ secrets.CORPUS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --global @nicia-ai/corpus-cli
+      - if: github.event_name == 'push'
+        run: corpus push --all agent-docs
+      - if: github.event_name == 'schedule'
+        run: |
+          corpus pull --all agent-docs
+          git add agent-docs
+          git diff --cached --quiet || {
+            git -c user.name=corpus-sync -c user.email=corpus-sync@users.noreply.github.com commit -m "Sync from Corpus"
+            git push
+          }
+```
+
+How it behaves:
+
+- Exit `2` means a conflict: someone changed the same file on both sides. The
+  job fails so a person can resolve it; everything else was applied.
+- With a `suggest` key, the push step reports each proposal and a link to
+  review it; a person applies it in Corpus, and the next scheduled pull brings
+  it back (the file you edited is already identical, so it just becomes synced).
+  A pushed change is not filed twice.
+- A rejected proposal leaves your edit in the repository. Revert it in git, or
+  run `corpus pull --all --overwrite agent-docs` once to take Corpus's version.
+- With a `suggest` key, deleting a file in git cannot be proposed, and the next
+  scheduled pull will restore it. Archive documents in Corpus, or use an `edit`
+  key for jobs that must propagate deletions.
+
+Not supported: images or other non-markdown content (ignored and listed); Corpus
+writing to git (it never does); merging two sides' edits to one file; renaming
+and editing a file in one commit while keeping history (that becomes an archive
+plus a new document); more than one corpus per directory.

@@ -57,6 +57,8 @@ describe("credential resolves to a Connection", () => {
       corpusSlug: conn.corpusSlug,
       // api_key.id populated for namespaced CallerRef construction.
       apiKeyId: expect.any(String),
+      // A key minted without a grant behaves as it always did.
+      apiKeyGrant: "edit",
     });
   });
 

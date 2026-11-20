@@ -21,10 +21,15 @@
     "sourceMap": false
   },
   "include": [
+    "checkout-guard.ts",
     "config.ts",
     "config-path.ts",
     "core.ts",
     "corpus.ts",
+    "grant.ts",
+    "http.ts",
+    "push-all.ts",
+    "rest-write.ts",
     "mcp-add.ts",
     "errors.ts",
     "sync.ts",

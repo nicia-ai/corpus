@@ -68,6 +68,11 @@ import {
   updateCorpusCommand,
 } from "./project-store/commands/corpora";
 import {
+  archiveDocumentInCorpusCommand,
+  createDocumentAtPathCommand,
+  moveDocumentToPathCommand,
+} from "./project-store/commands/corpus-documents";
+import {
   corpusOfDocument,
   corpusTreeChanged,
 } from "./project-store/commands/corpus-tree";
@@ -131,7 +136,9 @@ import {
 import { checkedPathSegments } from "./project-store/commands/untrusted-path";
 import type {
   CorpusFolderView,
+  ArchiveInCorpusResult,
   CorpusOutline,
+  CreateAtPathResult,
   CreateInCorpusResult,
   DeleteCorpusInput,
   DeleteCorpusResult,
@@ -149,6 +156,7 @@ import type {
   ImportResult,
   ImportSummary,
   MoveDocumentsResult,
+  MoveToPathResult,
   ProjectUsageSnapshot,
   ReapResult,
   RenameDocumentInput,
@@ -1274,6 +1282,97 @@ export class ProjectStore extends DurableObject<Env> {
         : { ok: true, docVersion: outcome.result.docVersion };
     } catch (err) {
       return this.saveError(err, input);
+    }
+  }
+
+  // The REST create for a document with no slug yet: the slug is derived
+  // here (inside the write, steering around every taken slug) from the
+  // corpus-relative `path`, which also places it. Used where the caller has
+  // no business inventing slugs, e.g. a whole-checkout push of new files.
+  async createDocumentAtPath(
+    input: Pick<SaveDocumentInput, "markdown" | "title" | "changedBy">,
+    corpusSlug: CorpusSlug,
+    path: string,
+  ): Promise<CreateAtPathResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand(now, (ctx) =>
+        createDocumentAtPathCommand(ctx, { ...input, corpusSlug, path }),
+      );
+      return outcome.result.ok
+        ? {
+            ok: true,
+            slug: outcome.result.slug,
+            docVersion: outcome.result.docVersion,
+          }
+        : { ok: false, forbidden: true };
+    } catch (err) {
+      // A fresh derived slug cannot be a version race, so only the creation
+      // refusals are results; anything else is a real fault.
+      if (err instanceof RollbackProbe) return { ok: false, rolledBack: true };
+      if (err instanceof FilenameCollision) {
+        return { ok: false, segmentCollision: true };
+      }
+      if (err instanceof MarkdownTooLarge) return { ok: false, tooLarge: true };
+      throw err;
+    }
+  }
+
+  // Remove a document from the bound corpus by archiving it, refusing when
+  // it moved past `clientVersion`. A document outside the corpus reads as
+  // `notFound`, exactly like one that does not exist.
+  async archiveDocumentInCorpus(
+    slug: DocumentSlug,
+    corpusSlug: CorpusSlug,
+    clientVersion: number,
+    changedBy: string,
+  ): Promise<ArchiveInCorpusResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand(now, (ctx) =>
+        archiveDocumentInCorpusCommand(ctx, {
+          slug,
+          corpusSlug,
+          clientVersion,
+          changedBy,
+        }),
+      );
+      return outcome.result.archived
+        ? { ok: true }
+        : { ok: false, notFound: true };
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        return {
+          ok: false,
+          conflict: true,
+          currentVersion: err.currentVersion,
+        };
+      }
+      throw err;
+    }
+  }
+
+  // Move a document to a corpus-relative path inside its own corpus,
+  // keeping its history. Atomic: a name already taken there changes nothing.
+  async moveDocumentToPath(
+    slug: DocumentSlug,
+    corpusSlug: CorpusSlug,
+    path: string,
+    changedBy: string,
+  ): Promise<MoveToPathResult> {
+    const now = new Date().toISOString();
+    try {
+      const outcome = await this.writeCommand(now, (ctx) =>
+        moveDocumentToPathCommand(ctx, { slug, corpusSlug, path, changedBy }),
+      );
+      return outcome.result.ok
+        ? { ok: true, changed: outcome.result.changed }
+        : { ok: false, notFound: true };
+    } catch (err) {
+      if (err instanceof FilenameCollision) {
+        return { ok: false, segmentCollision: true };
+      }
+      throw err;
     }
   }
 
