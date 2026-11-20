@@ -192,6 +192,23 @@ export const adminAudit = sqliteTable(
   (t) => [index("admin_audit_created_at_idx").on(t.createdAt)],
 );
 
+// Latest structural stats snapshot per project (counts only, computed
+// inside the ProjectStore DO; see store/domain/project-stats.ts). One row
+// per project, upserted by the daily refresh and the admin "refresh now".
+// `statsJson` + `schemaVersion` describe the last SUCCESSFUL computation
+// (`computedAt`); a failed attempt keeps them and records `errorKind` and
+// `attemptedAt` instead, so one broken project never erases its history.
+export const projectStats = sqliteTable("project_stats", {
+  projectId: text("project_id")
+    .primaryKey()
+    .references(() => project.id, { onDelete: "cascade" }),
+  schemaVersion: integer("schema_version").notNull(),
+  statsJson: text("stats_json"),
+  computedAt: integer("computed_at", { mode: "timestamp_ms" }),
+  attemptedAt: integer("attempted_at", { mode: "timestamp_ms" }).notNull(),
+  errorKind: text("error_kind"),
+});
+
 // Cross-tenant document handshake. The unguessable `id` is the path
 // segment on `/s/:id` (share-link pattern — owner can recopy). There is
 // NO FK to the Document: documents live in the per-Project DO, so
@@ -225,4 +242,5 @@ export type Connection = Readonly<typeof connection.$inferSelect>;
 export type ApiKey = Readonly<typeof apiKey.$inferSelect>;
 export type PendingConnect = Readonly<typeof pendingConnect.$inferSelect>;
 export type AdminAudit = Readonly<typeof adminAudit.$inferSelect>;
+export type ProjectStatsRow = Readonly<typeof projectStats.$inferSelect>;
 export type Embassy = Readonly<typeof embassy.$inferSelect>;

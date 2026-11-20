@@ -11,6 +11,10 @@ import {
   QuotaExceededError,
 } from "./control/entitlements";
 import { reconcileRetention } from "./control/project-reconciliation";
+import {
+  isStatsRefreshTick,
+  refreshAllProjectStats,
+} from "./control/project-stats";
 import { storeFor } from "./control/store-for";
 import type {
   EventAppendInput,
@@ -86,17 +90,21 @@ export default {
     return fetchWithContext(request, env, executionContext);
   },
 
-  // Cron entry (wrangler.jsonc `triggers.crons`): the control-plane and
-  // data-plane retention sweeps. Each is isolated so one failing does
-  // not abort the other.
+  // Cron entry (wrangler.jsonc `triggers.crons`, hourly): the control-plane
+  // and data-plane retention sweeps, plus the structural stats refresh on
+  // the one tick a day it is due. Each is isolated so one failing does not
+  // abort the others.
   async scheduled(
-    _controller: ScheduledController,
+    controller: ScheduledController,
     env: Env,
     _executionContext: ExecutionContext,
   ): Promise<void> {
     const results = await Promise.allSettled([
       reconcileControlPlane(env),
       reconcileRetention(env),
+      isStatsRefreshTick(controller.scheduledTime)
+        ? refreshAllProjectStats(env)
+        : Promise.resolve(),
     ]);
     for (const r of results) {
       if (r.status === "rejected") console.error("[scheduled] sweep", r.reason);
