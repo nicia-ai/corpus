@@ -3,6 +3,7 @@ import { ChevronRight, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { AgentPromptSection } from "@/components/corpus/AgentPromptSection";
+import { GitMirrorSection } from "@/components/corpus/GitMirrorSection";
 import { Field } from "@/components/Field";
 import { BackLink } from "@/components/ui/BackLink";
 import { Button } from "@/components/ui/Button";
@@ -35,6 +36,7 @@ import {
   revokeApiKey,
 } from "@/lib/server/api-keys";
 import type { CorpusMetaResult } from "@/lib/server/corpora";
+import type { GitMirrorStatus } from "@/lib/server/git-mirror";
 import type { Role } from "@/lib/server/team.functions";
 
 const KEY = "<YOUR_API_KEY>";
@@ -167,6 +169,7 @@ export function McpSetupPage({
   url,
   connection,
   col,
+  mirror,
 }: Readonly<{
   projectId: ProjectId;
   role: Role;
@@ -174,6 +177,9 @@ export function McpSetupPage({
   url: string;
   connection: ConnectionKeysView | undefined;
   col: CorpusMetaResult | undefined;
+  // Undefined on the generic page; `{ enabled: false }` when the server has
+  // no Git mirror, which hides the section.
+  mirror: GitMirrorStatus | undefined;
 }>): React.ReactElement {
   const [auth, setAuth] = useState<Auth>("oauth");
   const [toolId, setToolId] = useState<string>(TOOLS[0]?.id ?? "");
@@ -397,6 +403,29 @@ export function McpSetupPage({
             projectId={projectId}
             connection={connection}
             isOwner={isOwner}
+          />
+        </CollapsibleSection>
+      )}
+
+      {/* A read-only Git clone of the corpus, for agents that work with
+          files. Only when the server has a mirror. */}
+      {mode.kind === "corpus" && mirror?.enabled === true && (
+        <CollapsibleSection
+          className="mt-6"
+          title="Clone with Git"
+          description={
+            <>
+              A read-only Git mirror of the{" "}
+              <code className="font-mono">{mode.slug}</code> corpus.
+              Authenticated with the API key above, through the CLI.
+            </>
+          }
+        >
+          <GitMirrorSection
+            projectId={projectId}
+            corpusSlug={mode.slug}
+            isOwner={isOwner}
+            status={mirror}
           />
         </CollapsibleSection>
       )}

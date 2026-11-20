@@ -5,8 +5,13 @@ import { type ApiKeyScope, apiKeyScope } from "./api-scope";
 import { ValidationError } from "./errors";
 import { type Grant, grantAllows } from "./grant";
 import { asDocumentSlug } from "./ids";
+import {
+  MIRROR_NOT_ENABLED_MESSAGE,
+  MIRROR_NOT_READY_MESSAGE,
+} from "./mirror/errors";
 import { checkedPathSegments } from "./project-store/commands/untrusted-path";
 import { proposalReviewUrl } from "./proposal-review-url";
+import { MIRROR_BRANCH } from "./store/domain/git-mirror";
 import { NEW_DOCUMENT_SLUG } from "./store/domain/paths";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "./util";
 
@@ -454,4 +459,38 @@ export const docsRoutes = new Hono<{ Bindings: Env }>()
       return c.json({ ok: false, segmentCollision: true }, 409);
     }
     return c.json({ error: "not found" }, 404);
+  })
+
+  // A short-lived READ-ONLY credential for cloning the key's corpus from its
+  // mirror repository: cloning is reading, so any grant passes. The API key
+  // is exchanged for an Artifacts token scoped to that one repository; a
+  // write token is never issued.
+  .post("/api/v1/git/token", async (c) => {
+    const scope = await apiKeyScope(c);
+    if (scope instanceof Response) return scope;
+    const refused = refuseBelow(c, scope, "read", "clone the Git mirror");
+    if (refused !== undefined) return refused;
+    const access = await scope.store.gitCloneAccess(scope.ref.corpusSlug);
+    if (access.ok) {
+      return c.json({
+        remote: access.remote,
+        corpus: scope.ref.corpusSlug,
+        branch: MIRROR_BRANCH,
+        token: access.token,
+        expiresAt: access.expiresAt,
+        current: access.current,
+      });
+    }
+    if (access.reason === "not-ready") {
+      return c.json({ error: MIRROR_NOT_READY_MESSAGE }, 409);
+    }
+    return c.json(
+      {
+        error:
+          access.reason === "not-enabled"
+            ? MIRROR_NOT_ENABLED_MESSAGE
+            : "not found",
+      },
+      404,
+    );
   });

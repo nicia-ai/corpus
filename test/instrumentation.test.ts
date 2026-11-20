@@ -13,7 +13,7 @@ import {
 
 import { colSlug, docSlug, freshProject } from "./_helpers";
 
-// The wedge integration test. Real DO+D1 (vitest-pool-workers). No
+// The wedge integration test. Real DO+D1 (vitest-plugin). No
 // mocked seams. Proves the end-to-end chain:
 //   ProjectStore mutation → atomic local change_events row
 //                         → cross-DO EventLogStore.append

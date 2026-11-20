@@ -107,7 +107,7 @@ Other commands:
 | Command                                                        | What it does                                     |
 | -------------------------------------------------------------- | ------------------------------------------------ |
 | `pnpm build`                                                   | Production build (`vite build`)                  |
-| `pnpm test`                                                    | Full suite — vitest-pool-workers, real DO + D1   |
+| `pnpm test`                                                    | Full suite — vitest-plugin, real DO + D1         |
 | `pnpm typecheck`                                               | `wrangler types` then `tsc --noEmit`             |
 | `pnpm lint` / `pnpm format`                                    | ESLint / Prettier                                |
 | `pnpm auth:schema`                                             | Regenerate the Better Auth Drizzle schema        |
@@ -142,7 +142,7 @@ src/
   graph.ts             TypeGraph schema: Document + Corpus + Folder
   mcp.ts               MCP JSON-RPC surface
   errors.ts util.ts
-test/                  vitest-pool-workers suites (real bindings)
+test/                  vitest-plugin suites (real bindings)
 drizzle/               Generated D1 migrations (single clean baseline)
 drizzle-do/            Generated ProjectStore ledger migrations
 drizzle-event-log/     Generated EventLogStore migrations
@@ -181,6 +181,11 @@ Bindings (in `wrangler.jsonc`, not env vars):
   invite emails. Configure it as a binding named `EMAIL` with
   `EMAIL_FROM`; if it is absent, Corpus can use Resend or copy-link
   fallback.
+- Optional `ARTIFACTS` — Cloudflare Artifacts binding that turns on the
+  read-only Git mirror of each served corpus ([docs/git-mirror.md](docs/git-mirror.md)).
+  Absent by default: the feature is off. To enable it add
+  `"artifacts": [{ "binding": "ARTIFACTS", "namespace": "<name>" }]` to the
+  top level of `wrangler.jsonc` and deploy; there is no secret to set.
 
 ## Self-hosting
 

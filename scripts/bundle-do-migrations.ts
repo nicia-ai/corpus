@@ -1,7 +1,7 @@
 // Post-step of `pnpm db:generate:do`. drizzle-kit (driver:
 // "durable-sqlite") emits a `migrations.js` that text-imports the raw
 // `.sql` — that needs a bundler loader (wrangler Text rule) and is
-// untyped JS, fragile across this repo's vite / vitest-pool-workers /
+// untyped JS, fragile across this repo's vite / vitest-plugin /
 // wrangler toolchains. Instead we emit a self-contained, typed
 // `drizzle-do/migrations.ts` with the SQL inlined: zero loader
 // dependency, identical in every environment, generated verbatim and

@@ -93,7 +93,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.60.0",
-    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/vitest-plugin": "1.8.5",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/mdast": "^4.0.4",
@@ -112,7 +112,6 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "fast-check": "^4.10.2",
     "globals": "^17.12.0",
-    "miniflare": "^4.20260730.0",
     "prettier": "^3.9.9",
     "tsx": "^4.23.15",
     "typegraph-prev": "npm:@nicia-ai/typegraph@0.66.0",
@@ -120,6 +119,6 @@
     "typescript-eslint": "^8.70.1",
     "vite": "^8.3.1",
     "vitest": "^4.1.11",
-    "wrangler": "^4.139.0"
+    "wrangler": "4.166.0"
   }
 }

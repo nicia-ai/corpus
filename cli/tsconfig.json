@@ -32,6 +32,7 @@
     "rest-write.ts",
     "mcp-add.ts",
     "errors.ts",
+    "git.ts",
     "sync.ts",
     "sync-state.ts"
   ]
