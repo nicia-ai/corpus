@@ -13,7 +13,7 @@ repos, gists, Notion, and laptops, every agent carries its own drifting
 copy, and no one can see the full set. Corpus is **not a prompt manager,
 not a vector database, and not a RAG pipeline** — it's the documents you
 already have, made shared and versioned. Non-engineers author and curate
-them, group them into ordered **corpora**, and agents consume those
+them, group them into **corpora**, and agents consume those
 corpora over MCP with per-project OAuth/API-key isolation: an agent
 only ever sees the project its credential resolves to.
 
@@ -27,9 +27,9 @@ corpora, and folders.
 That document/corpus/folder model is built on
 **[TypeGraph](https://typegraph.dev)**, our open-source typed-graph
 library — Corpus's sibling in the knowledge stack (TypeGraph for
-structure, Corpus for context). Because documents are graph nodes shared
-across corpora by reference rather than copied, one edit updates
-every corpus, and every agent that reads it, at once. TypeGraph's
+structure, Corpus for context). Because a corpus and its documents are one
+graph, one approved edit reaches every agent that reads that corpus at
+once. TypeGraph's
 node-unique `(slug, docVersion)` constraint gives optimistic-concurrency
 conflict detection for free: a racing save becomes a 409 conflict, never
 a lost write. The same graph underpins the verifiable, append-only
@@ -47,8 +47,8 @@ version history.
   restored from. General document review stays off MCP and the full review
   layer stays out of the bundle; an originating agent can only retrieve and
   reply inside its own proposal.
-- **Corpora** — an ordered set of documents assembled into one
-  corpus, with a token-size estimate so you can see when a corpus is
+- **Corpora** — a set of documents an agent reads as one body of
+  knowledge, with a token-size estimate so you can see when a corpus is
   too large for an agent to use well.
 - **MCP** — each project exposes an MCP endpoint (`/mcp`) authenticated
   by OAuth bearer token or `cck_`-prefixed API key. An agent only ever

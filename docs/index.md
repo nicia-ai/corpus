@@ -13,8 +13,8 @@ person accepts change by change, and `corpus pull --all` to land the approved
 files in your repository.
 
 You write documents in a web editor — coding standards, architecture
-notes, API conventions, runbooks, product decisions — group them into an
-ordered **corpus**, and point your agent at that corpus over
+notes, API conventions, runbooks, product decisions — group them into a
+**corpus**, and point your agent at that corpus over
 [MCP](https://modelcontextprotocol.io). Every agent on that corpus reads
 the same source of truth, and you update it without touching a repo.
 
@@ -42,9 +42,9 @@ Three concepts, in order:
 1. **Document** — one markdown file. It has a stable slug, a title, and
    an append-only version history. Editing it in the browser creates a
    new version; nothing is ever silently overwritten.
-2. **Corpus** — an ordered list of documents, assembled into a single
-   body of markdown. This is the unit an agent consumes. A document can
-   belong to many corpora.
+2. **Corpus** — a set of documents, assembled into a single body of
+   markdown. This is the unit an agent consumes. An agent that needs more
+   than one body of knowledge connects to more than one corpus.
 3. **MCP endpoint** — one URL per project. An agent that authenticates
    to it can list your corpora and read their assembled markdown (and
    individual documents). Agents never write canonically — the most an

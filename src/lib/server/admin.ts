@@ -1,15 +1,26 @@
 import { createServerFn } from "@tanstack/react-start";
-import { count, desc, eq, ne } from "drizzle-orm";
+import { and, count, desc, eq, ne } from "drizzle-orm";
+import { z } from "zod";
 
 import { connectControlDb, type ControlDb } from "@/control/db";
-import { account, member, organization, project, user } from "@/control/schema";
+import { parseStoredStats, refreshProjectStats } from "@/control/project-stats";
+import {
+  account,
+  adminAudit,
+  member,
+  organization,
+  project,
+  projectStats,
+  user,
+} from "@/control/schema";
 import { storeFor } from "@/control/store-for";
-import { ForbiddenError, UnauthorizedError } from "@/errors";
+import { ForbiddenError, UnauthorizedError, ValidationError } from "@/errors";
 import { asProjectId } from "@/ids";
 import {
   assertServerContext as srv,
   type ServerRequestContext,
 } from "@/lib/server-context";
+import type { ProjectStats } from "@/store/domain/project-stats";
 
 // — Platform-admin gate ———————————————————————————————————————————
 // Product-wide visibility, NOT org ownership. The gate is the platform
@@ -27,7 +38,7 @@ export type AdminContext = Readonly<{
 // Reads the request-scoped session (resolved once by sessionRequestMiddleware)
 // rather than re-resolving it — every admin server fn would otherwise pay a
 // second getSession per call.
-function requireSiteAdmin(c: ServerRequestContext): AdminContext {
+export function requireSiteAdmin(c: ServerRequestContext): AdminContext {
   const u = c.authSession?.user;
   if (u === undefined) {
     throw new UnauthorizedError("Sign in required.");
@@ -207,3 +218,104 @@ export const adminListProjects = createServerFn({ method: "GET" }).handler(
     return { projects, truncatedAt };
   },
 );
+
+// — Structural project stats ——————————————————————————————————————
+// Snapshots are computed in each project's DO (counts only) and stored in
+// D1 by the daily cron; this surface reads them (one D1 query, no DO
+// fan-out) and can recompute a single project on demand.
+
+export const ADMIN_ACTION_REFRESH_PROJECT_STATS = "project.stats_refresh";
+const PROJECT_STATS_LIST_CAP = 200;
+
+export type AdminProjectStatsRow = Readonly<{
+  projectId: string;
+  name: string;
+  organizationName: string;
+  status: string;
+  // Last successful computation; null if none has succeeded yet.
+  computedAt: number | null;
+  attemptedAt: number | null;
+  errorKind: string | null;
+  // Null when never computed, or stored under an older schema version.
+  stats: ProjectStats | null;
+}>;
+
+export const adminListProjectStats = createServerFn({
+  method: "GET",
+}).handler(async ({ context }): Promise<AdminProjectStatsRow[]> => {
+  const c = srv(context);
+  requireSiteAdmin(c);
+  const rows = await connectControlDb(c.env.DB)
+    .select({
+      projectId: project.id,
+      name: project.name,
+      organizationName: organization.name,
+      status: project.status,
+      schemaVersion: projectStats.schemaVersion,
+      statsJson: projectStats.statsJson,
+      computedAt: projectStats.computedAt,
+      attemptedAt: projectStats.attemptedAt,
+      errorKind: projectStats.errorKind,
+    })
+    .from(project)
+    .leftJoin(organization, eq(organization.id, project.organizationId))
+    .leftJoin(projectStats, eq(projectStats.projectId, project.id))
+    .where(ne(project.status, "deleted"))
+    .orderBy(desc(project.createdAt))
+    .limit(PROJECT_STATS_LIST_CAP);
+  return rows.map((r) => ({
+    projectId: r.projectId,
+    name: r.name,
+    organizationName: r.organizationName ?? "—",
+    status: r.status,
+    computedAt: r.computedAt?.getTime() ?? null,
+    attemptedAt: r.attemptedAt?.getTime() ?? null,
+    errorKind: r.errorKind,
+    stats:
+      r.schemaVersion === null
+        ? null
+        : (parseStoredStats({
+            schemaVersion: r.schemaVersion,
+            statsJson: r.statsJson,
+          }) ?? null),
+  }));
+});
+
+export type AdminRefreshResult = Readonly<
+  { ok: true } | { ok: false; errorKind: string }
+>;
+
+// Gate + recompute + audit, separate from the server-fn wrapper so the
+// gate and the audit row are testable without the TanStack runtime.
+export async function refreshProjectStatsAsAdmin(
+  c: ServerRequestContext,
+  projectId: string,
+): Promise<AdminRefreshResult> {
+  const admin = requireSiteAdmin(c);
+  const db = connectControlDb(c.env.DB);
+  const [target] = await db
+    .select({ id: project.id })
+    .from(project)
+    .where(and(eq(project.id, projectId), ne(project.status, "deleted")));
+  if (target === undefined) throw new ValidationError("Unknown project.");
+  const outcome = await refreshProjectStats(c.env, asProjectId(target.id));
+  await db.insert(adminAudit).values({
+    actorUserId: admin.id,
+    action: ADMIN_ACTION_REFRESH_PROJECT_STATS,
+    targetType: "project",
+    targetId: target.id,
+    metadata: JSON.stringify({
+      ok: outcome.ok,
+      ...(outcome.ok ? {} : { errorKind: outcome.errorKind }),
+    }),
+  });
+  return outcome.ok
+    ? { ok: true }
+    : { ok: false, errorKind: outcome.errorKind };
+}
+
+export const adminRefreshProjectStats = createServerFn({ method: "POST" })
+  .validator(z.object({ projectId: z.string().min(1) }))
+  .handler(({ data, context }): Promise<AdminRefreshResult> =>
+    refreshProjectStatsAsAdmin(srv(context), data.projectId),
+  );
