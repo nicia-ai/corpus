@@ -10,7 +10,10 @@ import {
   entitlementsOf,
   QuotaExceededError,
 } from "./control/entitlements";
-import { reconcileRetention } from "./control/project-reconciliation";
+import {
+  reconcileDriveLayout,
+  reconcileRetention,
+} from "./control/project-reconciliation";
 import {
   isStatsRefreshTick,
   refreshAllProjectStats,
@@ -102,9 +105,14 @@ export default {
     const results = await Promise.allSettled([
       reconcileControlPlane(env),
       reconcileRetention(env),
+      // The daily tick lays every project out before counting it, so the
+      // stats describe the drive shape. Other ticks only repair projects
+      // whose agent is locked out by a default-corpus binding.
       isStatsRefreshTick(controller.scheduledTime)
-        ? refreshAllProjectStats(env)
-        : Promise.resolve(),
+        ? reconcileDriveLayout(env, "all").then(() =>
+            refreshAllProjectStats(env),
+          )
+        : reconcileDriveLayout(env, "default-bound"),
     ]);
     for (const r of results) {
       if (r.status === "rejected") console.error("[scheduled] sweep", r.reason);
