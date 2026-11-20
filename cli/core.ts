@@ -1,5 +1,18 @@
 import { z } from "zod";
 
+import { CliError } from "./errors.js";
+import {
+  type CorpusIdentity,
+  parseState,
+  serializeState,
+  sha256Hex,
+  stateCandidates,
+  type SyncState,
+  type TrackedFile,
+} from "./sync-state.js";
+
+export { CliError, type CliErrorKind } from "./errors.js";
+
 // Portable Corpus CLI core: the list / pull / push logic over the api-key
 // REST surface (`/api/v1/docs`), with ZERO runtime-specific imports. It
 // speaks only the web `fetch` standard and a tiny injected filesystem
@@ -24,6 +37,12 @@ export type Files = Readonly<{
   writeText: (path: string, data: string) => Promise<void>;
 }>;
 
+// The filesystem a whole-corpus sync needs: `Files` plus deletion. Writing
+// a nested path must create its parent folders; removing an absent path is
+// not an error.
+export type TreeFiles = Files &
+  Readonly<{ remove: (path: string) => Promise<void> }>;
+
 export type CorpusConfig = Readonly<{
   baseUrl: string;
   apiKey: string;
@@ -31,12 +50,21 @@ export type CorpusConfig = Readonly<{
   files: Files;
 }>;
 
+export type SyncConfig = Readonly<
+  Omit<CorpusConfig, "files"> & { files: TreeFiles }
+>;
+
 const DocSummarySchema = z.object({
   slug: z.string(),
   title: z.string(),
   docVersion: z.number(),
+  // Absent from servers that predate whole-corpus sync.
+  path: z.string().optional(),
 });
-const DocListSchema = z.object({ documents: z.array(DocSummarySchema) });
+const DocListSchema = z.object({
+  corpus: z.object({ projectId: z.string(), slug: z.string() }).optional(),
+  documents: z.array(DocSummarySchema),
+});
 const DocFullSchema = z.object({
   slug: z.string(),
   title: z.string(),
@@ -62,25 +90,6 @@ export type DocFull = Readonly<z.infer<typeof DocFullSchema>>;
 export type DoctorResult = Readonly<{
   documentCount: number;
 }>;
-
-// A failure the Node shell maps to a message + exit code. `kind`
-// classifies it; `detail` carries the structured fields the shell may want
-// (HTTP status, the server's current version on a conflict).
-export type CliErrorKind = "not-found" | "conflict" | "http" | "mismatch";
-
-export class CliError extends Error {
-  constructor(
-    readonly kind: CliErrorKind,
-    message: string,
-    readonly detail: Readonly<{
-      status?: number;
-      currentVersion?: number;
-    }> = {},
-  ) {
-    super(message);
-    this.name = "CliError";
-  }
-}
 
 // Where a document's version sidecar lives, given its markdown file path.
 export function sidecarPath(file: string): string {
@@ -126,17 +135,107 @@ async function request(
 ): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set("authorization", `Bearer ${cfg.apiKey}`);
-  return cfg.fetch(`${cfg.baseUrl}${path}`, { ...init, headers });
+  try {
+    return await cfg.fetch(`${cfg.baseUrl}${path}`, { ...init, headers });
+  } catch (error) {
+    // `fetch` rejects with a TypeError when no response arrived (DNS, TLS,
+    // refused connection): a transport failure, not a bug.
+    if (error instanceof TypeError) {
+      throw new CliError("http", `request failed: ${error.message}`);
+    }
+    throw error;
+  }
 }
 
-export async function list(cfg: CorpusConfig): Promise<readonly DocSummary[]> {
+export type CorpusListing = Readonly<{
+  corpus: CorpusIdentity | undefined;
+  documents: readonly DocSummary[];
+}>;
+
+export async function listCorpus(cfg: CorpusConfig): Promise<CorpusListing> {
   const res = await request(cfg, "/api/v1/docs");
   if (!res.ok) {
     throw new CliError("http", `list failed (${res.status})`, {
       status: res.status,
     });
   }
-  return DocListSchema.parse(await res.json()).documents;
+  const body = DocListSchema.parse(await res.json());
+  return { corpus: body.corpus, documents: body.documents };
+}
+
+export async function list(cfg: CorpusConfig): Promise<readonly DocSummary[]> {
+  return (await listCorpus(cfg)).documents;
+}
+
+export async function fetchDocument(
+  cfg: CorpusConfig,
+  slug: string,
+): Promise<DocFull> {
+  const res = await request(cfg, `/api/v1/docs/${encodeURIComponent(slug)}`);
+  if (res.status === 404) {
+    throw new CliError("not-found", `not found: ${slug}`, { status: 404 });
+  }
+  if (!res.ok) {
+    throw new CliError("http", `pull failed (${res.status})`, {
+      status: res.status,
+    });
+  }
+  return DocFullSchema.parse(await res.json());
+}
+
+// A file that a `pull --all` checkout tracks in its `.corpus.json` state
+// file. In such a checkout the state file, not a per-file sidecar, records a
+// document's base version, so single-document pull/push and `pull --all`
+// agree about what has been synced.
+type TrackedLocation = Readonly<{
+  statePath: string;
+  state: SyncState;
+  entry: TrackedFile;
+}>;
+
+// The nearest state file above `file` governs it. `undefined` when there is
+// none or `file` is not one of its tracked paths; a tracked path owned by a
+// different document is a copied or renamed file, refused like a sidecar
+// mismatch.
+async function findTracked(
+  files: Files,
+  file: string,
+  slug: string,
+): Promise<TrackedLocation | undefined> {
+  for (const { statePath, relPath } of stateCandidates(file)) {
+    const raw = await files.readText(statePath);
+    if (raw === undefined) continue;
+    const state = parseState(raw, statePath);
+    const entry = state.files.find((f) => f.path === relPath);
+    if (entry === undefined) return undefined;
+    if (entry.slug !== slug) {
+      throw new CliError(
+        "mismatch",
+        `${statePath} tracks "${entry.slug}" at ${relPath}, not "${slug}" — ` +
+          "refusing (copied or renamed file?).",
+      );
+    }
+    return { statePath, state, entry };
+  }
+  return undefined;
+}
+
+async function recordTracked(
+  files: Files,
+  tracked: TrackedLocation,
+  docVersion: number,
+  markdown: string,
+): Promise<void> {
+  const entry = {
+    ...tracked.entry,
+    docVersion,
+    sha256: await sha256Hex(markdown),
+  };
+  const state = {
+    ...tracked.state,
+    files: tracked.state.files.map((f) => (f.path === entry.path ? entry : f)),
+  };
+  await files.writeText(tracked.statePath, serializeState(state));
 }
 
 export async function doctor(
@@ -163,21 +262,17 @@ export async function pull(
   path?: string,
 ): Promise<Readonly<{ file: string; doc: DocFull }>> {
   const file = path ?? `${slug}.md`;
-  const res = await request(cfg, `/api/v1/docs/${encodeURIComponent(slug)}`);
-  if (res.status === 404) {
-    throw new CliError("not-found", `not found: ${slug}`, { status: 404 });
-  }
-  if (!res.ok) {
-    throw new CliError("http", `pull failed (${res.status})`, {
-      status: res.status,
-    });
-  }
-  const doc = DocFullSchema.parse(await res.json());
+  const doc = await fetchDocument(cfg, slug);
+  const tracked = await findTracked(cfg.files, file, slug);
   await cfg.files.writeText(file, doc.markdown);
-  await cfg.files.writeText(
-    sidecarPath(file),
-    serializeSidecar(doc.slug, doc.docVersion),
-  );
+  if (tracked === undefined) {
+    await cfg.files.writeText(
+      sidecarPath(file),
+      serializeSidecar(doc.slug, doc.docVersion),
+    );
+  } else {
+    await recordTracked(cfg.files, tracked, doc.docVersion, doc.markdown);
+  }
   return { file, doc };
 }
 
@@ -201,7 +296,11 @@ export async function push(
         "refusing to push (copied or renamed file?). Delete the sidecar to push as new.",
     );
   }
-  const clientVersion = sidecar?.docVersion ?? 0;
+  const tracked =
+    sidecar === undefined
+      ? await findTracked(cfg.files, file, slug)
+      : undefined;
+  const clientVersion = sidecar?.docVersion ?? tracked?.entry.docVersion ?? 0;
   const res = await request(cfg, `/api/v1/docs/${encodeURIComponent(slug)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -241,9 +340,13 @@ export async function push(
       status: res.status,
     });
   }
-  await cfg.files.writeText(
-    sidecarPath(file),
-    serializeSidecar(slug, body.docVersion),
-  );
+  if (sidecar === undefined && tracked !== undefined) {
+    await recordTracked(cfg.files, tracked, body.docVersion, markdown);
+  } else {
+    await cfg.files.writeText(
+      sidecarPath(file),
+      serializeSidecar(slug, body.docVersion),
+    );
+  }
   return { file, docVersion: body.docVersion };
 }
