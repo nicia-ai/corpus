@@ -6,6 +6,7 @@ import {
   generateApiKeyToken,
   insertApiKey,
   listApiKeys,
+  setApiKeyGrant,
 } from "@/control/api-keys";
 import {
   findCanonicalConnectionByCorpus,
@@ -14,7 +15,8 @@ import {
 import { connectControlDb } from "@/control/db";
 import { entitlementsOf } from "@/control/entitlements";
 import { UnauthorizedError, ValidationError } from "@/errors";
-import { asApiKeyId, asCorpusSlug } from "@/ids";
+import { GRANTS, type Grant } from "@/grant";
+import { asApiKeyId, asConnectionId, asCorpusSlug } from "@/ids";
 import { authMiddleware, projectMiddleware } from "@/lib/middleware";
 import { authedUserId, requireProjectOwner } from "@/lib/server/shared";
 import { assertServerContext as srv } from "@/lib/server-context";
@@ -27,6 +29,8 @@ import { assertServerContext as srv } from "@/lib/server-context";
 // connectionId from another project fails the `.find` with the same
 // "unknown connection" shape it would for a typo'd id (no oracle).
 const API_KEY_MINT_MSG = "Only an organization owner can mint API keys";
+const API_KEY_GRANT_MSG =
+  "Only an organization owner can change what an API key may do";
 
 // List-row metadata. The secret is NEVER here — only its short display
 // prefix; the plaintext exists once, in ApiKeyCreated.
@@ -34,11 +38,13 @@ export type ApiKeyMeta = Readonly<{
   id: string;
   name: string;
   tokenPrefix: string;
+  grant: Grant;
   createdAt: string;
 }>;
 export type ApiKeyCreated = Readonly<{
   id: string;
   name: string;
+  grant: Grant;
   token: string;
 }>;
 
@@ -71,6 +77,7 @@ export const listConnectionApiKeys = createServerFn({ method: "GET" })
           id: r.id,
           name: r.name,
           tokenPrefix: r.tokenPrefix,
+          grant: r.grant,
           createdAt: r.createdAt.toISOString(),
         })),
       };
@@ -83,6 +90,7 @@ export const createApiKey = createServerFn({ method: "POST" })
     z.object({
       name: z.string().trim().min(1).max(100),
       connectionId: z.string().min(1),
+      grant: z.enum(GRANTS),
     }),
   )
   .handler(async ({ data, context }): Promise<ApiKeyCreated> => {
@@ -109,8 +117,31 @@ export const createApiKey = createServerFn({ method: "POST" })
       connectionId: target.connectionId,
       name: data.name,
       token,
+      grant: data.grant,
     });
-    return { id, name: data.name, token };
+    return { id, name: data.name, grant: data.grant, token };
+  });
+
+export const changeApiKeyGrant = createServerFn({ method: "POST" })
+  .middleware([projectMiddleware])
+  .validator(
+    z.object({
+      id: z.string().min(1),
+      connectionId: z.string().min(1),
+      grant: z.enum(GRANTS),
+    }),
+  )
+  .handler(async ({ data, context }): Promise<{ grant: Grant }> => {
+    const c = srv(context);
+    const ref = requireProjectOwner(c.project, API_KEY_GRANT_MSG);
+    const changed = await setApiKeyGrant(connectControlDb(c.env.DB), {
+      id: asApiKeyId(data.id),
+      connectionId: asConnectionId(data.connectionId),
+      projectId: ref.projectId,
+      grant: data.grant,
+    });
+    if (!changed) throw new ValidationError("unknown API key");
+    return { grant: data.grant };
   });
 
 export const revokeApiKey = createServerFn({ method: "POST" })

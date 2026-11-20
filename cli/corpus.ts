@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   access,
   mkdir,
   open,
+  lstat,
+  readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -18,7 +22,13 @@ import { dirname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import { emitKeypressEvents } from "node:readline";
 import { text as readAll } from "node:stream/consumers";
+import { promisify } from "node:util";
 
+import {
+  containedReadText,
+  regularFilesOnly,
+  type CheckoutFs,
+} from "./checkout-guard.js";
 import { corpusConfigPath } from "./config-path.js";
 import {
   DEFAULT_CORPUS_URL,
@@ -46,15 +56,24 @@ import {
   isCredentialOperation,
 } from "./git.js";
 import { MCP_ADD_USAGE, mcpAdd } from "./mcp-add.js";
+import {
+  formatPushReport,
+  type PushConfig,
+  type PushFiles,
+  pushAll,
+} from "./push-all.js";
 import { formatSyncReport, pullAll } from "./sync.js";
 
 const EXIT_ERROR = 1;
-// `pull --all` only: local edits were left untouched (re-run with --overwrite
+// `pull --all` / `push --all`: local edits were left untouched (re-run with --overwrite
 // or resolve them); everything that could be applied was.
 const EXIT_CONFLICT = 2;
 // `pull --all` only: the server was unreachable or refused the request.
 const EXIT_TRANSPORT = 3;
 
+const PUSH_USAGE =
+  "usage: corpus push <slug> [file] [--path corpus/relative/path.md]";
+const PUSH_ALL_USAGE = "usage: corpus push --all [dir] [--dry-run]";
 const PULL_USAGE = "usage: corpus pull <slug> [path]";
 const PULL_ALL_USAGE = "usage: corpus pull --all [dir] [--overwrite]";
 
@@ -67,20 +86,22 @@ function configPath(): string {
   return corpusConfigPath(process.env, homedir(), platform());
 }
 
+function isMissing(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
 async function readStoredConfig(
   path: string,
 ): Promise<SavedConfig | undefined> {
   try {
     return parseSavedConfig(await readFile(path, "utf8"));
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return undefined;
-    }
+    if (isMissing(error)) return undefined;
     throw new Error(`Invalid Corpus config at ${path}. Run corpus setup.`, {
       cause: error,
     });
@@ -92,14 +113,7 @@ const files: TreeFiles = {
     try {
       return await readFile(path, "utf8");
     } catch (error) {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "ENOENT"
-      ) {
-        return undefined;
-      }
+      if (isMissing(error)) return undefined;
       throw error;
     }
   },
@@ -110,8 +124,96 @@ const files: TreeFiles = {
   remove: (path) => rm(path, { force: true }),
 };
 
+const execFileAsync = promisify(execFile);
+const GIT_LIST_FILES_ARGS = [
+  "ls-files",
+  "-z",
+  "--cached",
+  "--others",
+  "--exclude-standard",
+];
+const GIT_DIRECTORY = ".git";
+const GIT_LIST_MAX_BYTES = 1 << 28;
+
+// The files a push may consider under `dir`, relative to it. Inside a git
+// work tree git decides (tracked or untracked, minus whatever `.gitignore`,
+// `.git/info/exclude` and the global ignore file exclude), so the checkout's
+// own ignore rules are honored. Anywhere else every file is a candidate.
+async function listCandidateFiles(dir: string): Promise<readonly string[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-C", dir, ...GIT_LIST_FILES_ARGS],
+      { maxBuffer: GIT_LIST_MAX_BYTES },
+    );
+    return [...new Set(stdout.split("\0").filter((p) => p !== ""))];
+  } catch {
+    return walk(dir, "");
+  }
+}
+
+async function walk(root: string, relative: string): Promise<string[]> {
+  const entries = await readdir(join(root, relative), { withFileTypes: true });
+  const found: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === GIT_DIRECTORY) continue;
+    const path = relative === "" ? entry.name : `${relative}/${entry.name}`;
+    if (entry.isDirectory()) found.push(...(await walk(root, path)));
+    else if (entry.isFile()) found.push(path);
+  }
+  return found;
+}
+
+const checkoutFs: CheckoutFs = {
+  realPath: async (path) => {
+    try {
+      return await realpath(path);
+    } catch (error) {
+      if (isMissing(error)) return undefined;
+      throw error;
+    }
+  },
+  isRegularFile: async (path) => {
+    try {
+      return (await lstat(path)).isFile();
+    } catch (error) {
+      if (isMissing(error)) return false;
+      throw error;
+    }
+  },
+};
+
+// The files of one push: reads stay inside `dir` and links are not candidates.
+function pushFilesFor(dir: string): PushFiles {
+  return {
+    ...files,
+    readText: containedReadText(dir, checkoutFs, files.readText),
+    listFiles: async (root) =>
+      regularFilesOnly(root, await listCandidateFiles(root), checkoutFs, join),
+  };
+}
+
 function runtimeConfig(config: SavedConfig): CorpusConfig & SyncConfig {
   return { ...config, fetch, files };
+}
+
+// Reads stay inside `dir`, so a tracked file swapped for a link to somewhere
+// else is refused rather than written through.
+function pullConfig(
+  config: SavedConfig,
+  dir: string,
+): CorpusConfig & SyncConfig {
+  return {
+    ...runtimeConfig(config),
+    files: {
+      ...files,
+      readText: containedReadText(dir, checkoutFs, files.readText),
+    },
+  };
+}
+
+function pushConfig(config: SavedConfig, dir: string): PushConfig {
+  return { ...config, fetch, files: pushFilesFor(dir) };
 }
 
 async function configured(): Promise<
@@ -322,7 +424,11 @@ Commands:
   pull <slug> [path]                Download markdown + version sidecar
   pull --all [dir] [--overwrite]    Write the whole corpus into dir (default .)
                                     exit 0 ok, 1 error, 2 local edits kept, 3 server/auth
-  push <slug> [path]                Upload a new conflict-checked version
+  push <slug> [file] [--path P]     Upload a new conflict-checked version; --path places a
+                                    NEW document at corpus path P (default: top level)
+  push --all [dir] [--dry-run]      Send the directory's changes back (per the key's access:
+                                    edit applies, suggest files proposals, read refuses)
+                                    exit 0 ok, 1 error/failed, 2 conflicts, 3 server/auth
   git clone [dir] [--helper]        Print a ready-to-run read-only \`git clone\`
   git credential <get|store|erase>  Git credential helper for \`git pull\`
 
@@ -353,7 +459,7 @@ async function pullEverything(args: readonly string[]): Promise<void> {
   const { dir, overwrite } = parsePullAll(args);
   const { config } = await configured();
   try {
-    const report = await pullAll(runtimeConfig(config), dir, { overwrite });
+    const report = await pullAll(pullConfig(config, dir), dir, { overwrite });
     for (const line of formatSyncReport(report, dir)) {
       process.stdout.write(`${line}\n`);
     }
@@ -402,6 +508,56 @@ async function gitCommand(args: readonly string[]): Promise<void> {
     throw error;
   }
   die(GIT_USAGE);
+}
+
+function parsePushAll(
+  args: readonly string[],
+): Readonly<{ dir: string; dryRun: boolean }> {
+  const flags = new Set(["--all", "--dry-run"]);
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const unknown = args.filter((a) => a.startsWith("--") && !flags.has(a));
+  if (unknown.length > 0 || positional.length > 1) die(PUSH_ALL_USAGE);
+  return { dir: positional[0] ?? ".", dryRun: args.includes("--dry-run") };
+}
+
+async function pushEverything(args: readonly string[]): Promise<void> {
+  const { dir, dryRun } = parsePushAll(args);
+  const { config } = await configured();
+  try {
+    const report = await pushAll(pushConfig(config, dir), dir, { dryRun });
+    for (const line of formatPushReport(report, dir)) {
+      process.stdout.write(`${line}\n`);
+    }
+    if (report.conflicts.length > 0) process.exit(EXIT_CONFLICT);
+    if (report.failed.length > 0) process.exit(EXIT_ERROR);
+  } catch (error) {
+    if (error instanceof CliError && error.kind === "http") {
+      die(error.message, EXIT_TRANSPORT);
+    }
+    throw error;
+  }
+}
+
+function parsePush(
+  args: readonly string[],
+): Readonly<{ slug: string; file: string | undefined; docPath?: string }> {
+  const positional: string[] = [];
+  let docPath: string | undefined;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--path") {
+      docPath = args[i + 1];
+      if (docPath === undefined || docPath.startsWith("--")) die(PUSH_USAGE);
+      i += 1;
+    } else if (arg?.startsWith("--") === true) {
+      die(PUSH_USAGE);
+    } else if (arg !== undefined) {
+      positional.push(arg);
+    }
+  }
+  const [slug, file] = positional;
+  if (slug === undefined || positional.length > 2) die(PUSH_USAGE);
+  return { slug, file, ...(docPath === undefined ? {} : { docPath }) };
 }
 
 async function main(): Promise<void> {
@@ -478,17 +634,24 @@ async function main(): Promise<void> {
       return;
     }
     case "push": {
-      const [slug, path] = args;
-      if (slug === undefined || args.length > 2) {
-        die("usage: corpus push <slug> [path]");
-      }
+      if (args.includes("--all")) return pushEverything(args);
+      const { slug, file, docPath } = parsePush(args);
       const { config } = await configured();
-      const { docVersion } = await push(
+      const result = await push(
         runtimeConfig(config),
         slug,
-        absoluteForwardSlashes(path ?? `${slug}.md`),
+        absoluteForwardSlashes(file ?? `${slug}.md`),
+        docPath === undefined ? {} : { docPath },
       );
-      process.stdout.write(`pushed ${slug} → v${docVersion}\n`);
+      if (result.proposal !== undefined) {
+        process.stdout.write(
+          `proposed ${slug} as proposal #${String(result.proposal.proposalId)}` +
+            `${result.proposal.reviewUrl === undefined ? "" : `: ${result.proposal.reviewUrl}`}\n` +
+            "Nothing has changed in Corpus until a person applies it.\n",
+        );
+        return;
+      }
+      process.stdout.write(`pushed ${slug} → v${result.docVersion}\n`);
       return;
     }
     default:

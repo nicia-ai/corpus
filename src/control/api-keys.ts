@@ -1,11 +1,18 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
-import type { ApiKeyId, ConnectionId, OrganizationId, UserId } from "../ids";
+import type { Grant } from "../grant";
+import type {
+  ApiKeyId,
+  ConnectionId,
+  OrganizationId,
+  ProjectId,
+  UserId,
+} from "../ids";
 import { asApiKeyId } from "../ids";
 import { sha256 } from "../util";
 
 import type { ControlDb } from "./db";
-import { apiKey } from "./schema/app";
+import { apiKey, connection } from "./schema/app";
 
 // MCP API-key token format. The `cck_` prefix lets the `/mcp` transport
 // cheaply tell an API key apart from an OAuth JWT (which is dot-delimited
@@ -48,6 +55,7 @@ export type ApiKeyRow = Readonly<{
   id: ApiKeyId;
   name: string;
   tokenPrefix: string;
+  grant: Grant;
   createdAt: Date;
 }>;
 
@@ -65,6 +73,7 @@ export async function listApiKeys(
       id: apiKey.id,
       name: apiKey.name,
       tokenPrefix: apiKey.tokenPrefix,
+      grant: apiKey.grant,
       createdAt: apiKey.createdAt,
     })
     .from(apiKey)
@@ -76,6 +85,7 @@ export async function listApiKeys(
     id: asApiKeyId(r.id),
     name: r.name,
     tokenPrefix: r.tokenPrefix,
+    grant: r.grant,
     createdAt: r.createdAt,
   }));
 }
@@ -92,6 +102,7 @@ export async function insertApiKey(
     connectionId: ConnectionId;
     name: string;
     token: string;
+    grant: Grant;
   }>,
 ): Promise<ApiKeyId> {
   const [row] = await db
@@ -103,6 +114,7 @@ export async function insertApiKey(
       name: input.name,
       tokenHash: await hashApiKeyToken(input.token),
       tokenPrefix: apiKeyDisplayPrefix(input.token),
+      grant: input.grant,
     })
     .returning({ id: apiKey.id });
   return asApiKeyId(row?.id ?? "");
@@ -119,4 +131,40 @@ export async function deleteApiKey(
   await db
     .delete(apiKey)
     .where(and(eq(apiKey.id, id), eq(apiKey.userId, userId)));
+}
+
+// Change what a key may do. Scoped by `(connectionId, projectId)` like the
+// rest of Connection administration: the key's Connection must belong to
+// `projectId`, so a stray key id from another project is a silent no-op
+// (`false`), never a cross-tenant write.
+export async function setApiKeyGrant(
+  db: ControlDb,
+  input: Readonly<{
+    id: ApiKeyId;
+    connectionId: ConnectionId;
+    projectId: ProjectId;
+    grant: Grant;
+  }>,
+): Promise<boolean> {
+  const owned = db
+    .select({ id: connection.id })
+    .from(connection)
+    .where(
+      and(
+        eq(connection.id, input.connectionId),
+        eq(connection.projectId, input.projectId),
+      ),
+    );
+  const rows = await db
+    .update(apiKey)
+    .set({ grant: input.grant })
+    .where(
+      and(
+        eq(apiKey.id, input.id),
+        eq(apiKey.connectionId, input.connectionId),
+        inArray(apiKey.connectionId, owned),
+      ),
+    )
+    .returning({ id: apiKey.id });
+  return rows.length > 0;
 }

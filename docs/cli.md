@@ -11,12 +11,13 @@ is the way automation edits canonical documents without a browser: a CI job
 that regenerates a runbook, a script that syncs docs from another system, or
 just you, editing in your own `$EDITOR` instead of the web UI.
 
-Unlike [MCP](./connect-your-agent.md) — whose only write is a human-reviewed
-proposal — the CLI **reads and writes canonical documents**. That is why it
-deliberately uses the corpus-scoped REST API and an API key instead of the
-MCP/OAuth transport. It pushes new versions through the same
-optimistic-concurrency contract the web editor enforces, so nothing is ever
-silently overwritten.
+What a key may do is its **grant**, the same `read < suggest < edit` rule a
+[share link](./share-a-page.md) carries: a `read` key fetches, a `suggest` key
+also sends changes that become **proposals a person reviews**, and an `edit` key
+writes canonical documents directly (see [Grants](#grants)). That is why the CLI
+uses the corpus-scoped REST API and an API key rather than the MCP/OAuth
+transport. Direct writes go through the same optimistic-concurrency contract the
+web editor enforces, so nothing is ever silently overwritten.
 
 > The CLI is scoped to the **one corpus** its API key is bound to. It
 > can only see and edit that corpus's documents — never the rest of the
@@ -131,9 +132,11 @@ Alongside the markdown, `pull` writes a small **version sidecar** —
 it next to the file; `push` reads it to detect conflicts. Pulling a slug
 that isn't in your corpus fails with `not found`.
 
-### `push <slug> [path]`
+### `push <slug> [file] [--path P]`
 
-Upload your local edits as a new version (default file `<slug>.md`):
+Upload your local edits as a new version (default file `<slug>.md`). Needs a
+`suggest` or `edit` key. With a `suggest` key the edit is filed as a proposal
+instead (see [Grants](#grants)):
 
 ```sh
 $ corpus push api-style-guide
@@ -219,9 +222,135 @@ reapply your edit, and `corpus push <slug> <path>`. Or re-run with
 conflicting or locally edited file and deletes edited files that were removed
 upstream. Local edits are discarded, so commit or copy anything you want first.
 
+### `push --all [dir] [--dry-run]`
+
+Send the changes in a `pull --all` directory (default: the current directory)
+back to Corpus. It compares the directory to its `.corpus.json` and sends:
+
+- **modified files**: tracked files whose bytes differ from what was last
+  pulled;
+- **new files**: untracked `.md` files anywhere under `dir`, at their path
+  relative to `dir` (missing folders are created);
+- **deleted files**: tracked files that no longer exist locally;
+- **renamed files**: a deleted tracked file plus a new file with the **same
+  bytes** is one rename, so the document keeps its identity and history.
+
+```sh
+$ corpus push --all ./agent-docs --dry-run
+dry run (edit access): nothing was sent. 3 change(s) planned in ./agent-docs
+  update  runbooks/deploy.md  [deploy-runbook v4]
+  create  runbooks/rollback.md
+  move  style/old.md -> style/api.md  [api-style-guide]
+
+$ corpus push --all ./agent-docs
+applied 3, unchanged 5
+~ runbooks/deploy.md
++ runbooks/rollback.md
+> style/old.md -> style/api.md
+```
+
+How it behaves:
+
+- **Plan first.** Everything is planned (listing, local reads) before the first
+  write request. `--dry-run` prints that plan and sends nothing.
+- **Conflicts never overwrite.** A tracked file whose upstream version (or
+  path) moved since your last pull is a **conflict**: it is left untouched and
+  reported, and the rest of the run continues. Exit `2`, as for `pull --all`.
+- **Only markdown, only under `dir`.** Files that are not `.md` are ignored and
+  listed once. `.git/` and `.corpus.json` are always ignored. Inside a git
+  work tree the file list comes from git (`git ls-files --cached --others
+--exclude-standard`), so your `.gitignore`, `.git/info/exclude` and global
+  ignore file are respected; outside one, every file under `dir` is a
+  candidate. Nothing outside `dir` is ever read or written: symbolic links are
+  never candidates, and a tracked file that has become a link to somewhere
+  outside `dir` stops the run with an error (`pull --all` refuses it too).
+  A file over the 1,000,000-byte document limit is reported as `failed`; the
+  rest of the run continues.
+- **Pull first.** There must be a `.corpus.json` (run `pull --all` once, even
+  into an empty directory), so push can tell your edits from upstream's.
+- **Unsafe paths stop the run** before anything is sent: an absolute path, `..`,
+  a backslash or control character, a `.git` segment, or two paths that differ
+  only by case.
+- **The state file follows the server.** After a direct write the file records
+  the new version, so an immediate `pull --all` is "up to date". After filing a
+  proposal it does **not**: see [Grants](#grants).
+
+| Exit | Meaning                                                                                                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success, including "nothing to push" and proposals filed.                                                                                                                 |
+| `1`  | Bad usage, missing config, a state file that is missing or invalid, an unsafe path, a key that may not push (`read`), or a write the server refused (listed as `failed`). |
+| `2`  | Conflicts: some files were left untouched. Everything else was sent.                                                                                                      |
+| `3`  | Transport or auth error: the server was unreachable or refused the key.                                                                                                   |
+
+## Grants
+
+The key's grant decides what `push` and `push --all` do with a change. The
+owner sets it when minting the key and can change it any time (see
+[API keys](./api-keys.md#grants)); existing keys can edit.
+
+| Change you made       | `read`  | `suggest`                                                | `edit`                                                               |
+| --------------------- | ------- | -------------------------------------------------------- | -------------------------------------------------------------------- |
+| `list`, `pull`        | yes     | yes                                                      | yes                                                                  |
+| Modify a file         | refused | **proposal** against the version you pulled              | new version, written directly                                        |
+| Add a new `.md` file  | refused | **proposal** for a new document at that path             | document created at that path                                        |
+| Delete a file         | refused | not sent, reported (a removal cannot be proposed)        | document **archived** (kept, not erased; the app has no restore yet) |
+| Rename or move a file | refused | new path becomes a proposal; the old file is not removed | document moved, history kept                                         |
+
+A `read` key stops before sending anything. A `suggest` key reports each
+proposal's number and where to review it, and the server answers any attempt
+to do more with a `403` whose body lists what the key may do instead. Proposals
+carry the key's owner as author and arrive through the CLI channel, so reviewers
+see them the way they see any agent's suggestion: hunk by hunk.
+
+A rename together with an edit looks like a different file, so it is an archive
+plus a new document (history stays with the archived one). Rename in its own
+commit to keep history.
+
+### Proposals are not synced
+
+Filing a proposal changes nothing in Corpus, so `push --all` does **not** mark
+the file as synced. The file keeps reading as a local edit, and the state file
+remembers only _that_ it was proposed (a `proposals` list), so a CI job that
+runs on every merge does not file the same proposal twice. Then:
+
+- **Pull while the proposal is open:** the file is `kept` (local edit, upstream
+  unchanged), not a conflict.
+- **A person applies it** (all hunks): `pull --all` finds your bytes equal to
+  the new upstream version and just updates the state file. Nothing is
+  rewritten and there is no conflict.
+- **A person applies part of it:** your file and upstream now differ and both
+  changed, so `pull --all` reports a conflict, as it would for any edit made on
+  both sides.
+- **A person rejects it:** nothing changes. Your local edit stays in the file
+  (and is still reported as `kept`). Run `corpus pull --all --overwrite` to
+  take upstream's version, or revert the file in git. To propose again, change
+  the file: an unchanged file is not re-proposed.
+
+### The round trip
+
+```text
+pull --all   ->  edit in git (engineers, agents)   ->  push --all
+     ^                                                      |
+     |                                       edit key: applied now
+     |                                    suggest key: review in Corpus
+     +------------------  pull --all  <---------------------+
+```
+
+1. `corpus pull --all docs` brings the corpus into the repository.
+2. People and agents edit the files; changes land on the main branch.
+3. `corpus push --all docs` sends them back: applied (`edit`) or filed as
+   proposals (`suggest`).
+4. With `suggest`, a person reviews and applies them in Corpus.
+5. The next `corpus pull --all docs` brings the result back; files you edited
+   that were applied are already up to date.
+
+Not supported: images or other non-markdown content; mirroring git history into
+Corpus (or Corpus writing to git); merging two sides' edits to the same file
+(that is a conflict you resolve by hand); proposing a removal or a move.
+
 ## The sync-state file
 
-`pull --all` records what it wrote in a single dotfile at the root of the
+`pull --all` and `push --all` record what they synced in a single dotfile at the root of the
 directory, `.corpus.json`:
 
 ```json
@@ -235,9 +364,14 @@ directory, `.corpus.json`:
       "docVersion": 4,
       "sha256": "…"
     }
-  ]
+  ],
+  "proposals": [{ "path": "style/api.md", "baseVersion": 2, "sha256": "…", "proposalId": 31 }]
 }
 ```
+
+`proposals` appears only while `push --all` has filed proposals that are not yet
+applied; entries drop out on their own once the file is tracked at a newer
+version.
 
 `slug` is the stable document identifier the REST API uses; it survives
 renames and moves. `sha256` is the hash of the bytes written. The file is
@@ -271,9 +405,15 @@ artifact: leave it beside the markdown, and don't hand-edit it. A file with
 ## Creating documents
 
 Pushing a slug that doesn't exist yet **creates** it — inside the corpus your
-key is bound to, at its top level, so it shows up in `list` and is readable
-immediately. (Move it into a folder afterwards from the web app. Over the
-[REST API](#rest-api) a create can also name a corpus-relative `path`.)
+key is bound to, at its top level by default, so it shows up in `list` and is
+readable immediately. Name a corpus-relative path with `--path` to put it in a
+folder (missing folders are created):
+
+```sh
+corpus push onboarding ./onboarding.md --path people/new-hires/onboarding.md
+```
+
+With a `suggest` key the same push files a proposal for a new document.
 
 ```sh
 $ printf '# Onboarding\n\nWelcome…\n' > onboarding.md
@@ -300,9 +440,9 @@ CLI inherits that scope exactly:
 - `push` to a slug that already exists **outside** the corpus is
   refused — the key can grow its own corpus, never reach into another.
 
-Any project member's key can read and write through it; **minting** keys is
-owner-only. Revoke a key the moment it might be exposed — see
-[API keys](./api-keys.md).
+What a key may do within its corpus is its [grant](#grants). **Minting** keys
+and **changing a key's grant** are owner-only. Revoke a key the moment it might
+be exposed — see [API keys](./api-keys.md).
 
 ## A typical loop
 
@@ -359,27 +499,33 @@ and Node setup (set `CORPUS_URL` and `CORPUS_API_KEY` from secrets):
     }
 ```
 
-This only copies the corpus's current files into the repository. It does not
-push edits made in the repository back to Corpus (use `corpus push` for that),
-and Corpus does not mirror or write to git itself.
+This only copies the corpus's current files into the repository. To send
+edits made in the repository back, see [`push --all`](#push---all-dir---dry-run)
+and the [CI recipe](./recipes.md#round-trip-a-git-repository-through-ci). Corpus
+does not mirror or write to git itself.
 
 ## REST API
 
-The CLI is a thin client over three endpoints under `/api/v1/docs`. Each
-takes the API key as a bearer token and is scoped to the key's corpus:
+The CLI is a thin client over these endpoints. Each takes the API key as a
+bearer token and is scoped to the key's corpus:
 
-| Method & path            | Does                                                                                                                          |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/docs`       | List the corpus's documents (`slug`, `title`, `docVersion`, `path`) plus the `corpus` identity (`projectId`, `slug`).         |
-| `GET /api/v1/docs/:slug` | Fetch one document's `markdown` + metadata. `404` if it is not in the corpus.                                                 |
-| `PUT /api/v1/docs/:slug` | Write a new version. Body: `{ markdown, clientVersion, title?, path? }`; `path` (corpus-relative) only places a NEW document. |
+| Method & path                               | Needs   | Does                                                                                                                                                                                                                                                                   |
+| ------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/docs`                          | read    | List the corpus's documents (`slug`, `title`, `docVersion`, `path`) plus the `corpus` identity and the key's `grant`.                                                                                                                                                  |
+| `GET /api/v1/docs/:slug`                    | read    | Fetch one document's `markdown` + metadata. `404` if it is not in the corpus.                                                                                                                                                                                          |
+| `PUT /api/v1/docs/:slug`                    | suggest | `{ markdown, clientVersion, title?, path? }`. `edit`: write a new version (version 0 creates; `path` places a NEW document). `suggest`: file a proposal against `clientVersion` (version 0: a new-document proposal); answers `202` with `proposalId` and `reviewUrl`. |
+| `POST /api/v1/docs`                         | suggest | `{ markdown, path, title? }`: create at a corpus-relative path with a server-derived slug (`201`, `edit`) or propose it (`202`, `suggest`).                                                                                                                            |
+| `DELETE /api/v1/docs/:slug?clientVersion=N` | edit    | Archive the document; `409` if it moved past `N`.                                                                                                                                                                                                                      |
+| `POST /api/v1/docs/:slug/move`              | edit    | `{ path }`: move within the corpus (folders created), keeping history; `409` if the name is taken.                                                                                                                                                                     |
 
 ```sh
 curl -H "Authorization: Bearer $CORPUS_API_KEY" \
   "$CORPUS_URL/api/v1/docs/api-style-guide"
 ```
 
-A `PUT` whose `clientVersion` is behind the server returns `409` with the
+A write with too low a grant returns `403` with `{ error, code: "grant_too_low",
+grant, needed, allowed }`, where `allowed` lists what the key may do instead. A
+`PUT` whose `clientVersion` is behind the server returns `409` with the
 `currentVersion`. An update (`clientVersion` above 0) of a document that is not
 in the bound corpus — including one that was moved out — returns `404`, the
 same as a slug that does not exist. Creating a slug already taken outside the

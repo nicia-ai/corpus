@@ -140,3 +140,9 @@ export function resolveWikiPath(
     return a < b ? -1 : a > b ? 1 : 0;
   })[0];
 }
+
+// The alphabet a NEW document slug is minted in (what `normalizeSlug`
+// produces): lowercase alphanumerics joined by single dashes, none leading or
+// trailing. Existing slugs are accepted as they are; only a slug a caller
+// invents is checked against this.
+export const NEW_DOCUMENT_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;

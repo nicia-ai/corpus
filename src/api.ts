@@ -3,7 +3,7 @@ import {
   oauthProviderOpenIdConfigMetadata,
 } from "@better-auth/oauth-provider";
 import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resource-client";
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import {
   createLocalJWKSet,
   errors,
@@ -11,8 +11,8 @@ import {
   type JSONWebKeySet,
   type JWTPayload,
 } from "jose";
-import { z } from "zod";
 
+import { bearer, resolveScope } from "./api-scope";
 import { getAuth } from "./auth.server";
 import { API_KEY_PREFIX } from "./control/api-keys";
 import {
@@ -24,29 +24,16 @@ import { connectionClaimKey } from "./control/oauth-selection";
 import { resolveProjectById } from "./control/project-resolution";
 import type { ConnectionRef } from "./control/refs";
 import { storeFor } from "./control/store-for";
+import { docsRoutes } from "./docs-rest";
 import {
   embassyGet,
   embassyEdit,
   embassySection,
   embassySuggest,
 } from "./embassy/http";
-import { ValidationError } from "./errors";
-import {
-  asDocumentSlug,
-  asProjectId,
-  callerRefFromApiKey,
-  callerRefFromOAuth,
-} from "./ids";
+import { asProjectId, callerRefFromApiKey, callerRefFromOAuth } from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
-import {
-  MIRROR_NOT_ENABLED_MESSAGE,
-  MIRROR_NOT_READY_MESSAGE,
-} from "./mirror/errors";
-import { checkedPathSegments } from "./project-store/commands/untrusted-path";
 import { scopedExecutor } from "./scoped-executor";
-import { corpusIsServed } from "./store/domain/corpus-drive";
-import { MIRROR_BRANCH } from "./store/domain/git-mirror";
-import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "./util";
 
 // Shared MCP responder: parse the JSON-RPC envelope (the trust
 // boundary), preflight the bound Corpus, and dispatch through the
@@ -111,31 +98,6 @@ async function respondMcp(
     projectId: ref.projectId,
   });
   return Response.json(await handleMcp(parsed.data, exec));
-}
-
-function bearer(authorization: string | undefined): string | undefined {
-  const m = /^Bearer\s+(.+)$/iu.exec(authorization ?? "");
-  return m?.[1]?.trim();
-}
-
-// The one place a Connection's bound-Corpus scope is resolved: its
-// Project store plus the resolved member-slug set. `undefined` = the
-// bound Corpus is gone, and every caller fails closed on that (never
-// widening to the whole Project). Sharing it keeps the /mcp and REST
-// surfaces from drifting on the tenant/scope boundary.
-async function resolveScope(
-  env: Env,
-  ref: ConnectionRef,
-): Promise<
-  | Readonly<{ store: ReturnType<typeof storeFor>; members: readonly string[] }>
-  | undefined
-> {
-  // The default corpus is the drafts space: never served, whatever a
-  // Connection row written before that rule may still say.
-  if (!corpusIsServed(ref.corpusSlug)) return undefined;
-  const store = storeFor(env, ref.projectId);
-  const members = await store.corpusMembers(ref.corpusSlug);
-  return members === undefined ? undefined : { store, members };
 }
 
 // RFC 9728 Protected Resource Metadata. The MCP spec REQUIRES it + a
@@ -207,64 +169,6 @@ async function verifyOAuthJwt(
   }
 }
 
-const MAX_PUSH_PATH_LENGTH = 1_024;
-
-const DocPushBody = z.object({
-  // First-gate length cap; the DO's UTF-8 byte check is the authority
-  // (multi-byte text can pass this and still come back `tooLarge`).
-  markdown: markdownBodyZ,
-  clientVersion: z.number().int().nonnegative(),
-  title: z.string().optional(),
-  // Where a NEW document goes, relative to the key's corpus (missing folders
-  // are created). Absent = the corpus top level. Ignored for a document that
-  // already exists; checked with `checkedPathSegments` before the write.
-  path: z.string().min(1).max(MAX_PUSH_PATH_LENGTH).optional(),
-});
-
-// True when the push body failed ONLY because the markdown blew the
-// length gate — classified on Zod's structured issue code (never a
-// message match) so the caller gets a 413 naming the limit rather than
-// a generic "invalid body" 400.
-function markdownTooBig(error: z.ZodError): boolean {
-  return error.issues.some(
-    (issue) => issue.code === "too_big" && issue.path[0] === "markdown",
-  );
-}
-
-type ApiKeyScope = Readonly<{
-  store: ReturnType<typeof storeFor>;
-  members: ReadonlySet<string>;
-  ref: ConnectionRef;
-}>;
-
-// Non-UI surface only. The web app's data flows through TanStack Start
-// server functions (src/lib/server/*.ts); Hono carries auth, MCP, and
-// OAuth discovery — the external/agent contract.
-//
-// Resolve an api-key bearer to its Project store AND the bound
-// Corpus's resolved member-slug set — the REST tenant *and* scope
-// boundary in one step. An api-key is a Connection credential bound to a
-// single Corpus, so the CLI/automation surface must see exactly that
-// Corpus's documents, never the whole Project: the bearer's authority
-// is the Corpus, not its tenant. Shares `resolveScope` with the /mcp
-// preflight and fails closed (403) when the bound Corpus is gone —
-// never widening to "therefore the whole Project." Returns the 401/403
-// Response itself on failure so each route early-returns it unchanged.
-async function apiKeyScope(
-  c: Context<{ Bindings: Env }>,
-): Promise<ApiKeyScope | Response> {
-  const token = bearer(c.req.header("authorization"));
-  const ref = token?.startsWith(API_KEY_PREFIX)
-    ? await resolveApiKey(connectControlDb(c.env.DB), token)
-    : undefined;
-  if (ref === undefined) return c.json({ error: "unauthorized" }, 401);
-  const scope = await resolveScope(c.env, ref);
-  if (scope === undefined) {
-    return c.json({ error: "connection's corpus unavailable" }, 403);
-  }
-  return { store: scope.store, members: new Set(scope.members), ref };
-}
-
 export const api = new Hono<{ Bindings: Env }>()
   .get("/healthz", (c) => c.json({ ok: true }))
   .get("/s/:token", (c) => embassyGet(c))
@@ -299,143 +203,7 @@ export const api = new Hono<{ Bindings: Env }>()
       new Request(url, c.req.raw),
     );
   })
-  // — REST surface for the CLI / automation (api-key bearer) ——————————
-  // Every route scopes through the api-key's bound Corpus: an agent
-  // credential never reads or writes a document outside its Corpus.
-  // List filters to members; a non-member read 404s (no existence leak).
-  // Writes: a member is updated; a wholly-new slug is CREATED into the
-  // bound Corpus; a slug that already exists outside it 403s (that is
-  // another scope's document — the key may grow its own Corpus, never
-  // reach into one it doesn't already contain).
-  .get("/api/v1/docs", async (c) => {
-    const scope = await apiKeyScope(c);
-    if (scope instanceof Response) return scope;
-    const docs = await scope.store.listDocuments();
-    return c.json({
-      corpus: { projectId: scope.ref.projectId, slug: scope.ref.corpusSlug },
-      documents: docs
-        .filter((d) => scope.members.has(d.slug))
-        .map((d) => ({
-          slug: d.slug,
-          title: d.title,
-          docVersion: d.docVersion,
-          path: d.path,
-        })),
-    });
-  })
-  .get("/api/v1/docs/:slug", async (c) => {
-    const scope = await apiKeyScope(c);
-    if (scope instanceof Response) return scope;
-    const slug = c.req.param("slug");
-    if (!scope.members.has(slug)) return c.json({ error: "not found" }, 404);
-    const d = await scope.store.getDocument(asDocumentSlug(slug));
-    if (d === undefined) return c.json({ error: "not found" }, 404);
-    return c.json({
-      slug: d.slug,
-      title: d.title,
-      filename: d.filename,
-      markdown: d.markdown,
-      docVersion: d.docVersion,
-    });
-  })
-  .put("/api/v1/docs/:slug", async (c) => {
-    const scope = await apiKeyScope(c);
-    if (scope instanceof Response) return scope;
-    const slug = c.req.param("slug");
-    const parsed = DocPushBody.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      return markdownTooBig(parsed.error)
-        ? c.json({ error: MARKDOWN_TOO_LARGE_MESSAGE }, 413)
-        : c.json({ error: "invalid body" }, 400);
-    }
-    if (parsed.data.path !== undefined) {
-      try {
-        checkedPathSegments(parsed.data.path);
-      } catch (error) {
-        if (error instanceof ValidationError) {
-          return c.json({ error: error.message }, 400);
-        }
-        throw error;
-      }
-    }
-    const save = compact({
-      slug: asDocumentSlug(slug),
-      markdown: parsed.data.markdown,
-      title: parsed.data.title,
-      clientVersion: parsed.data.clientVersion,
-      changedBy: scope.ref.userId,
-    });
-    // `members` is a snapshot from the start of the request, so the write
-    // never trusts it: the DO decides inside its transaction, against
-    // where the document is NOW. A document in the bound corpus is
-    // updated; a wholly-new slug is created in the corpus's root; a slug
-    // that exists outside it — including one moved out a moment ago — is
-    // `forbidden`.
-    const r = await scope.store.saveDocumentInCorpus(
-      save,
-      scope.ref.corpusSlug,
-      parsed.data.path,
-    );
-    if (r.ok) return c.json({ ok: true, docVersion: r.docVersion });
-    if ("forbidden" in r) {
-      // An UPDATE (clientVersion > 0) of a document that is not in this
-      // corpus — never was, or was moved out — answers exactly like a
-      // document that does not exist. Only a CREATE can still observe a
-      // taken slug (it cannot be created), which stays a 403.
-      return parsed.data.clientVersion > 0
-        ? c.json({ error: "not found" }, 404)
-        : c.json({ error: "forbidden" }, 403);
-    }
-    // The DO's authoritative UTF-8 byte cap (reachable when multi-byte
-    // markdown passes the length gate above).
-    if ("tooLarge" in r) {
-      return c.json({ error: MARKDOWN_TOO_LARGE_MESSAGE }, 413);
-    }
-    if ("conflict" in r) {
-      // Head version 0 = there is no such document: an update of a slug that
-      // does not exist reads exactly like an update of one outside the corpus.
-      if (r.currentVersion === 0) return c.json({ error: "not found" }, 404);
-      return c.json(
-        { ok: false, conflict: true, currentVersion: r.currentVersion },
-        409,
-      );
-    }
-    if ("segmentCollision" in r) {
-      return c.json({ ok: false, segmentCollision: true }, 409);
-    }
-    return c.json({ ok: false, rolledBack: true }, 409);
-  })
-  // A short-lived READ-ONLY credential for cloning the key's corpus from its
-  // mirror repository. The API key is exchanged for an Artifacts token scoped
-  // to that one repository; a write token is never issued. No owner gate here:
-  // minting the key was the owner-gated act.
-  .post("/api/v1/git/token", async (c) => {
-    const scope = await apiKeyScope(c);
-    if (scope instanceof Response) return scope;
-    const access = await scope.store.gitCloneAccess(scope.ref.corpusSlug);
-    if (access.ok) {
-      return c.json({
-        remote: access.remote,
-        corpus: scope.ref.corpusSlug,
-        branch: MIRROR_BRANCH,
-        token: access.token,
-        expiresAt: access.expiresAt,
-        current: access.current,
-      });
-    }
-    if (access.reason === "not-ready") {
-      return c.json({ error: MIRROR_NOT_READY_MESSAGE }, 409);
-    }
-    return c.json(
-      {
-        error:
-          access.reason === "not-enabled"
-            ? MIRROR_NOT_ENABLED_MESSAGE
-            : "not found",
-      },
-      404,
-    );
-  })
+  .route("/", docsRoutes)
   .get("/.well-known/oauth-authorization-server", (c) =>
     // See `asBetterAuthPlugin` in better-auth-plugin-compat.ts: widening the
     // oauth-provider plugin to `BetterAuthPlugin` erases the literal

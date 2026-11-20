@@ -25,6 +25,18 @@ const TrackedFileSchema = z.object({
   docVersion: z.number().int().nonnegative(),
   sha256: z.string().regex(SHA256_HEX),
 });
+// A change `push --all` filed as a proposal instead of writing it. It is NOT
+// a synced file: the tracked entry keeps recording what was last pulled, so a
+// later `pull --all` still sees the local edit. This only remembers what was
+// already proposed, so a CI job that runs on every merge does not file the
+// same proposal again. `baseVersion` is the version the proposal was filed
+// against (0 for a new document); `sha256` is the proposed bytes.
+const PendingProposalSchema = z.object({
+  path: SafePathSchema,
+  baseVersion: z.number().int().nonnegative(),
+  sha256: z.string().regex(SHA256_HEX),
+  proposalId: z.number().int().positive(),
+});
 const CorpusIdentitySchema = z.object({
   projectId: z.string().min(1),
   slug: z.string().min(1),
@@ -33,15 +45,34 @@ const SyncStateSchema = z.object({
   version: z.literal(STATE_VERSION),
   corpus: CorpusIdentitySchema,
   files: z.array(TrackedFileSchema),
+  proposals: z.array(PendingProposalSchema).optional(),
 });
 
 export type TrackedFile = Readonly<z.infer<typeof TrackedFileSchema>>;
+export type PendingProposal = Readonly<z.infer<typeof PendingProposalSchema>>;
 export type CorpusIdentity = Readonly<z.infer<typeof CorpusIdentitySchema>>;
 export type SyncState = Readonly<{
   version: typeof STATE_VERSION;
   corpus: CorpusIdentity;
   files: readonly TrackedFile[];
+  proposals?: readonly PendingProposal[] | undefined;
 }>;
+
+export function pendingProposals(state: SyncState): readonly PendingProposal[] {
+  return state.proposals ?? [];
+}
+
+// A proposal stops being pending once a tracked file at its path shows it
+// was applied or overtaken: the document exists (a new-document proposal) or
+// has moved past the version it was filed against.
+export function stillPending(
+  proposal: PendingProposal,
+  files: readonly TrackedFile[],
+): boolean {
+  const tracked = files.find((f) => f.path === proposal.path);
+  if (tracked === undefined) return true;
+  return proposal.baseVersion > 0 && tracked.docVersion <= proposal.baseVersion;
+}
 
 // Why a corpus-relative path may not be materialized, or `undefined` when it
 // is safe. A document path comes from the server and a tracked path from a
@@ -106,6 +137,15 @@ export function serializeState(state: SyncState): string {
       docVersion: f.docVersion,
       sha256: f.sha256,
     }));
+  const proposals = pendingProposals(state)
+    .filter((p) => stillPending(p, state.files))
+    .sort((a, b) => compareCodePoints(a.path, b.path))
+    .map((p) => ({
+      path: p.path,
+      baseVersion: p.baseVersion,
+      sha256: p.sha256,
+      proposalId: p.proposalId,
+    }));
   const ordered = {
     version: state.version,
     corpus: {
@@ -113,6 +153,7 @@ export function serializeState(state: SyncState): string {
       slug: state.corpus.slug,
     },
     files,
+    ...(proposals.length === 0 ? {} : { proposals }),
   };
   return `${JSON.stringify(ordered, null, 2)}\n`;
 }

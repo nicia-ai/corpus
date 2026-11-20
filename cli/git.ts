@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { type CorpusConfig, request } from "./core.js";
 import { CliError } from "./errors.js";
+import { type ApiConfig, request } from "./http.js";
 
 // `corpus git`: hand a read-only Git clone of the key's corpus to a person or
 // an agent sandbox. The server keeps a Git mirror of each served corpus on
@@ -45,9 +45,7 @@ async function errorMessage(res: Response, fallback: string): Promise<string> {
 }
 
 // Exchange the API key for a read-only clone credential.
-export async function fetchCloneAccess(
-  cfg: CorpusConfig,
-): Promise<CloneAccess> {
+export async function fetchCloneAccess(cfg: ApiConfig): Promise<CloneAccess> {
   const res = await request(cfg, TOKEN_PATH, { method: "POST" });
   if (res.status === STATUS_NOT_FOUND) {
     throw new CliError(
@@ -136,7 +134,7 @@ export function isCredentialOperation(
 // server. `store` and `erase` are no-ops — tokens are minted on demand and
 // never kept.
 export async function credentialReply(
-  cfg: CorpusConfig,
+  cfg: ApiConfig,
   operation: CredentialOperation,
   input: string,
 ): Promise<string> {

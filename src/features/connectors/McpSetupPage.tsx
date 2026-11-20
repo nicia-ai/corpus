@@ -11,6 +11,7 @@ import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { AbsoluteTime } from "@/components/ui/DateTime";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Segmented } from "@/components/ui/Segmented";
 import { Card, EmptyState, listSurface } from "@/components/ui/Surface";
 import { Tabs } from "@/components/ui/Tabs";
 import { showToast } from "@/components/ui/Toast";
@@ -20,6 +21,7 @@ import {
   cursorMcpSnippet,
   vscodeMcpSnippet,
 } from "@/features/onboarding/agent-write-prompt";
+import type { Grant } from "@/grant";
 import { asCorpusSlug, type ProjectId } from "@/ids";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
@@ -28,6 +30,7 @@ import { useSubmit } from "@/lib/forms";
 import {
   type ApiKeyCreated,
   type ApiKeyMeta,
+  changeApiKeyGrant,
   type ConnectionKeysView,
   createApiKey,
   revokeApiKey,
@@ -37,6 +40,22 @@ import type { GitMirrorStatus } from "@/lib/server/git-mirror";
 import type { Role } from "@/lib/server/team.functions";
 
 const KEY = "<YOUR_API_KEY>";
+
+// What an API key may do through the CLI / REST API. The same
+// read < suggest < edit rule a share link carries.
+const KEY_GRANT_OPTIONS = [
+  { value: "read", label: "Read" },
+  { value: "suggest", label: "Suggest" },
+  { value: "edit", label: "Edit" },
+] as const satisfies readonly Readonly<{ value: Grant; label: string }>[];
+
+const KEY_GRANT_BLURB: Readonly<Record<Grant, string>> = {
+  read: "Can list and fetch documents. Cannot change anything.",
+  suggest:
+    "Can also send changes, which wait for a person to review them. Cannot write directly.",
+  edit: "Can also write documents directly and archive them, with no review.",
+};
+const DEFAULT_KEY_GRANT: Grant = "suggest";
 
 type Auth = "oauth" | "apikey";
 
@@ -519,7 +538,11 @@ function ApiKeyManager({
           No API keys yet. Generate one to connect a headless client.
         </EmptyState>
       ) : (
-        <KeyList keys={keys} />
+        <KeyList
+          projectId={projectId}
+          connectionId={connectionId}
+          keys={keys}
+        />
       )}
       {creating ? (
         <CreateForm
@@ -544,37 +567,94 @@ function ApiKeyManager({
   );
 }
 
-function KeyList({ keys }: Readonly<{ keys: readonly ApiKeyMeta[] }>) {
+function KeyList({
+  projectId,
+  connectionId,
+  keys,
+}: Readonly<{
+  projectId: ProjectId;
+  connectionId: string;
+  keys: readonly ApiKeyMeta[];
+}>) {
   return (
     <div className={listSurface()}>
-      <table className="w-full text-base">
-        <thead>
-          <tr className="border-b border-slate-200 bg-slate-50 text-left text-sm text-slate-500">
-            <th className="px-4 py-3 font-medium">Name</th>
-            <th className="px-4 py-3 font-medium">Key</th>
-            <th className="px-4 py-3 font-medium">Created</th>
-            <th className="px-4 py-3" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-200">
-          {keys.map((k) => (
-            <tr key={k.id} className="hover:bg-slate-50">
-              <td className="px-4 py-3 font-medium">{k.name}</td>
-              <td className="px-4 py-3 font-mono text-sm text-slate-500">
-                {k.tokenPrefix}…
-              </td>
-              <td className="px-4 py-3 text-slate-500 tabular-nums">
-                <AbsoluteTime iso={k.createdAt} />
-              </td>
-              <td className="px-4 py-3 text-right">
-                <RevokeButton id={k.id} name={k.name} />
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-base">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50 text-left text-sm text-slate-500">
+              <th className="px-4 py-3 font-medium">Name</th>
+              <th className="px-4 py-3 font-medium">Key</th>
+              <th className="px-4 py-3 font-medium">Access</th>
+              <th className="px-4 py-3 font-medium">Created</th>
+              <th className="px-4 py-3" />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {keys.map((k) => (
+              <tr key={k.id} className="hover:bg-slate-50">
+                <td className="px-4 py-3 font-medium">{k.name}</td>
+                <td className="px-4 py-3 font-mono text-sm text-slate-500">
+                  {k.tokenPrefix}…
+                </td>
+                <td className="px-4 py-3">
+                  <KeyGrant
+                    projectId={projectId}
+                    connectionId={connectionId}
+                    apiKey={k}
+                  />
+                </td>
+                <td className="px-4 py-3 text-slate-500 tabular-nums">
+                  <AbsoluteTime iso={k.createdAt} />
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <RevokeButton id={k.id} name={k.name} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
+}
+
+function KeyGrant({
+  projectId,
+  connectionId,
+  apiKey,
+}: Readonly<{
+  projectId: ProjectId;
+  connectionId: string;
+  apiKey: ApiKeyMeta;
+}>) {
+  const router = useRouter();
+  const { error, run } = useSubmit(async (grant: Grant) => {
+    await changeApiKeyGrant({
+      data: { id: apiKey.id, connectionId, projectId, grant },
+    });
+    showToast(`Key “${apiKey.name}” can now ${grantVerb(grant)}`);
+    void router.invalidate();
+  });
+  return (
+    <div className="space-y-1">
+      <Segmented
+        ariaLabel={`Access for ${apiKey.name}`}
+        activation="manual"
+        options={KEY_GRANT_OPTIONS}
+        value={apiKey.grant}
+        onChange={(next) => void run(next)}
+      />
+      {error !== undefined && <p className="text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+function grantVerb(grant: Grant): string {
+  return grant === "read"
+    ? "read"
+    : grant === "suggest"
+      ? "suggest changes"
+      : "edit";
 }
 
 function CreateForm({
@@ -589,13 +669,14 @@ function CreateForm({
   onCreated: (k: ApiKeyCreated) => void;
 }>) {
   const [name, setName] = useState("");
+  const [grant, setGrant] = useState<Grant>(DEFAULT_KEY_GRANT);
   const {
     pending,
     error,
     run: submit,
   } = useSubmit(async () => {
     const k = await createApiKey({
-      data: { name: name.trim(), connectionId, projectId },
+      data: { name: name.trim(), connectionId, projectId, grant },
     });
     track("api_key_created", { projectId, connectionId });
     onCreated(k);
@@ -610,6 +691,16 @@ function CreateForm({
       }}
     >
       <Field label="Name" value={name} onChange={setName} />
+      <div className="space-y-1.5">
+        <div className="text-sm font-medium text-slate-700">Access</div>
+        <Segmented
+          ariaLabel="Key access"
+          options={KEY_GRANT_OPTIONS}
+          value={grant}
+          onChange={setGrant}
+        />
+        <p className="text-sm text-slate-500">{KEY_GRANT_BLURB[grant]}</p>
+      </div>
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={pending || name.trim() === ""}>
           {pending ? "Generating…" : "Generate key"}
@@ -632,6 +723,7 @@ function CreatedKey({
       <div className="text-base font-medium text-slate-900">
         Key “{created.name}” created
       </div>
+      <p className="text-sm text-slate-500">{KEY_GRANT_BLURB[created.grant]}</p>
       <p className="text-sm text-amber-700">
         Copy it now — this is the only time the full key is shown.
       </p>

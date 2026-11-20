@@ -860,6 +860,42 @@ export class FolderRepo {
     return { ok: true, changed: true };
   }
 
+  // Give a document a new place: a folder and a file name in one step, so
+  // the sibling-namespace check is made against the name it will HAVE
+  // there (placing then renaming could collide in between). Writes the
+  // folder edge only; the caller sets the `filename` property.
+  async relocate(
+    documentSlug: DocumentSlug,
+    folderSlug: FolderSlug,
+    filename: string,
+  ): Promise<PlaceDocumentResult> {
+    const doc = await this.docBySlug(documentSlug);
+    if (doc === undefined) return { ok: false, reason: "missing" };
+    if ((await this.nodeBySlug(folderSlug)) === undefined) {
+      return { ok: false, reason: "missing" };
+    }
+    const existing = await this.docFolderEdge(doc);
+    const current =
+      existing === undefined
+        ? undefined
+        : (await this.g.nodes.Folder.getById(existing.toId))?.slug;
+    const sameFolder = current === folderSlug;
+    if (sameFolder && doc.filename === filename) {
+      return { ok: true, changed: false };
+    }
+    const siblings = await this.siblingSegments(folderSlug);
+    if (
+      segmentCollides(siblings, filename, {
+        kind: "document",
+        slug: documentSlug,
+      })
+    ) {
+      return { ok: false, reason: "segment-collision" };
+    }
+    if (!sameFolder) await this.rehomeDocument(documentSlug, folderSlug);
+    return { ok: true, changed: true };
+  }
+
   // `placeDocument` for a SET of documents into one folder, best-effort:
   // each outcome is parallel to the input, a collision or a missing
   // document leaves only that one in place. The reads are set reads — the

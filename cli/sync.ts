@@ -163,7 +163,9 @@ export async function pullAll(
   return buildReport(settled);
 }
 
-function requireIdentity(corpus: CorpusIdentity | undefined): CorpusIdentity {
+export function requireIdentity(
+  corpus: CorpusIdentity | undefined,
+): CorpusIdentity {
   if (corpus === undefined) {
     throw new CliError(
       "unsupported",
@@ -205,7 +207,7 @@ function validatedRemote(documents: readonly DocSummary[]): readonly Remote[] {
   });
 }
 
-async function readState(
+export async function readState(
   cfg: SyncConfig,
   statePath: string,
   identity: CorpusIdentity,
@@ -426,7 +428,7 @@ function buildReport(decisions: readonly Decision[]): SyncReport {
   };
 }
 
-function joinPath(dir: string, path: string): string {
+export function joinPath(dir: string, path: string): string {
   if (dir === "" || dir === ".") return path;
   return `${dir.replace(/\/+$/, "")}/${path}`;
 }
