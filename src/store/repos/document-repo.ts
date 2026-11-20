@@ -6,6 +6,10 @@ import type { GraphHandle } from "../handle";
 
 import { findAll } from "./paginate";
 
+// Slugs per `bulkFindByIndex` statement. Each input binds several
+// parameters and a Durable Object's SQLite allows 100 per statement.
+const FIND_MANY_CHUNK = 25;
+
 export type DocumentNode = Node<typeof Document>;
 
 export type DocumentFields = Readonly<{
@@ -42,12 +46,18 @@ export class DocumentRepo {
   async findMany(
     slugs: readonly DocumentSlug[],
   ): Promise<readonly (DocumentNode | undefined)[]> {
-    const groups = await this.g.nodes.Document.bulkFindByIndex(
-      DOCUMENT_SLUG_INDEX,
-      slugs.map((slug) => ({ props: { slug } })),
-      { limitPerInput: 1 },
-    );
-    return groups.map((group) => group[0]);
+    const heads: (DocumentNode | undefined)[] = [];
+    for (let i = 0; i < slugs.length; i += FIND_MANY_CHUNK) {
+      const groups = await this.g.nodes.Document.bulkFindByIndex(
+        DOCUMENT_SLUG_INDEX,
+        slugs
+          .slice(i, i + FIND_MANY_CHUNK)
+          .map((slug) => ({ props: { slug } })),
+        { limitPerInput: 1 },
+      );
+      heads.push(...groups.map((group) => group[0]));
+    }
+    return heads;
   }
 
   list(limit: number): Promise<readonly DocumentNode[]> {
