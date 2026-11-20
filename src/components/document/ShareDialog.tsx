@@ -14,10 +14,10 @@ import {
   neverExpires,
   type EmbassyExpiry,
 } from "@/embassy/expiry";
-import type { EmbassyGrant } from "@/embassy/grant";
 import { isIntakeMarkdown } from "@/embassy/intake";
 import { embassyPrompt } from "@/embassy/prompt";
 import { embassyUrl } from "@/embassy/url";
+import type { Grant } from "@/grant";
 import type { DocumentSlug, ProjectId } from "@/ids";
 import { useSubmit } from "@/lib/forms";
 import {
@@ -36,7 +36,7 @@ const GRANT_OPTIONS = [
   { value: "suggest", label: "Suggest" },
   { value: "edit", label: "Edit" },
 ] as const satisfies readonly Readonly<{
-  value: EmbassyGrant;
+  value: Grant;
   label: string;
 }>[];
 
@@ -79,7 +79,7 @@ export function ShareDialog({
   });
   const [rows, setRows] = useState(initialRows);
   const [label, setLabel] = useState("");
-  const [grant, setGrant] = useState<EmbassyGrant>(
+  const [grant, setGrant] = useState<Grant>(
     !served && isIntakeMarkdown(markdown) ? "edit" : "read",
   );
   const [expiry, setExpiry] = useState<EmbassyExpiry>(DEFAULT_EMBASSY_EXPIRY);
@@ -246,7 +246,7 @@ function EmbassyRow({
     onRevoked();
   });
   const { error: grantError, run: runGrant } = useSubmit(
-    async (next: EmbassyGrant) => {
+    async (next: Grant) => {
       onChanged(
         await changeEmbassyGrant({
           data: { projectId, embassyId: row.id, grant: next },

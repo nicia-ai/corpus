@@ -19,8 +19,8 @@ import {
   EMBASSY_EXPIRIES,
   embassyExpiresAt,
 } from "@/embassy/expiry";
-import { EMBASSY_GRANTS, type EmbassyGrant } from "@/embassy/grant";
 import { ValidationError } from "@/errors";
+import { GRANTS, type Grant } from "@/grant";
 import { asDocumentSlug, asEmbassyId } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import { changedBy, requireProjectOwner, storeOf } from "@/lib/server/shared";
@@ -33,7 +33,7 @@ export type EmbassyDto = Readonly<{
   id: string;
   documentSlug: string;
   label: string;
-  grant: EmbassyGrant;
+  grant: Grant;
   expiresAt: number;
   fetchCount: number;
 }>;
@@ -74,7 +74,7 @@ export const createEmbassy = createServerFn({ method: "POST" })
     z.object({
       slug: z.string().min(1),
       label: z.string().trim().min(1).max(80),
-      grant: z.enum(EMBASSY_GRANTS),
+      grant: z.enum(GRANTS),
       expiry: z.enum(EMBASSY_EXPIRIES).default(DEFAULT_EMBASSY_EXPIRY),
     }),
   )
@@ -125,7 +125,7 @@ export const changeEmbassyGrant = createServerFn({ method: "POST" })
   .validator(
     z.object({
       embassyId: z.string().min(1),
-      grant: z.enum(EMBASSY_GRANTS),
+      grant: z.enum(GRANTS),
     }),
   )
   .handler(async ({ data, context }): Promise<EmbassyDto> => {

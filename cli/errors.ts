@@ -8,7 +8,9 @@ export type CliErrorKind =
   | "mismatch"
   | "state"
   | "unsafe-path"
-  | "unsupported";
+  | "unsupported"
+  // The key's grant does not allow the operation (HTTP 403, grant_too_low).
+  | "forbidden";
 
 export class CliError extends Error {
   constructor(

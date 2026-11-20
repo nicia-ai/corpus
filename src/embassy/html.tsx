@@ -1,8 +1,8 @@
 import { renderToString } from "react-dom/server";
 
 import { MarkdownContent } from "@/components/markdown/Markdown";
-import type { EmbassyGrant } from "@/embassy/grant";
 import { embassyPrompt } from "@/embassy/prompt";
+import type { Grant } from "@/grant";
 import { documentBody } from "@/store/domain/frontmatter";
 
 const PAGE_CSS = `
@@ -45,7 +45,7 @@ export function embassyPageHtml(input: {
   title: string;
   markdown: string;
   url: string;
-  grant: EmbassyGrant;
+  grant: Grant;
   docVersion: number;
 }): string {
   const prompt = embassyPrompt({ url: input.url, grant: input.grant });

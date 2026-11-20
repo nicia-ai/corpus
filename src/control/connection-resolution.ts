@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 
+import type { Grant } from "../grant";
 import {
   asApiKeyId,
   asCorpusSlug,
@@ -31,6 +32,7 @@ type ConnRow = Readonly<{
   role: string;
   status: ProjectStatus;
   apiKeyId?: string;
+  apiKeyGrant?: Grant;
 }>;
 
 function toConnectionRef(row: ConnRow): ConnectionRef {
@@ -42,6 +44,7 @@ function toConnectionRef(row: ConnRow): ConnectionRef {
     connectionId: asConnectionId(row.connectionId),
     corpusSlug: asCorpusSlug(row.corpusSlug),
     apiKeyId: row.apiKeyId === undefined ? undefined : asApiKeyId(row.apiKeyId),
+    apiKeyGrant: row.apiKeyGrant,
   });
 }
 
@@ -62,6 +65,7 @@ export async function resolveApiKey(
       role: member.role,
       status: project.status,
       apiKeyId: apiKey.id,
+      apiKeyGrant: apiKey.grant,
     })
     .from(apiKey)
     .innerJoin(connection, eq(connection.id, apiKey.connectionId))

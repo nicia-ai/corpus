@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 
-import { grantsAllowing, type EmbassyGrant } from "../embassy/grant";
+import { grantsAllowing, type Grant } from "../grant";
 import {
   asDocumentSlug,
   asEmbassyId,
@@ -14,8 +14,6 @@ import { ACCESSIBLE_STATUSES, isAccessible } from "./access";
 import type { ControlDb } from "./db";
 import { embassy, project } from "./schema/app";
 
-export type { EmbassyGrant };
-
 export const EMBASSY_DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const EMBASSY_WRITE_LIMIT = 1000;
 export const EMBASSY_FETCH_DEBOUNCE_MS = 60_000;
@@ -26,7 +24,7 @@ export type EmbassyView = Readonly<{
   projectId: ProjectId;
   documentSlug: DocumentSlug;
   label: string;
-  grant: EmbassyGrant;
+  grant: Grant;
   expiresAt: number;
   fetchCount: number;
   lastFetchedAt: number | undefined;
@@ -59,7 +57,7 @@ export async function mintEmbassy(
     projectId: ProjectId;
     documentSlug: DocumentSlug;
     label?: string;
-    grant: EmbassyGrant;
+    grant: Grant;
     expiresAt?: number;
   }>,
 ): Promise<EmbassyView> {
@@ -208,7 +206,7 @@ export async function noteEmbassyFetch(
 
 export async function setEmbassyGrant(
   db: ControlDb,
-  input: Readonly<{ id: EmbassyId; projectId: ProjectId; grant: EmbassyGrant }>,
+  input: Readonly<{ id: EmbassyId; projectId: ProjectId; grant: Grant }>,
 ): Promise<EmbassyView | undefined> {
   const [row] = await db
     .update(embassy)
@@ -267,7 +265,7 @@ export async function setEmbassyExpiry(
 
 export async function reserveEmbassyWrite(
   db: ControlDb,
-  input: Readonly<{ id: EmbassyId; needed: EmbassyGrant }>,
+  input: Readonly<{ id: EmbassyId; needed: Grant }>,
 ): Promise<boolean> {
   // The grant is re-checked in the same update as the reservation, so an
   // owner switching a link to suggest-only takes effect on the next write.

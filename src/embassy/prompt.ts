@@ -1,4 +1,4 @@
-import type { EmbassyGrant } from "@/embassy/grant";
+import type { Grant } from "@/grant";
 
 function suggestInstructions(url: string): string {
   return `
@@ -45,7 +45,7 @@ GET it again at the start of every session before you write.
 
 export function embassyPrompt(input: {
   url: string;
-  grant: EmbassyGrant;
+  grant: Grant;
   oneLiner?: string;
 }): string {
   const write =

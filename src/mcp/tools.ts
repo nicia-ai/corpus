@@ -3,8 +3,9 @@ import { z } from "zod";
 
 import { asDocumentSlug } from "../ids";
 import { proposalMessageSchema } from "../lib/proposal-message";
-import type { ProposalResult } from "../project-store/commands/suggestions";
+import { proposalReviewUrl } from "../proposal-review-url";
 import { parseFrontmatter } from "../store/domain/frontmatter";
+import { NEW_DOCUMENT_SLUG } from "../store/domain/paths";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "../util";
 
 import type { McpExecutor } from "./executor";
@@ -53,34 +54,9 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-type FoundProposalResult = Extract<ProposalResult, { found: true }>;
-
-function proposalReviewUrl(
-  exec: McpExecutor,
-  result: Pick<
-    FoundProposalResult,
-    "proposalId" | "kind" | "documentSlug" | "outcome"
-  >,
-): string | undefined {
-  if (result.kind === "create" && result.outcome !== "open") {
-    return undefined;
-  }
-  const projectId = encodeURIComponent(exec.projectId);
-  const reviewPath =
-    result.kind === "create"
-      ? `/p/${projectId}/documents`
-      : `/p/${projectId}/documents/${encodeURIComponent(result.documentSlug)}`;
-  const reviewUrl = new URL(reviewPath, `${exec.baseUrl}/`);
-  reviewUrl.hash = `proposal-${String(result.proposalId)}`;
-  return reviewUrl.toString();
-}
-
 // Create-proposals mint a NEW identifier, so unlike reads/edits (which
 // accept whatever slug already exists) the proposed slug is format-checked
-// at the boundary: the normalizeSlug alphabet — lowercase alphanumerics
-// joined by single leading/trailing-free dashes.
-const CREATE_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-
+// at the boundary against NEW_DOCUMENT_SLUG.
 // Shared create path for suggest_edit's baseDocVersion-0 form. The scoped
 // executor pins the proposal's origin to its bound Collection; `taken` is
 // mapped to CONFLICT — the same existence grade the REST create path
@@ -98,7 +74,7 @@ async function proposeCreate(
       "a new-document proposal needs non-empty proposedMarkdown",
     );
   }
-  if (target.slug !== undefined && !CREATE_SLUG.test(target.slug)) {
+  if (target.slug !== undefined && !NEW_DOCUMENT_SLUG.test(target.slug)) {
     return err(
       id,
       ERR.INVALID_PARAMS,

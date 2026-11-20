@@ -12,7 +12,8 @@ OAuth sign-in flow — scripts, CI jobs, agents without a browser. For
 Claude Code and Claude Desktop, prefer [OAuth](./connect-your-agent.md).
 
 A Connection is administered by an organization **owner**: members can
-read through an existing credential, but only owners can mint a new one.
+read through an existing credential, but only owners can mint a new one or
+change what a key may do.
 
 ## Creating a key
 
@@ -24,7 +25,8 @@ API keys live on each Corpus's **Connect** page, not on a top-level
 3. On the MCP setup page, scroll to **API keys** and click
    **+ API key**. Give it a **Name** that says where it's used
    (`ci-release-bot`, `laptop-cursor`).
-4. Click **Generate key**.
+4. Choose its **Access** (see [Grants](#grants)).
+5. Click **Generate key**.
 
 The full secret is shown **exactly once**, on the confirmation screen.
 
@@ -34,6 +36,29 @@ Store it in your secret manager or the client's credential store. Corpus
 keeps only a short prefix (`cck_xxxxxxxx`) so you can recognize the key
 later; it cannot show or reset the secret. Lose it and you revoke and
 create a new one.
+
+## Grants
+
+Every key has a grant, the same `read < suggest < edit` rule a
+[share link](./share-a-page.md) carries. It applies to the REST API and the
+[CLI](./cli.md); each grant includes everything before it.
+
+| Grant     | The key can                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------- |
+| `read`    | List and fetch the corpus's documents.                                                                  |
+| `suggest` | Also send changes. They become **proposals** a person reviews hunk by hunk; nothing changes until then. |
+| `edit`    | Also write documents directly, create them, move them and archive them, with no review.                 |
+
+A change with too low a grant is refused with a `403` that says what the key
+may do instead. Removing or moving a document cannot be proposed, so a
+`suggest` key cannot do either.
+
+Pick the weakest grant the job needs: a CI job that only syncs a repository
+from Corpus needs `read`; one that sends repository edits back for review needs
+`suggest`. Keys minted before grants existed keep working as `edit`. An owner
+can change a key's grant from the **Access** control on the key list; it takes
+effect on the key's next request. The grant does not change what **MCP**
+allows: over MCP a key can still only file proposals.
 
 ## Using a key
 

@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 import { CliError } from "./errors.js";
+import { CLI_GRANTS, DEFAULT_GRANT, type Grant } from "./grant.js";
+import { type ApiConfig, request } from "./http.js";
+import { type ProposalReceipt, putDocument } from "./rest-write.js";
 import {
   type CorpusIdentity,
   parseState,
@@ -12,6 +15,7 @@ import {
 } from "./sync-state.js";
 
 export { CliError, type CliErrorKind } from "./errors.js";
+export type { FetchLike } from "./http.js";
 
 // Portable Corpus CLI core: the list / pull / push logic over the api-key
 // REST surface (`/api/v1/docs`), with ZERO runtime-specific imports. It
@@ -20,13 +24,6 @@ export { CliError, type CliErrorKind } from "./errors.js";
 // or a WASM host — each supplies its own adapter. The Node entry point
 // (`cli/corpus.ts`) wires `node:fs` + `node:process` to this core; tests
 // wire an in-memory file map + the test worker's `fetch`.
-
-// A `fetch` accepting a string URL — the narrow shape the core needs. The
-// global `fetch` (and a Worker `Fetcher.fetch`) is assignable to it.
-export type FetchLike = (
-  input: string,
-  init?: RequestInit,
-) => Promise<Response>;
 
 // The host filesystem, abstracted to text read/write by path. `readText`
 // resolves to `undefined` when the path is absent (it never throws for
@@ -43,12 +40,7 @@ export type Files = Readonly<{
 export type TreeFiles = Files &
   Readonly<{ remove: (path: string) => Promise<void> }>;
 
-export type CorpusConfig = Readonly<{
-  baseUrl: string;
-  apiKey: string;
-  fetch: FetchLike;
-  files: Files;
-}>;
+export type CorpusConfig = Readonly<ApiConfig & { files: Files }>;
 
 export type SyncConfig = Readonly<
   Omit<CorpusConfig, "files"> & { files: TreeFiles }
@@ -63,6 +55,8 @@ const DocSummarySchema = z.object({
 });
 const DocListSchema = z.object({
   corpus: z.object({ projectId: z.string(), slug: z.string() }).optional(),
+  // Absent from servers that predate grants.
+  grant: z.enum(CLI_GRANTS).optional(),
   documents: z.array(DocSummarySchema),
 });
 const DocFullSchema = z.object({
@@ -70,17 +64,6 @@ const DocFullSchema = z.object({
   title: z.string(),
   markdown: z.string(),
   docVersion: z.number(),
-});
-const PushResultSchema = z.object({
-  ok: z.boolean().optional(),
-  docVersion: z.number().optional(),
-  conflict: z.boolean().optional(),
-  currentVersion: z.number().optional(),
-  segmentCollision: z.boolean().optional(),
-  rolledBack: z.boolean().optional(),
-  // The server's refusal message on a non-409 error body (e.g. the 413
-  // markdown-size cap) — surfaced verbatim so the shell explains itself.
-  error: z.string().optional(),
 });
 const SidecarSchema = z.object({ slug: z.string(), docVersion: z.number() });
 
@@ -128,27 +111,10 @@ function serializeSidecar(slug: string, docVersion: number): string {
   return `${JSON.stringify({ slug, docVersion })}\n`;
 }
 
-async function request(
-  cfg: CorpusConfig,
-  path: string,
-  init?: RequestInit,
-): Promise<Response> {
-  const headers = new Headers(init?.headers);
-  headers.set("authorization", `Bearer ${cfg.apiKey}`);
-  try {
-    return await cfg.fetch(`${cfg.baseUrl}${path}`, { ...init, headers });
-  } catch (error) {
-    // `fetch` rejects with a TypeError when no response arrived (DNS, TLS,
-    // refused connection): a transport failure, not a bug.
-    if (error instanceof TypeError) {
-      throw new CliError("http", `request failed: ${error.message}`);
-    }
-    throw error;
-  }
-}
-
 export type CorpusListing = Readonly<{
   corpus: CorpusIdentity | undefined;
+  // What the key may do. A server that predates grants lets a key write.
+  grant: Grant;
   documents: readonly DocSummary[];
 }>;
 
@@ -160,7 +126,11 @@ export async function listCorpus(cfg: CorpusConfig): Promise<CorpusListing> {
     });
   }
   const body = DocListSchema.parse(await res.json());
-  return { corpus: body.corpus, documents: body.documents };
+  return {
+    corpus: body.corpus,
+    grant: body.grant ?? DEFAULT_GRANT,
+    documents: body.documents,
+  };
 }
 
 export async function list(cfg: CorpusConfig): Promise<readonly DocSummary[]> {
@@ -276,11 +246,26 @@ export async function pull(
   return { file, doc };
 }
 
+export type PushResult = Readonly<
+  | { file: string; docVersion: number; proposal?: undefined }
+  // A `suggest` key sends the change as a proposal. Nothing canonical has
+  // changed, so the sidecar / state file is left as it was: the file still
+  // reads as a local edit until the proposal is applied and pulled.
+  | { file: string; docVersion?: undefined; proposal: ProposalReceipt }
+>;
+
+export type PushOptions = Readonly<{
+  // Corpus-relative path for a NEW document (missing folders are created).
+  // Ignored by the server for a document that already exists.
+  docPath?: string;
+}>;
+
 export async function push(
   cfg: CorpusConfig,
   slug: string,
   path?: string,
-): Promise<Readonly<{ file: string; docVersion: number }>> {
+  options: PushOptions = {},
+): Promise<PushResult> {
   const file = path ?? `${slug}.md`;
   const markdown = await cfg.files.readText(file);
   if (markdown === undefined)
@@ -301,52 +286,66 @@ export async function push(
       ? await findTracked(cfg.files, file, slug)
       : undefined;
   const clientVersion = sidecar?.docVersion ?? tracked?.entry.docVersion ?? 0;
-  const res = await request(cfg, `/api/v1/docs/${encodeURIComponent(slug)}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ markdown, clientVersion }),
+  const outcome = await putDocument(cfg, {
+    slug,
+    markdown,
+    clientVersion,
+    path: options.docPath,
   });
-  const body = PushResultSchema.parse(await res.json());
-  if (res.status === 409) {
-    if (body.segmentCollision === true) {
+  switch (outcome.kind) {
+    case "written":
+      break;
+    case "proposed":
+      return { file, proposal: outcome.proposal };
+    case "unchanged":
+      throw new CliError(
+        "unsupported",
+        "nothing to propose: the document already has exactly this content.",
+      );
+    case "path-taken":
       throw new CliError(
         "conflict",
         "conflict: that slug collides with an existing file or folder path.",
         { status: 409 },
       );
-    }
-    if (body.rolledBack === true) {
+    case "rolled-back":
       throw new CliError(
         "conflict",
         "conflict: the write could not be completed atomically. Retry it.",
         { status: 409 },
       );
-    }
-    throw new CliError(
-      "conflict",
-      `conflict: the document is at v${body.currentVersion ?? 0}. ` +
-        "Pull, reapply your change, and push again.",
-      {
-        status: 409,
-        ...(body.currentVersion === undefined
-          ? {}
-          : { currentVersion: body.currentVersion }),
-      },
-    );
-  }
-  if (!res.ok || body.ok !== true || body.docVersion === undefined) {
-    const detail = body.error === undefined ? "" : `: ${body.error}`;
-    throw new CliError("http", `push failed (${res.status})${detail}`, {
-      status: res.status,
-    });
+    case "conflict":
+      throw new CliError(
+        "conflict",
+        `conflict: the document is at v${outcome.currentVersion ?? 0}. ` +
+          "Pull, reapply your change, and push again.",
+        {
+          status: 409,
+          ...(outcome.currentVersion === undefined
+            ? {}
+            : { currentVersion: outcome.currentVersion }),
+        },
+      );
+    case "gone":
+      throw new CliError("http", "push failed (404): not found", {
+        status: 404,
+      });
+    case "refused":
+      throw new CliError(
+        "http",
+        `push failed (${String(outcome.status)}): ${outcome.message}`,
+        { status: outcome.status },
+      );
+    default:
+      throw new CliError("http", "push failed (unexpected response)");
   }
   if (sidecar === undefined && tracked !== undefined) {
-    await recordTracked(cfg.files, tracked, body.docVersion, markdown);
+    await recordTracked(cfg.files, tracked, outcome.docVersion, markdown);
   } else {
     await cfg.files.writeText(
       sidecarPath(file),
-      serializeSidecar(slug, body.docVersion),
+      serializeSidecar(slug, outcome.docVersion),
     );
   }
-  return { file, docVersion: body.docVersion };
+  return { file, docVersion: outcome.docVersion };
 }

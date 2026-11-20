@@ -1,3 +1,4 @@
+import type { Grant } from "../grant";
 import type {
   ApiKeyId,
   CorpusSlug,
@@ -27,4 +28,7 @@ export type ConnectionRef = Readonly<{
   connectionId: ConnectionId;
   corpusSlug: CorpusSlug;
   apiKeyId?: ApiKeyId;
+  // Present exactly when the credential is an API key: what it may do to its
+  // corpus. An OAuth Connection carries no grant (MCP's only write is a proposal).
+  apiKeyGrant?: Grant;
 }>;
