@@ -9,6 +9,9 @@ const RetentionSchema = z
     documentVersionDays: z.number().int().positive().optional(),
     changeEventDays: z.number().int().positive().optional(),
     blobDays: z.number().int().positive().optional(),
+    // How long a soft-deleted file keeps its node (and so its R2 bytes) before
+    // the reaper removes it. A head file is never reaped.
+    fileDays: z.number().int().positive().optional(),
   })
   .strict();
 

@@ -16,7 +16,8 @@ export type EntitlementAction =
   | "member_invite"
   | "api_key_mint"
   | "oauth_client_register"
-  | "event_log_append";
+  | "event_log_append"
+  | "file_upload";
 
 export type QuotaInput = Readonly<{
   action: EntitlementAction;

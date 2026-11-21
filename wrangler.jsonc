@@ -50,11 +50,21 @@
   // plan without Artifacts get. Production opts in by adding the same
   // "artifacts" entry to the top level with its own namespace.
   //
+  //
+  // Optional file storage (see docs/files.md), the same way: the default
+  // config above has NO `FILES` R2 binding, so uploads are off and the editor
+  // hides its upload affordances. A deployment opts in by adding
+  // "r2_buckets": [{ "binding": "FILES", "bucket_name": "<its bucket>" }] to
+  // its top level. It is not declared at the top level here because a
+  // `wrangler deploy` would then fail for anyone who has not created the
+  // bucket.
+  //
   // The `mirror` environment is what the test suite's `mirror` project runs
   // against (vite.config.ts): the local Artifacts simulator, which needs Git
   // 2.32+ on PATH. `pnpm dev` cannot use it — the Cloudflare Vite plugin
-  // (1.x) does not run the simulator yet. Non-inheritable bindings must be
-  // repeated here; keep them in step with the top level.
+  // (1.x) does not run the simulator yet. The `files` environment is what
+  // the `files` project runs against: a local R2 bucket. Non-inheritable
+  // bindings must be repeated in each; keep them in step with the top level.
   "env": {
     "mirror": {
       "durable_objects": {
@@ -74,6 +84,28 @@
       "artifacts": [
         { "binding": "ARTIFACTS", "namespace": "corpus-dev", "remote": false },
       ],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "corpus-files-dev" }],
+      "vars": {
+        "BETTER_AUTH_SECRET": "dev-only-secret-change-me-min-32-chars-long",
+        "BETTER_AUTH_URL": "http://localhost:8787",
+      },
+    },
+    "files": {
+      "durable_objects": {
+        "bindings": [
+          { "name": "PROJECT_STORE", "class_name": "ProjectStore" },
+          { "name": "EVENT_LOG_STORE", "class_name": "EventLogStore" },
+        ],
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "corpus-control",
+          "database_id": "PLACEHOLDER_RUN_wrangler_d1_create",
+          "migrations_dir": "./drizzle",
+        },
+      ],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "corpus-files-dev" }],
       "vars": {
         "BETTER_AUTH_SECRET": "dev-only-secret-change-me-min-32-chars-long",
         "BETTER_AUTH_URL": "http://localhost:8787",

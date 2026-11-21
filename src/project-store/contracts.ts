@@ -198,6 +198,7 @@ export type ReapResult = Readonly<{
   versionsDeleted: number;
   eventsDeleted: number;
   blobsDeleted: number;
+  filesDeleted: number;
 }>;
 
 // Only what the DO method itself can return. Parse-time variants

@@ -20,13 +20,18 @@ import {
 // MUST stay present in the test build too. Under vitest we swap the
 // dev/build Cloudflare adapter for the test pool.
 //
-// Two test projects: the suite runs against the default wrangler config
-// (no Artifacts binding — the Git mirror is off, as for a self-hoster on a
-// plan without it), and `test/mirror/` runs against the `mirror` wrangler
-// environment, which adds the local Artifacts simulator.
+// Three test projects: the suite runs against the default wrangler config
+// (no Artifacts or R2 binding — the Git mirror and file uploads are off, as
+// for a self-hoster without them), `test/mirror/` runs against the `mirror`
+// wrangler environment, which adds the local Artifacts simulator, and
+// `test/files/` runs against the `files` environment, which adds local R2.
 const MIRROR_TESTS = "test/mirror/**/*.test.ts";
 const MIRROR_WRANGLER_ENV = "mirror";
 const MIRROR_TEST_TIMEOUT_MS = 30_000;
+// Likewise the file-storage tests run against the `files` wrangler
+// environment, which adds a local R2 bucket (the `FILES` binding).
+const FILES_TESTS = "test/files/**/*.test.ts";
+const FILES_WRANGLER_ENV = "files";
 
 export default defineConfig(async (configEnv: ConfigEnv) => {
   const isVitest = process.env.VITEST === "true" || configEnv.mode === "test";
@@ -93,7 +98,11 @@ export default defineConfig(async (configEnv: ConfigEnv) => {
       ? {
           test: {
             projects: [
-              testProject("worker", { exclude: [MIRROR_TESTS] }),
+              testProject("worker", { exclude: [MIRROR_TESTS, FILES_TESTS] }),
+              testProject("files", {
+                environment: FILES_WRANGLER_ENV,
+                include: [FILES_TESTS],
+              }),
               testProject("mirror", {
                 environment: MIRROR_WRANGLER_ENV,
                 include: [MIRROR_TESTS],

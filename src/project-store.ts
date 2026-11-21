@@ -48,6 +48,7 @@ import {
   corpusSnapshotMembers,
   type DomainChange,
   isDocumentChange,
+  isFileChange,
   type ProjectCommandContext,
 } from "./project-store/command";
 import {
@@ -97,6 +98,11 @@ import {
   layOutAsDrivesCommand,
 } from "./project-store/commands/drive-layout";
 import { ensureDefaultCorpusCommand } from "./project-store/commands/ensure-default-corpus";
+import {
+  attachFileCommand,
+  type AttachFileInput,
+  type AttachFileResult,
+} from "./project-store/commands/files";
 import {
   createFolderCommand,
   type CreateFolderResult,
@@ -190,6 +196,7 @@ import {
   corpusMembersProjection,
   corpusMetaProjection,
   corpusOutlineProjection,
+  documentAssetsProjection,
   documentHistoryPageProjection,
   documentHistoryProjection,
   documentHistoryVersionProjection,
@@ -213,6 +220,7 @@ import {
   corpusIsServed,
 } from "./store/domain/corpus-drive";
 import { DEFAULT_CORPUS_SLUG } from "./store/domain/default-corpus";
+import type { AssetRef } from "./store/domain/file-kinds";
 import type { GitMirrorStatus } from "./store/domain/git-mirror";
 import { events as buildEvent } from "./store/domain/instrumentation-events";
 import type { ParsedLink } from "./store/domain/links";
@@ -231,6 +239,7 @@ import {
   DocumentRepo,
   type RecentDocumentRow,
 } from "./store/repos/document-repo";
+import { FileRepo } from "./store/repos/file-repo";
 import {
   type DeleteFolderResult,
   FolderRepo,
@@ -297,6 +306,13 @@ type RealtimeChangeResolver<T> = (
   outcome: CommandOutcome<T>,
 ) => RealtimeChange | undefined;
 
+// A stored file as the serving route needs it: what to say about the bytes.
+export type ServedFile = Readonly<{
+  filename: string;
+  contentType: string;
+  size: number;
+}>;
+
 export type DocumentReviewSnapshot = Readonly<{
   doc: DocumentSnapshot | undefined;
   // The corpus the document is in and its path inside it.
@@ -306,6 +322,8 @@ export type DocumentReviewSnapshot = Readonly<{
   blocks: DocumentBlocksResult;
   comments: readonly CommentThreadView[];
   suggestions: readonly SuggestionView[];
+  // The stored files the page's relative links resolve to, by link target.
+  assets: Readonly<Record<string, AssetRef>>;
 }>;
 
 export type DocumentHistoryPageSnapshot = Readonly<{
@@ -345,6 +363,14 @@ function realtimeChangeFromDomain(
   // document.archived — the document one is what a viewer needs to hear).
   const change = changes.find(isDocumentChange) ?? changes[0];
   if (change === undefined) return undefined;
+  if (isFileChange(change)) {
+    return compact({
+      area: "corpus" as const,
+      action: change.kind,
+      actorId: change.changedBy,
+      collectionSlug: change.corpusSlug,
+    });
+  }
   if (isDocumentChange(change)) {
     return compact({
       area: "document" as const,
@@ -773,6 +799,7 @@ export class ProjectStore extends DurableObject<Env> {
       docs: new DocumentRepo(graph),
       cols: new CorpusGraph(graph),
       folders: new FolderRepo(graph),
+      files: new FileRepo(graph),
       log: new ChangeLog(ledger),
       blobs: new BlobStore(ledger),
       versions: new VersionRepo(graph),
@@ -947,20 +974,28 @@ export class ProjectStore extends DurableObject<Env> {
         blocks: { found: false },
         comments: [],
         suggestions: [],
+        assets: {},
       };
     }
-    const [location, head, blocks, comments, suggestions] = await Promise.all([
-      documentLocationProjection(u, slug),
-      u.versions.documentVersion(slug, doc.docVersion),
-      this.documentBlocksForHead(u, slug, doc.docVersion, doc.markdown),
-      this.commentThreadViews(u, slug),
-      this.suggestionViews(u, slug),
-    ]);
+    const [location, head, blocks, comments, suggestions, assets] =
+      await Promise.all([
+        documentLocationProjection(u, slug),
+        u.versions.documentVersion(slug, doc.docVersion),
+        this.documentBlocksForHead(u, slug, doc.docVersion, doc.markdown),
+        this.commentThreadViews(u, slug),
+        this.suggestionViews(u, slug),
+        documentAssetsProjection(
+          u,
+          slug,
+          this.projectId(),
+          this.parsedLinksByHash,
+        ),
+      ]);
     const headChange =
       head === undefined
         ? undefined
         : { changedBy: head.changedBy, changedAt: head.changedAt };
-    return { doc, location, headChange, blocks, comments, suggestions };
+    return { doc, location, headChange, blocks, comments, suggestions, assets };
   }
 
   async documentHistoryPageSnapshot(
@@ -1134,6 +1169,42 @@ export class ProjectStore extends DurableObject<Env> {
   // verifier the MCP tool and CLI surface.
   async verifyHistory(slug?: DocumentSlug): Promise<VerifyResult> {
     return verifyHistoryProjection(await this.read(), slug);
+  }
+
+  // — Files ——————————————————————————————————————————————————————————
+  // The metadata half of an upload (the bytes are in R2 first; see
+  // `src/files/http.ts`). One transaction: the node, its folder edge, the
+  // `file.created` event.
+
+  async attachFile(input: AttachFileInput): Promise<AttachFileResult> {
+    const outcome = await this.writeCommand(new Date().toISOString(), (ctx) =>
+      attachFileCommand(ctx, input),
+    );
+    return outcome.result;
+  }
+
+  // The live file with these bytes, or undefined: the authority for "may a
+  // member of this project read this hash". Project-level, since a member
+  // already sees every page.
+  async fileByHash(contentHash: string): Promise<ServedFile | undefined> {
+    const file = await (await this.read()).files.liveByHash(contentHash);
+    return file === undefined
+      ? undefined
+      : {
+          filename: file.filename,
+          contentType: file.contentType,
+          size: file.size,
+        };
+  }
+
+  // Every hash a surviving node references: what the orphan sweep keeps.
+  async referencedFileHashes(): Promise<readonly string[]> {
+    return (await this.read()).files.referencedHashes();
+  }
+
+  // Live file count, for exports to report what they leave out.
+  async liveFileCount(): Promise<number> {
+    return (await this.read()).files.liveCount();
   }
 
   // — Retention ——————————————————————————————————————————————————————

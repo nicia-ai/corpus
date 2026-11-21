@@ -55,5 +55,12 @@ export async function reapExpiredRecords(
     );
   }
 
-  return { versionsDeleted, eventsDeleted, blobsDeleted };
+  let filesDeleted = 0;
+  if (retention.fileDays !== undefined) {
+    filesDeleted = await u.files.reapDeletedBefore(
+      cutoffIso(nowMs, retention.fileDays),
+    );
+  }
+
+  return { versionsDeleted, eventsDeleted, blobsDeleted, filesDeleted };
 }

@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import type { CallerChannel, CorpusSlug, DocumentSlug } from "../../ids";
+import type {
+  CallerChannel,
+  CorpusSlug,
+  DocumentSlug,
+  FileSlug,
+} from "../../ids";
 import { alwaysIncludeBudgetTokensZ, compact } from "../../util";
 
 // The change-event vocabulary — the single source of event-type
@@ -16,6 +21,13 @@ export const DOCUMENT_EVENT_TYPES = [
   "document.archived",
 ] as const;
 export type DocumentEventType = (typeof DOCUMENT_EVENT_TYPES)[number];
+
+// A file is created (uploaded) or deleted. A file has no version chain, so
+// there is no "updated" yet; replacing one in place (the CLI and REST
+// writes) adds `file.replaced` with before/after hashes when it lands. The
+// Git mirror subscribes to this family, never to R2.
+export const FILE_EVENT_TYPES = ["file.created", "file.deleted"] as const;
+export type FileEventType = (typeof FILE_EVENT_TYPES)[number];
 
 // `attached` / `detached` now mean a document MOVED into / out of a
 // corpus (membership is "under the corpus root"; there is no attaching).
@@ -71,6 +83,48 @@ export type CollectionChange = Readonly<{
   changedBy: string;
   changedAt: string;
 }>;
+
+// A file change names the corpus the file is in (its folder ancestry's
+// root), because every consumer, the mirror above all, thinks per corpus.
+// `filename` and the content fields are present on `file.created`; a
+// cascade delete knows only the slug.
+export type FileChange = Readonly<{
+  kind: FileEventType;
+  fileSlug: FileSlug;
+  corpusSlug: CorpusSlug;
+  filename?: string;
+  contentHash?: string;
+  contentType?: string;
+  size?: number;
+  changedBy: string;
+  changedAt: string;
+}>;
+
+export function fileCreated(
+  args: Readonly<{
+    fileSlug: FileSlug;
+    corpusSlug: CorpusSlug;
+    filename: string;
+    contentHash: string;
+    contentType: string;
+    size: number;
+    changedBy: string;
+    changedAt: string;
+  }>,
+): FileChange {
+  return { kind: "file.created", ...args };
+}
+
+export function fileDeleted(
+  args: Readonly<{
+    fileSlug: FileSlug;
+    corpusSlug: CorpusSlug;
+    changedBy: string;
+    changedAt: string;
+  }>,
+): FileChange {
+  return { kind: "file.deleted", ...args };
+}
 
 // The created-vs-updated rule, in one place.
 export function documentChange(

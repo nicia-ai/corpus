@@ -7,6 +7,7 @@ import {
 import {
   documentMovedIn,
   documentMovedOut,
+  fileDeleted,
   MEMBERSHIP_REASON_MOVED,
 } from "../../store/domain/change-events";
 import type { CorpusLocation } from "../../store/domain/corpus-drive";
@@ -169,9 +170,21 @@ export async function deleteFolderCommand(
     return { result: MISSING, changes: [] };
   }
   const corpusSlug = await corpusOfFolder(ctx.u, input.slug);
-  const result = await ctx.u.folders.delete(input.slug);
+  const result = await ctx.u.folders.delete(input.slug, ctx.now);
   if (!result.ok) return { result, changes: [] };
   const changes: DomainChange[] = [];
+  if (corpusSlug !== undefined) {
+    for (const fileSlug of result.fileSlugs) {
+      changes.push(
+        fileDeleted({
+          fileSlug,
+          corpusSlug,
+          changedBy: input.changedBy,
+          changedAt: ctx.now,
+        }),
+      );
+    }
+  }
   for (const slug of result.documentSlugs) {
     const archived = await archiveOneDocumentCommand(ctx, {
       slug,

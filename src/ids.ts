@@ -21,6 +21,7 @@ export type UserId = Id<"UserId">;
 export type DocumentSlug = Id<"DocumentSlug">;
 export type CorpusSlug = Id<"CorpusSlug">;
 export type FolderSlug = Id<"FolderSlug">;
+export type FileSlug = Id<"FileSlug">;
 export type ApiKeyId = Id<"ApiKeyId">;
 export type ConnectionId = Id<"ConnectionId">;
 export type EmbassyId = Id<"EmbassyId">;
@@ -52,6 +53,7 @@ export const asInvitationId = (s: string): InvitationId => s as InvitationId;
 export const asDocumentSlug = (s: string): DocumentSlug => s as DocumentSlug;
 export const asCorpusSlug = (s: string): CorpusSlug => s as CorpusSlug;
 export const asFolderSlug = (s: string): FolderSlug => s as FolderSlug;
+export const asFileSlug = (s: string): FileSlug => s as FileSlug;
 export const asCallerRef = (s: string): CallerRef => s as CallerRef;
 
 // Construct a CallerRef from an API key id. The single sanctioned site

@@ -1,3 +1,4 @@
+import { defineGraph } from "@nicia-ai/typegraph";
 import { runInDurableObject } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -6,9 +7,29 @@ import { createSqliteBackend as createBackendPrev } from "typegraph-prev/adapter
 import { describe, expect, it } from "vitest";
 
 import { ledgerMigrations } from "../drizzle-do/migrations";
-import { canonicalGraph } from "../src/graph";
+import {
+  canonicalGraph,
+  Collection,
+  COLLECTION_BY_SLUG,
+  CollectionVersion,
+  COLLECTION_VERSION_BY_SLUG_VERSION,
+  Document,
+  DOCUMENT_BY_SLUG,
+  DocumentVersion,
+  DOCUMENT_VERSION_BY_SLUG_VERSION,
+  Folder,
+  FOLDER_BY_SLUG,
+  folderChild,
+  GRAPH_ID,
+  inFolder,
+  includes,
+  includesFolder,
+  versionOfCollection,
+  versionsOf,
+} from "../src/graph";
+import { formatOfExtension } from "../src/store/domain/file-kinds";
 
-import { docSlug, freshStore } from "./_helpers";
+import { colSlug, docSlug, freshStore } from "./_helpers";
 
 // Every other test in this suite builds a graph from scratch, which takes
 // `ensureSchema`'s `initializeSchema` path — there is no stored schema to
@@ -48,11 +69,62 @@ const RECORDED_RELATIONS = [
 // future release changes the graph document's SHAPE rather than just its
 // brand identities, this seeding call is what surfaces it: it will fail
 // at runtime, not silently pass.
+// The graph as every project provisioned before uploaded files existed has
+// it: the same kinds and constraints, without `File` and `file_in_folder`. A
+// real project stores exactly this schema, so booting the CURRENT graph over
+// it is the hop that adds the File kind to an adopted store.
+const unique = (name: string, fields: string[]) => [
+  { name, fields, scope: "kind" as const, collation: "binary" as const },
+];
+const graphBeforeFiles = defineGraph({
+  id: GRAPH_ID,
+  nodes: {
+    Document: { type: Document, unique: unique(DOCUMENT_BY_SLUG, ["slug"]) },
+    DocumentVersion: {
+      type: DocumentVersion,
+      unique: unique(DOCUMENT_VERSION_BY_SLUG_VERSION, ["slug", "docVersion"]),
+    },
+    Collection: {
+      type: Collection,
+      unique: unique(COLLECTION_BY_SLUG, ["slug"]),
+    },
+    CollectionVersion: {
+      type: CollectionVersion,
+      unique: unique(COLLECTION_VERSION_BY_SLUG_VERSION, [
+        "collectionSlug",
+        "collectionVersion",
+      ]),
+    },
+    Folder: { type: Folder, unique: unique(FOLDER_BY_SLUG, ["slug"]) },
+  },
+  edges: {
+    includes: { type: includes, from: [Collection], to: [Document] },
+    includes_folder: {
+      type: includesFolder,
+      from: [Collection],
+      to: [Folder],
+    },
+    folder_child: { type: folderChild, from: [Folder], to: [Folder] },
+    in_folder: { type: inFolder, from: [Document], to: [Folder] },
+    versions_of: {
+      type: versionsOf,
+      from: [Document],
+      to: [DocumentVersion],
+    },
+    version_of_collection: {
+      type: versionOfCollection,
+      from: [Collection],
+      to: [CollectionVersion],
+    },
+  },
+});
+
 async function seedWithPreviousRelease(
   state: DurableObjectState,
+  graph: unknown = canonicalGraph,
 ): Promise<void> {
   const [prev] = await createStorePrev(
-    canonicalGraph as unknown as Parameters<typeof createStorePrev>[0],
+    graph as Parameters<typeof createStorePrev>[0],
     createBackendPrev(drizzle(state.storage)),
   );
   await prev.materializeIndexes({ stopOnError: true });
@@ -144,4 +216,67 @@ describe("upgrade path: a project provisioned by the previous release", () => {
       });
     },
   );
+
+  // The File kind arrived after projects existed. Opening the current graph
+  // over storage that has never heard of it must add the kind, its edge and
+  // its indexes, keep every existing row, and then accept file writes: the
+  // path `ensureStore` self-heals on every project's next boot.
+  it("adds the File kind to a project provisioned before uploaded files existed", async () => {
+    const store = freshStore("upgrade-files");
+    await runInDurableObject(store, async (_instance, state) => {
+      await migrate(drizzle(state.storage), ledgerMigrations);
+      await seedWithPreviousRelease(state, graphBeforeFiles);
+      const kinds = state.storage.sql
+        .exec<{ n: number }>(
+          "SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'corpus_file_%'",
+        )
+        .one().n;
+      expect(kinds).toBe(0);
+    });
+
+    const docs = await store.listDocuments();
+    expect(docs.map((d) => d.slug)).toContain(SEEDED);
+
+    const corpus = colSlug("after-upgrade");
+    await store.createCorpus({
+      slug: corpus,
+      name: "After",
+      changedBy: "upgrade-test",
+    });
+    const page = await store.importDocumentAtPath({
+      corpusSlug: corpus,
+      path: "guide/page.md",
+      markdown: "![](./shot.png)",
+      changedBy: "upgrade-test",
+    });
+    if (!page.ok) throw new Error("the page could not be created");
+    const png = formatOfExtension("png");
+    if (png === undefined) throw new Error("the png format must exist");
+    const hash = "ab".repeat(32);
+    const attached = await store.attachFile({
+      documentSlug: docSlug(page.slug),
+      name: "shot.png",
+      contentHash: hash,
+      size: 12,
+      format: png,
+      changedBy: "upgrade-test",
+    });
+    expect(attached).toMatchObject({ ok: true, created: true });
+    expect((await store.fileByHash(hash))?.filename).toBe("shot.png");
+
+    // The adopted schema now carries the File indexes TypeGraph materialized.
+    await runInDurableObject(store, (_instance, state) => {
+      const present = state.storage.sql
+        .exec<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'corpus_file_%'",
+        )
+        .toArray()
+        .map((row) => row.name);
+      expect(new Set(present)).toEqual(
+        new Set(["corpus_file_slug_idx", "corpus_file_hash_idx"]),
+      );
+    });
+    // And the older rows are intact.
+    expect((await store.listDocuments()).map((d) => d.slug)).toContain(SEEDED);
+  });
 });

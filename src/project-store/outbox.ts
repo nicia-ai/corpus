@@ -1,5 +1,9 @@
 import { eventLogFor } from "../control/event-log-for";
 import type { ProjectId } from "../ids";
+import type {
+  CollectionChange,
+  DocumentChange,
+} from "../store/domain/change-events";
 import {
   encodeEvent,
   eventType as eventTypeOf,
@@ -12,7 +16,7 @@ import {
   type InstrumentationOutbox,
 } from "../store/repos/instrumentation-outbox";
 
-import { isDocumentChange, type DomainChange } from "./command";
+import { isDocumentChange, isFileChange, type DomainChange } from "./command";
 import {
   corpusInstrumentationEvent,
   documentInstrumentationEvent,
@@ -54,6 +58,10 @@ export class ProjectInstrumentation {
     changes: readonly DomainChange[],
   ): Promise<void> {
     for (const change of changes) {
+      if (isFileChange(change)) {
+        await u.log.appendFile(change);
+        continue;
+      }
       const localEventId = isDocumentChange(change)
         ? await u.log.append(change)
         : await u.log.appendCorpus(change);
@@ -88,7 +96,9 @@ export class ProjectInstrumentation {
     return this.drainPromise;
   }
 
-  private eventForChange(change: DomainChange): InstrumentationEvent {
+  private eventForChange(
+    change: DocumentChange | CollectionChange,
+  ): InstrumentationEvent {
     return isDocumentChange(change)
       ? documentInstrumentationEvent(change)
       : corpusInstrumentationEvent(change);

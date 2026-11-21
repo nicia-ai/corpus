@@ -3,8 +3,10 @@ import type { Node } from "@nicia-ai/typegraph";
 import type { Folder } from "../../graph";
 import {
   asDocumentSlug,
+  asFileSlug,
   asFolderSlug,
   type DocumentSlug,
+  type FileSlug,
   type FolderSlug,
 } from "../../ids";
 import {
@@ -16,8 +18,13 @@ import {
 import type { GraphHandle } from "../handle";
 
 import type { DocumentNode } from "./document-repo";
+import { type FileNode, FileRepo, type FolderFile } from "./file-repo";
 
 export type FolderNode = Node<typeof Folder>;
+
+type FileEdge = Awaited<
+  ReturnType<GraphHandle["edges"]["file_in_folder"]["findFrom"]>
+>[number];
 
 const FOLDER_WALK_MAX_HOPS = 100;
 
@@ -43,6 +50,8 @@ export type FolderTreeNode = Readonly<{
   slug: string;
   childFolders: readonly Readonly<{ slug: string; position: number }>[];
   documents: readonly Readonly<{ slug: string; filename: string }>[];
+  // Live files directly in it.
+  files: readonly FolderFile[];
 }>;
 
 export type FolderView = Readonly<{
@@ -75,6 +84,9 @@ export type DeleteFolderResult = Readonly<
       // Documents that were in the deleted subtree — the DO archives
       // each (folder delete is a cascade, never a re-home).
       documentSlugs: readonly DocumentSlug[];
+      // Files that were in it, already soft-deleted here (a file has no
+      // history to archive, only a `deletedAt` and bytes the sweep reclaims).
+      fileSlugs: readonly FileSlug[];
     }
   | { ok: false; reason: "missing" }
 >;
@@ -95,7 +107,11 @@ export type PlaceDocumentResult = Readonly<
 // Helpers take nodes (not ids) and return inferred edges so TypeGraph's
 // branded NodeId/EdgeId flow through unbroken (mirrors the other repos).
 export class FolderRepo {
-  constructor(private readonly g: GraphHandle) {}
+  private readonly files: FileRepo;
+
+  constructor(private readonly g: GraphHandle) {
+    this.files = new FileRepo(g);
+  }
 
   // — Lookups ————————————————————————————————————————————————
 
@@ -249,6 +265,7 @@ export class FolderRepo {
   private toSiblingSegments(
     folders: readonly Readonly<{ node: FolderNode }>[],
     docs: readonly DocumentNode[],
+    files: readonly FileNode[],
   ): SiblingSegment[] {
     return [
       ...folders.map((f) => ({
@@ -261,24 +278,39 @@ export class FolderRepo {
         slug: d.slug,
         segment: d.filename,
       })),
+      ...files.map((f) => ({
+        kind: "file" as const,
+        slug: f.slug,
+        segment: f.filename,
+      })),
     ];
   }
 
   // The cross-type sibling namespace under a parent: child folders
-  // contribute `name`, documents contribute `filename`. Archived docs
+  // contribute `name`, documents and files contribute `filename`. Archived docs
   // are excluded — once archived, a doc no longer occupies its filename
   // slot for collision checks (so a re-upload at the same path lands on
   // a fresh document, and the slot is free for a new sibling).
   private async siblingSegments(
     parentSlug: string | null,
   ): Promise<SiblingSegment[]> {
-    const [folders, docs] = await Promise.all([
+    const [folders, docs, files] = await Promise.all([
       this.childFolders(parentSlug),
       this.documentsIn(parentSlug),
+      parentSlug === null ? [] : this.files.liveIn(parentSlug),
     ]);
     return this.toSiblingSegments(
       folders,
       docs.filter((d) => d.archivedAt === undefined),
+      files,
+    );
+  }
+
+  // Every segment taken under a folder (folders, live documents, live
+  // files): what a new name must avoid.
+  async occupiedNames(folderSlug: string): Promise<ReadonlySet<string>> {
+    return new Set(
+      (await this.siblingSegments(folderSlug)).map((s) => s.segment),
     );
   }
 
@@ -482,7 +514,12 @@ export class FolderRepo {
       ).values(),
     ];
     if (folders.length === 0) {
-      map.set(rootSlug, { slug: rootSlug, childFolders: [], documents: [] });
+      map.set(rootSlug, {
+        slug: rootSlug,
+        childFolders: [],
+        documents: [],
+        files: [],
+      });
       return map;
     }
     const folderRefs = folders.map((folder) => ({
@@ -490,10 +527,12 @@ export class FolderRepo {
       id: folder.id,
     }));
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
-    const [childGroups, documentGroups] = await Promise.all([
+    const [childGroups, documentGroups, fileGroups] = await Promise.all([
       this.g.edges.folder_child.bulkFindFrom(folderRefs),
       this.g.edges.in_folder.bulkFindTo(folderRefs),
+      this.g.edges.file_in_folder.bulkFindTo(folderRefs),
     ]);
+    const filesByFolder = await this.liveFilesByFolder(fileGroups, byId);
     const documentEdges = documentGroups.flat();
     const documents = await this.g.nodes.Document.getByIds(
       documentEdges.map((edge) => edge.fromId),
@@ -520,9 +559,38 @@ export class FolderRepo {
             : [{ slug: child.slug, position: edge.position }];
         }),
         documents: documentsByFolder.get(folder.slug) ?? [],
+        files: filesByFolder.get(folder.slug) ?? [],
       });
     }
     return map;
+  }
+
+  // The live files of a set of folders, grouped by folder slug, from the
+  // `file_in_folder` edge groups parallel to the folder set.
+  private async liveFilesByFolder(
+    groups: readonly (readonly FileEdge[])[],
+    foldersById: ReadonlyMap<string, FolderNode>,
+  ): Promise<ReadonlyMap<string, readonly FolderFile[]>> {
+    const edges = groups.flat();
+    const nodes = await this.g.nodes.File.getByIds(
+      edges.map((edge) => edge.fromId),
+    );
+    const byFolder = new Map<string, FolderFile[]>();
+    for (const [i, edge] of edges.entries()) {
+      const file = nodes[i];
+      const folder = foldersById.get(edge.toId);
+      if (
+        file === undefined ||
+        file.deletedAt !== undefined ||
+        folder === undefined
+      ) {
+        continue;
+      }
+      const list = byFolder.get(folder.slug) ?? [];
+      list.push({ slug: asFileSlug(file.slug), filename: file.filename });
+      byFolder.set(folder.slug, list);
+    }
+    return byFolder;
   }
 
   // The document occupying `filename` directly under `folderSlug`
@@ -767,7 +835,10 @@ export class FolderRepo {
   // documents are detached and returned for the DO to archive (the
   // soft-delete documents get everywhere). No re-home, so no name-clash
   // can ever block a delete.
-  async delete(slug: FolderSlug): Promise<DeleteFolderResult> {
+  async delete(
+    slug: FolderSlug,
+    deletedAt: string,
+  ): Promise<DeleteFolderResult> {
     const node = await this.find(slug);
     if (node === undefined) return { ok: false, reason: "missing" };
     const documentSlugs: DocumentSlug[] = [];
@@ -780,10 +851,24 @@ export class FolderRepo {
       kind: "Folder" as const,
       id: folder.id,
     }));
-    const [parents, documentEdgeGroups] = await Promise.all([
+    const [parents, documentEdgeGroups, fileEdgeGroups] = await Promise.all([
       this.parentEdgesOf(subtree),
       this.g.edges.in_folder.bulkFindTo(folderRefs),
+      this.g.edges.file_in_folder.bulkFindTo(folderRefs),
     ]);
+    const fileNodes = await this.g.nodes.File.getByIds(
+      fileEdgeGroups.flat().map((edge) => edge.fromId),
+    );
+    for (const edge of fileEdgeGroups.flat()) {
+      await this.g.edges.file_in_folder.hardDelete(edge.id);
+    }
+    const fileSlugs = await this.files.softDelete(
+      fileNodes.filter(
+        (file): file is FileNode =>
+          file !== undefined && file.deletedAt === undefined,
+      ),
+      deletedAt,
+    );
     const documentEdges = documentEdgeGroups.flat();
     const documents = await this.g.nodes.Document.getByIds(
       documentEdges.map((edge) => edge.fromId),
@@ -800,7 +885,7 @@ export class FolderRepo {
       if (own !== undefined) await this.g.edges.folder_child.hardDelete(own.id);
       await this.g.nodes.Folder.hardDelete(f.id);
     }
-    return { ok: true, documentSlugs };
+    return { ok: true, documentSlugs, fileSlugs };
   }
 
   // The folder plus every descendant folder, deepest-first: a parent is
