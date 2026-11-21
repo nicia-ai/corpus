@@ -127,7 +127,7 @@ the Connection's bound Corpus:
 
 | Tool                    | Does                                                                                                                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_collections`      | The Corpus this connection is bound to (a connection targets exactly one).                                                                                                        |
+| `list_corpora`          | The Corpus this connection is bound to (a connection targets exactly one).                                                                                                        |
 | `list_documents`        | Every document in the bound Corpus, in alphabetical order by path — path, slug, title, version, and size. Paths are relative to the corpus root.                                  |
 | `read_document`         | Read one document's markdown, verbatim, by `path` or `slug`.                                                                                                                      |
 | `read_document_meta`    | Parsed YAML frontmatter for one document in the bound Corpus, by `path` or `slug`.                                                                                                |
@@ -138,7 +138,7 @@ the Connection's bound Corpus:
 | `reply_to_proposal`     | Reply inside one of this caller's still-open proposals. It cannot access document comments, resolve feedback, or act on another caller's proposal.                                |
 
 The same data is also exposed as MCP **resources**:
-`collection://<slug>/outline` and `document://<slug>` — handy for clients that browse
+`corpus://<slug>/outline` and `document://<slug>` — handy for clients that browse
 resources rather than call tools. Resources are scoped the same way; you won't see
 slugs outside the bound Corpus.
 

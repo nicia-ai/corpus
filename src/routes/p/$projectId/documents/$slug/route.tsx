@@ -25,7 +25,7 @@ function DocumentLayout(): React.ReactElement {
         <BackLink
           to="/p/$projectId/documents"
           projectId={projectId}
-          label="Documents"
+          label="Corpora"
           className="mb-2 inline-block"
         />
       ) : (

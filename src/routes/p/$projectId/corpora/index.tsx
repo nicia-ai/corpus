@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-// The corpora ARE the Documents surface; this path survives only so old
+// The corpora ARE the Corpora page; this path survives only so old
 // links keep working.
 export const Route = createFileRoute("/p/$projectId/corpora/")({
   beforeLoad: ({ params }) => {

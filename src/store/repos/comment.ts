@@ -10,6 +10,8 @@ import {
   type NewCommentThread,
 } from "../../db";
 
+import { readInBatches } from "./in-batches";
+
 type AnchorUpdate = Readonly<{
   blockId: string;
   start: number;
@@ -85,15 +87,16 @@ export class CommentRepo {
     return r?.id ?? 0;
   }
 
-  commentsForThreads(
+  async commentsForThreads(
     threadIds: readonly number[],
   ): Promise<readonly CommentRow[]> {
-    if (threadIds.length === 0) return Promise.resolve([]);
-    return this.db
-      .select()
-      .from(comment)
-      .where(inArray(comment.threadId, [...threadIds]))
-      .orderBy(comment.id);
+    const rows = await readInBatches(threadIds, (batch) =>
+      this.db
+        .select()
+        .from(comment)
+        .where(inArray(comment.threadId, [...batch])),
+    );
+    return [...rows].sort((a, b) => a.id - b.id);
   }
 
   // After a rebase relocates a thread's anchor within the new document.

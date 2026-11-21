@@ -55,7 +55,7 @@ propose instead, so nothing reaches an agent consumer without review. See
 4. Choose **Create link**, then **Copy prompt**.
 
 To start a page that an agent will fill in, use **New intake** on the
-Documents page: it creates an empty page with an Edit link and copies the
+Corpora page: it creates an empty page with an Edit link and copies the
 prompt in one step.
 
 ## One link per collaborator
@@ -227,7 +227,7 @@ Archiving or deleting a page, or deleting the project, also revokes its links.
 
 Priya and Sam run a hackathon. Priya owns the Corpus organization.
 
-**1. Priya creates and shares the page.** On the Documents page she chooses
+**1. Priya creates and shares the page.** On the Corpora page she chooses
 **New intake**, titles it "Spring Hackathon", and Corpus copies a prompt. She
 opens the page, chooses **Share**, and sees one Edit link named "Intake draft".
 She renames it "Priya's Claude Code" and chooses **Create another link**: name

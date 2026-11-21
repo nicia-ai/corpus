@@ -667,9 +667,7 @@ async function assertScopeContains(
   bound: string,
   members: readonly string[],
 ): Promise<void> {
-  const ctxs = JSON.parse(
-    textOf(await callTool(token, "list_collections")),
-  ) as {
+  const ctxs = JSON.parse(textOf(await callTool(token, "list_corpora"))) as {
     slug: string;
   }[];
   expect(ctxs.map((c) => c.slug)).toEqual([bound]);
@@ -695,7 +693,7 @@ async function assertScopeForbids(
   const docs = textOf(await callTool(token, "list_documents"));
   for (const slug of forbidden) expect(docs).not.toContain(slug);
 
-  const ctxs = textOf(await callTool(token, "list_collections"));
+  const ctxs = textOf(await callTool(token, "list_corpora"));
   for (const slug of forbidden) expect(ctxs).not.toContain(slug);
 
   const resList = await rpc(token, {
@@ -717,7 +715,7 @@ async function assertScopeForbids(
     jsonrpc: "2.0",
     id: 100,
     method: "resources/read",
-    params: { uri: `collection://${otherCtx}/outline` },
+    params: { uri: `corpus://${otherCtx}/outline` },
   });
   expect(((await outline.json()) as JsonRpcOk).error?.code).toBe(-32004);
 }

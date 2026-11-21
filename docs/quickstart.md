@@ -24,7 +24,7 @@ more than one.
 
 ## 3. Write your first document
 
-Go to **Documents → Document** (the **+** button). Give it a **Title**
+Go to **Corpora → Document** (the **+** button). Give it a **Title**
 and write **Markdown** in the body. For example:
 
 ```markdown

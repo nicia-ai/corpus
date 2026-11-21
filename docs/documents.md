@@ -11,7 +11,7 @@ corpus: written once, versioned forever, and belonging to exactly one
 
 ## Creating a document
 
-**Documents → Document** (the **+** button). Enter a **Title** and the
+**Corpora → Document** (the **+** button). Enter a **Title** and the
 **Markdown** body, then **Create**.
 
 A new document starts in **Drafts**, the unpublished space. Agents
@@ -110,10 +110,10 @@ frontmatter: …"_. Either fix the YAML or remove the block.
 
 ## Importing existing markdown
 
-Have docs already written somewhere? Click **Upload** on the Documents
+Have docs already written somewhere? Click **Upload** on the Corpora
 page (or drop files into the empty-state uploader). Drag a folder, pick
 individual files, or drop a `.zip` — Corpus keeps the folder structure,
-imports every Markdown/text file under it, and lands you on Documents
+imports every Markdown/text file under it, and lands you on Corpora
 with a summary toast (`12 added · 3 updated · 1 failed`). Choose the
 corpus the files land in; leave it on Drafts to publish them later. Each
 imported file becomes a canonical document; re-uploading an unchanged

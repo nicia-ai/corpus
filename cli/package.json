@@ -1,7 +1,7 @@
 {
   "name": "@nicia-ai/corpus-cli",
   "version": "0.1.0",
-  "description": "Standalone CLI for a collection-scoped Corpus markdown store.",
+  "description": "Standalone CLI for a corpus-scoped Corpus markdown store.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/core.js",
