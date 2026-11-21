@@ -27,6 +27,8 @@ function CurrentTabRoute(): React.ReactElement {
     suggestions,
     viewerId,
     docRefs,
+    assets,
+    filesEnabled,
   } = Route.useLoaderData();
   const projectId = asProjectId(Route.useParams().projectId);
   const isOwner = ProjectRoute.useLoaderData().current.role === "owner";
@@ -43,6 +45,8 @@ function CurrentTabRoute(): React.ReactElement {
       suggestions={suggestions}
       viewerId={viewerId}
       docRefs={docRefs}
+      assets={assets}
+      filesEnabled={filesEnabled}
       isOwner={isOwner}
     />
   );

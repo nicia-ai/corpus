@@ -186,6 +186,12 @@ Bindings (in `wrangler.jsonc`, not env vars):
   Absent by default: the feature is off. To enable it add
   `"artifacts": [{ "binding": "ARTIFACTS", "namespace": "<name>" }]` to the
   top level of `wrangler.jsonc` and deploy; there is no secret to set.
+- Optional `FILES` — R2 bucket binding that turns on image and attachment
+  uploads ([docs/files.md](docs/files.md)). Absent by default: the feature is
+  off and the editor shows no upload controls. To enable it create a bucket
+  (`wrangler r2 bucket create <name>`), add
+  `"r2_buckets": [{ "binding": "FILES", "bucket_name": "<name>" }]` to the top
+  level of `wrangler.jsonc` and deploy.
 
 ## Self-hosting
 

@@ -60,6 +60,15 @@ for editing. Choose **Insert link** or **Apply** to make the change, or press
 **Escape** or **Cancel** to leave the document unchanged. A destination is
 required: use a complete web address, document path, or `#section`.
 
+### Images and files
+
+Paste an image, drag files into the page, or choose **Insert image** in the
+editing controls. Corpus stores the file next to the page and links it with a
+relative path such as `![diagram](./diagram.png)`. See [Images and
+files](./files.md) for what is allowed, the limits, and what happens when you
+move a page away from its images. The controls only appear when your Corpus
+server has file storage turned on.
+
 Click **Save** to commit, or **Discard** to discard the draft. Each save
 creates a new version (see [Versioning &
 history](./versioning-and-history.md)).

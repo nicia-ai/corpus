@@ -18,3 +18,7 @@ documentation published to the Corpus site. Nothing here ships.
   evaluation, dependency-update mechanics.
 - `better-auth.md` — the Better Auth 1.7 bump and the workarounds it
   still requires.
+- `files.md` — images and attachments: why files are graph nodes with bytes in
+  R2, the bytes-first upload order and the orphan sweep that makes it safe, the
+  SVG defenses, and what the first PR deliberately left for share links, the
+  mirror, the CLI and MCP.

@@ -19,6 +19,7 @@ import { modKeyLabel } from "@/lib/platform";
 import { scanWikilinks, splitWikiTarget } from "@/store/domain/links";
 
 import { frontmatter, imageReplace, tableReplace } from "./block-widgets";
+import { assetsOf, imageAssetsField } from "./image-assets";
 import { imageParts, linkParts, type SliceText } from "./inline-spans";
 import { wikiLinkResolver } from "./wikilink-facet";
 
@@ -332,7 +333,9 @@ function decorateImage(
   const slice: SliceText = (f, t) => state.doc.sliceString(f, t);
   const parts = imageParts(slice, node);
   if (!parts) return;
-  decos.push(imageReplace(node.from, node.to, parts.src, parts.alt));
+  decos.push(
+    imageReplace(node.from, node.to, parts.src, parts.alt, assetsOf(state)),
+  );
 }
 
 // Task list items: swap the `[ ]`/`[x]` marker for a checkbox widget and strike
@@ -799,6 +802,10 @@ export const livePreviewField = StateField.define<DecorationSet>({
       // Its previous state then has no reveal gate; rebuild from the new gate.
       tr.startState.field(revealGate, false) !== tr.state.field(revealGate) ||
       tr.startState.readOnly !== tr.state.readOnly ||
+      // An upload settled, or the loader's assets changed: a relative image
+      // may now resolve (or stop resolving).
+      tr.startState.field(imageAssetsField, false) !==
+        tr.state.field(imageAssetsField, false) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState)
     )
       return computeDecorations(tr.state);
