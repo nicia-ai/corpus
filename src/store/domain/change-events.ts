@@ -26,7 +26,11 @@ export type DocumentEventType = (typeof DOCUMENT_EVENT_TYPES)[number];
 // there is no "updated" yet; replacing one in place (the CLI and REST
 // writes) adds `file.replaced` with before/after hashes when it lands. The
 // Git mirror subscribes to this family, never to R2.
-export const FILE_EVENT_TYPES = ["file.created", "file.deleted"] as const;
+export const FILE_EVENT_TYPES = [
+  "file.created",
+  "file.moved",
+  "file.deleted",
+] as const;
 export type FileEventType = (typeof FILE_EVENT_TYPES)[number];
 
 // `attached` / `detached` now mean a document MOVED into / out of a
@@ -92,6 +96,9 @@ export type FileChange = Readonly<{
   kind: FileEventType;
   fileSlug: FileSlug;
   corpusSlug: CorpusSlug;
+  // `file.moved`: the corpus it left (the same as `corpusSlug` for a move
+  // within one corpus).
+  fromCorpusSlug?: CorpusSlug;
   filename?: string;
   contentHash?: string;
   contentType?: string;
@@ -113,6 +120,20 @@ export function fileCreated(
   }>,
 ): FileChange {
   return { kind: "file.created", ...args };
+}
+
+export function fileMoved(
+  args: Readonly<{
+    fileSlug: FileSlug;
+    corpusSlug: CorpusSlug;
+    fromCorpusSlug: CorpusSlug;
+    filename: string;
+    contentHash: string;
+    changedBy: string;
+    changedAt: string;
+  }>,
+): FileChange {
+  return { kind: "file.moved", ...args };
 }
 
 export function fileDeleted(

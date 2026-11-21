@@ -85,6 +85,20 @@ export class FileRepo {
     return node;
   }
 
+  // Every live file with the folder it is in, for the corpus tree.
+  async listLive(): Promise<
+    readonly Readonly<{ node: FileNode; folderSlug: string }>[]
+  > {
+    const rows = await this.g
+      .query()
+      .from("File", "f")
+      .traverse("file_in_folder", "e")
+      .to("Folder", "folder")
+      .select((ctx) => ({ node: ctx.f, folderSlug: ctx.folder.slug }))
+      .execute();
+    return rows.filter((row) => row.node.deletedAt === undefined);
+  }
+
   // Bytes of live files, the figure the project quota is measured against.
   async liveBytes(): Promise<number> {
     const [row] = await this.g
@@ -150,6 +164,34 @@ export class FileRepo {
       { kind: "Folder", id: folder.id },
       {},
     );
+  }
+
+  // Soft-delete one live file: detached from its folder (so its name is free)
+  // and stamped `deletedAt`. False when it is missing or already deleted.
+  async deleteOne(slug: FileSlug, deletedAt: string): Promise<boolean> {
+    const node = await this.find(slug);
+    if (node === undefined || node.deletedAt !== undefined) return false;
+    const edges = await this.g.edges.file_in_folder.findFrom({
+      kind: "File",
+      id: node.id,
+    });
+    for (const edge of edges) {
+      await this.g.edges.file_in_folder.hardDelete(edge.id);
+    }
+    await this.softDelete([node], deletedAt);
+    return true;
+  }
+
+  // The folder a live file is in, or undefined.
+  async folderOf(slug: FileSlug): Promise<string | undefined> {
+    const node = await this.find(slug);
+    if (node === undefined || node.deletedAt !== undefined) return undefined;
+    const [edge] = await this.g.edges.file_in_folder.findFrom({
+      kind: "File",
+      id: node.id,
+    });
+    if (edge === undefined) return undefined;
+    return (await this.g.nodes.Folder.getById(edge.toId))?.slug;
   }
 
   // Retention: remove soft-deleted files whose window has passed. `hardDelete`

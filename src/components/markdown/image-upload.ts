@@ -1,3 +1,5 @@
+import type { Text } from "@codemirror/state";
+
 import {
   ALLOWED_FILE_EXTENSIONS,
   formatOfExtension,
@@ -66,4 +68,38 @@ export function insertionMarkdown(asset: AssetRef): string {
   return isImageContentType(asset.contentType)
     ? `![${stem(asset.name)}](${target})`
     : `[${asset.name}](${target})`;
+}
+
+export type BlockInsertion = Readonly<{
+  // Where `insert` goes in the document, and where the caret lands after it.
+  at: number;
+  insert: string;
+  caret: number;
+}>;
+
+const BLANK_NEXT_LINE = /^\n[ \t]*(?:\n|$)/;
+
+// Where an inserted image or file link goes, so it is always its own block:
+// separated from text above and below by a blank line (markdown's own
+// paragraph rule), never glued to a sentence. From a line with text it goes
+// after that line; from a blank line it goes there. The caret lands on the
+// blank line after the block, ready for more writing.
+export function blockInsertion(
+  doc: Text,
+  pos: number,
+  markdown: string,
+): BlockInsertion {
+  const line = doc.lineAt(pos);
+  const at = line.to;
+  const blank = line.text.trim() === "";
+  const previousIsText =
+    line.number > 1 && doc.line(line.number - 1).text.trim() !== "";
+  const before = blank ? (previousIsText ? "\n" : "") : "\n\n";
+  const rest = doc.sliceString(at);
+  const after = rest === "" ? "\n\n" : BLANK_NEXT_LINE.test(rest) ? "" : "\n";
+  return {
+    at,
+    insert: `${before}${markdown}${after}`,
+    caret: at + before.length + markdown.length + 1,
+  };
 }

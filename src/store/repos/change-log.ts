@@ -86,6 +86,7 @@ export class ChangeLog {
       afterJson: JSON.stringify(
         compact({
           fileSlug: change.fileSlug,
+          fromCorpusSlug: change.fromCorpusSlug,
           filename: change.filename,
           contentHash: change.contentHash,
           contentType: change.contentType,

@@ -14,6 +14,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 
 import { DeleteCorpusDialog } from "@/components/corpus/DeleteCorpusDialog";
 import { DocRow } from "@/components/documents/DocRow";
+import { FileRow } from "@/components/documents/FileRow";
 import { FolderHeader } from "@/components/documents/FolderHeader";
 import { MoveDialog } from "@/components/documents/MoveDialog";
 import { NewFolder } from "@/components/documents/NewFolder";
@@ -21,7 +22,7 @@ import { BackLink } from "@/components/ui/BackLink";
 import { Button, buttonStyles } from "@/components/ui/Button";
 import { listSurface } from "@/components/ui/Surface";
 import { showToast } from "@/components/ui/Toast";
-import type { DocumentSlug, FolderSlug, ProjectId } from "@/ids";
+import type { DocumentSlug, FileSlug, FolderSlug, ProjectId } from "@/ids";
 import { cn } from "@/lib/cn";
 import { useSubmit } from "@/lib/forms";
 import { connectThisCorpus } from "@/lib/server/connections";
@@ -31,6 +32,11 @@ import {
   renameFilename,
   type DocListItem,
 } from "@/lib/server/documents";
+import {
+  deleteFile,
+  type FileRow as FileRowData,
+  moveFile,
+} from "@/lib/server/files";
 import {
   createFolder,
   deleteFolder,
@@ -50,6 +56,7 @@ import { EditCorpusForm } from "./EditCorpusForm";
 // a folder slug or the root.
 type Dragged =
   | Readonly<{ kind: "doc"; slug: DocumentSlug }>
+  | Readonly<{ kind: "file"; slug: FileSlug }>
   | Readonly<{ kind: "folder"; slug: FolderSlug }>;
 type DropTarget = FolderSlug | null;
 
@@ -70,6 +77,7 @@ export function CorpusPage({
   corpus,
   corpora,
   documents,
+  files,
   folders,
   allFolders,
   isOwner,
@@ -80,6 +88,8 @@ export function CorpusPage({
   corpora: readonly CorpusListItem[];
   // This corpus's pages and folders only.
   documents: readonly DocListItem[];
+  // Stored images and attachments of this corpus.
+  files: readonly FileRowData[];
   folders: readonly FolderRow[];
   // Every folder in the project, for the move dialog's other corpora.
   allFolders: readonly FolderRow[];
@@ -97,7 +107,7 @@ export function CorpusPage({
     [corpus.slug],
   );
 
-  const { childFolders, docsByFolder } = useMemo(() => {
+  const { childFolders, docsByFolder, filesByFolder } = useMemo(() => {
     const nextFolders = new Map<DropTarget, FolderRow[]>();
     for (const folder of [...folders].sort((a, b) =>
       comparePaths(a.name, b.name),
@@ -114,8 +124,20 @@ export function CorpusPage({
       list.push(document);
       nextDocs.set(document.folderSlug, list);
     }
-    return { childFolders: nextFolders, docsByFolder: nextDocs };
-  }, [documents, folders]);
+    const nextFiles = new Map<DropTarget, FileRowData[]>();
+    for (const file of [...files].sort((a, b) =>
+      comparePaths(a.path, b.path),
+    )) {
+      const list = nextFiles.get(file.folderSlug) ?? [];
+      list.push(file);
+      nextFiles.set(file.folderSlug, list);
+    }
+    return {
+      childFolders: nextFolders,
+      docsByFolder: nextDocs,
+      filesByFolder: nextFiles,
+    };
+  }, [documents, files, folders]);
 
   const drag = useRef<Dragged | null>(null);
   // `undefined` = nothing hovered; `null` = root container; a string =
@@ -208,6 +230,15 @@ export function CorpusPage({
   const onDocDragStart = useCallback((slug: DocumentSlug): void => {
     drag.current = { kind: "doc", slug };
   }, []);
+  const onFileDragStart = useCallback((slug: FileSlug): void => {
+    drag.current = { kind: "file", slug };
+  }, []);
+  const onFileDelete = useCallback(
+    (slug: FileSlug): void => {
+      void run(() => deleteFile({ data: { projectId, slug } }));
+    },
+    [projectId, run],
+  );
   const onDocRename = useCallback(
     (slug: DocumentSlug, filename: string): Promise<void> =>
       run(() => renameFilename({ data: { projectId, slug, filename } })),
@@ -306,6 +337,12 @@ export function CorpusPage({
             data: { projectId, slug: item.slug, destination: here(target) },
           }),
         );
+      } else if (item.kind === "file") {
+        void run(() =>
+          moveFile({
+            data: { projectId, slug: item.slug, destination: here(target) },
+          }),
+        );
       } else {
         void run(() =>
           moveDocument({
@@ -336,6 +373,7 @@ export function CorpusPage({
     const isOpen = expanded.has(f.slug);
     const subFolders = childFolders.get(f.slug) ?? [];
     const subDocs = docsByFolder.get(f.slug) ?? [];
+    const subFiles = filesByFolder.get(f.slug) ?? [];
     return (
       <div key={f.slug}>
         <FolderHeader
@@ -376,6 +414,15 @@ export function CorpusPage({
                 onRename={onDocRename}
               />
             ))}
+            {subFiles.map((file) => (
+              <FileRow
+                key={file.slug}
+                file={file}
+                depth={depth + 1}
+                onDelete={onFileDelete}
+                onDragStart={onFileDragStart}
+              />
+            ))}
           </>
         )}
       </div>
@@ -384,7 +431,9 @@ export function CorpusPage({
 
   const rootFolders = childFolders.get(null) ?? [];
   const rootDocs = docsByFolder.get(null) ?? [];
-  const empty = folders.length === 0 && documents.length === 0;
+  const rootFiles = filesByFolder.get(null) ?? [];
+  const empty =
+    folders.length === 0 && documents.length === 0 && files.length === 0;
 
   // "Connect this corpus": reuse-or-create the canonical Connection for this
   // corpus, then take the owner to the setup page. Owner-only (the server fn
@@ -647,7 +696,7 @@ export function CorpusPage({
             <FolderIcon className="size-4 shrink-0" aria-hidden />
             Top level
             <span className="font-normal text-slate-400">
-              — drag a document or folder here to move it out
+              — drag a document, file or folder here to move it out
             </span>
           </div>
           {creatingIn === null && (
@@ -669,6 +718,15 @@ export function CorpusPage({
               onArchive={onDocArchive}
               onDragStart={onDocDragStart}
               onRename={onDocRename}
+            />
+          ))}
+          {rootFiles.map((file) => (
+            <FileRow
+              key={file.slug}
+              file={file}
+              depth={0}
+              onDelete={onFileDelete}
+              onDragStart={onFileDragStart}
             />
           ))}
         </div>

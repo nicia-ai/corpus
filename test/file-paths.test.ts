@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { asDocumentSlug, asFolderSlug, type CorpusSlug } from "../src/ids";
+import {
+  asDocumentSlug,
+  asFileSlug,
+  asFolderSlug,
+  type CorpusSlug,
+} from "../src/ids";
 import type { AttachFileResult } from "../src/project-store/commands/files";
 import { formatOfExtension } from "../src/store/domain/file-kinds";
 
@@ -298,5 +303,140 @@ describe("the bundle", () => {
     // The link text is canonical markdown and travels untouched (dangling).
     expect(bundle.documents["guide-setup"]?.md).toBe("![](./shot.png)");
     expect(await store.liveFileCount()).toBe(1);
+  });
+});
+
+describe("managing a file in the corpus tree", () => {
+  async function setup() {
+    const store = await project();
+    const p = await page(store, "guide/page.md");
+    const a = await attached(store, p, "shot.png", "m1");
+    return { store, p, a, slug: asFileSlug(a.file.slug) };
+  }
+
+  it("lists live files with their corpus and corpus-relative path", async () => {
+    const { store } = await setup();
+    const files = await store.listFiles();
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      name: "shot.png",
+      path: "guide/shot.png",
+      corpusSlug: CORPUS,
+      contentType: "image/png",
+    });
+    expect(files[0]?.folderSlug).not.toBeNull();
+  });
+
+  it("deletes a file: gone from the list and its name free, bytes retained until reaped", async () => {
+    const { store, p, slug } = await setup();
+    const hash = "m1".padEnd(64, "0");
+    expect(await store.deleteFile(slug, BY)).toEqual({ ok: true });
+    expect(await store.listFiles()).toEqual([]);
+    expect(await store.fileByHash(hash)).toBeUndefined();
+    expect(await store.referencedFileHashes()).toEqual([hash]);
+    expect(await store.deleteFile(slug, BY)).toEqual({
+      ok: false,
+      reason: "missing",
+    });
+    // The name is free again.
+    const again = await attached(store, p, "shot.png", "m2");
+    expect(again.file.name).toBe("shot.png");
+    const events = (await store.recentChanges(20)).map((e) => e.eventType);
+    expect(events).toContain("file.deleted");
+  });
+
+  it("moves a file between folders, keeping its bytes and hash", async () => {
+    const { store, slug } = await setup();
+    await page(store, "other/inner.md");
+    const other = await folderSlug(store, "other");
+    const moved = await store.moveFile(
+      slug,
+      { corpusSlug: CORPUS, folderSlug: other },
+      BY,
+    );
+    expect(moved).toEqual({ ok: true, changed: true });
+    const [file] = await store.listFiles();
+    expect(file?.path).toBe("other/shot.png");
+    expect(file?.contentHash).toBe("m1".padEnd(64, "0"));
+    expect(file?.slug).toBe(slug);
+    // Moving to where it already is changes nothing.
+    expect(
+      await store.moveFile(slug, { corpusSlug: CORPUS, folderSlug: other }, BY),
+    ).toEqual({ ok: true, changed: false });
+  });
+
+  it("moves a file to another corpus (one corpus per file) and to its root", async () => {
+    const { store, slug } = await setup();
+    const second = colSlug("second");
+    await store.createCorpus({ slug: second, name: "Second", changedBy: BY });
+    const moved = await store.moveFile(
+      slug,
+      { corpusSlug: second, folderSlug: null },
+      BY,
+    );
+    expect(moved).toEqual({ ok: true, changed: true });
+    const [file] = await store.listFiles();
+    expect(file).toMatchObject({
+      corpusSlug: second,
+      path: "shot.png",
+      folderSlug: null,
+    });
+    const events = (await store.recentChanges(20)).filter(
+      (e) => e.eventType === "file.moved",
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]?.corpusSlug).toBe(second);
+  });
+
+  it("refuses a move into a folder with a same-named sibling, like a page", async () => {
+    const { store, slug } = await setup();
+    const clash = await page(store, "other/inner.md");
+    await attached(store, clash, "shot.png", "m3");
+    // And a same-named PAGE or FOLDER blocks it too.
+    await page(store, "third/shot.png", "# a page named like the file");
+    const other = await folderSlug(store, "other");
+    const third = await folderSlug(store, "third");
+
+    expect(
+      await store.moveFile(slug, { corpusSlug: CORPUS, folderSlug: other }, BY),
+    ).toEqual({ ok: false, reason: "segment-collision" });
+    expect(
+      await store.moveFile(slug, { corpusSlug: CORPUS, folderSlug: third }, BY),
+    ).toEqual({ ok: false, reason: "segment-collision" });
+    // Nothing moved.
+    const mine = (await store.listFiles()).find((f) => f.slug === slug);
+    expect(mine?.path).toBe("guide/shot.png");
+  });
+
+  it("refuses a move to a missing destination or of a missing file", async () => {
+    const { store, slug } = await setup();
+    expect(
+      await store.moveFile(
+        slug,
+        { corpusSlug: colSlug("nowhere"), folderSlug: null },
+        BY,
+      ),
+    ).toEqual({ ok: false, reason: "missing" });
+    expect(
+      await store.moveFile(
+        asFileSlug("nope"),
+        { corpusSlug: CORPUS, folderSlug: null },
+        BY,
+      ),
+    ).toEqual({ ok: false, reason: "missing" });
+  });
+
+  it("keeps a page's image resolving when the file moves with it, not when it moves alone", async () => {
+    const store = await project();
+    const p = await page(store, "guide/setup.md", "![](./shot.png)");
+    const a = await attached(store, p, "shot.png", "m4");
+    expect(Object.keys(await assetsOf(store, p))).toEqual(["./shot.png"]);
+    await page(store, "other/inner.md");
+    await store.moveFile(
+      asFileSlug(a.file.slug),
+      { corpusSlug: CORPUS, folderSlug: await folderSlug(store, "other") },
+      BY,
+    );
+    expect(await assetsOf(store, p)).toEqual({});
   });
 });

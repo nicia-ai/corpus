@@ -91,6 +91,11 @@ export type DeleteFolderResult = Readonly<
   | { ok: false; reason: "missing" }
 >;
 
+export type PlaceFileResult = Readonly<
+  | { ok: true; changed: boolean }
+  | { ok: false; reason: "missing" | "segment-collision" }
+>;
+
 export type PlaceDocumentResult = Readonly<
   | { ok: true; changed: boolean }
   | { ok: false; reason: "missing" | "segment-collision" }
@@ -942,6 +947,37 @@ export class FolderRepo {
       return { ok: false, reason: "segment-collision" };
     }
     await this.rehomeDocument(documentSlug, folderSlug);
+    return { ok: true, changed: true };
+  }
+
+  // Move a live file to another folder, keeping its bytes and name. The same
+  // sibling-namespace rule as a document: a same-named page, folder or file
+  // already there refuses the move and writes nothing.
+  async placeFile(
+    fileSlug: FileSlug,
+    folderSlug: FolderSlug,
+  ): Promise<PlaceFileResult> {
+    const node = await this.files.find(fileSlug);
+    if (
+      node === undefined ||
+      node.deletedAt !== undefined ||
+      (await this.nodeBySlug(folderSlug)) === undefined
+    ) {
+      return { ok: false, reason: "missing" };
+    }
+    if ((await this.files.folderOf(fileSlug)) === folderSlug) {
+      return { ok: true, changed: false };
+    }
+    const siblings = await this.siblingSegments(folderSlug);
+    if (
+      segmentCollides(siblings, node.filename, {
+        kind: "file",
+        slug: fileSlug,
+      })
+    ) {
+      return { ok: false, reason: "segment-collision" };
+    }
+    await this.files.rehome(fileSlug, folderSlug);
     return { ok: true, changed: true };
   }
 

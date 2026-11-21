@@ -1180,6 +1180,7 @@ function collabToastMessage(
     case "collection.reordered":
     case "collection.deleted":
     case "file.created":
+    case "file.moved":
     case "file.deleted":
       // Project/corpus-level changes don't warrant a per-document toast.
       return undefined;
@@ -1216,6 +1217,7 @@ function shouldRefreshDocumentPage(
     change.action === "document.archived" ||
     // A page's images resolve against the stored files beside it.
     change.action === "file.created" ||
+    change.action === "file.moved" ||
     change.action === "file.deleted"
   );
 }

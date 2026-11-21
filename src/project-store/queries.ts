@@ -35,6 +35,7 @@ import type {
   DocumentRef,
   DocumentSearchHit,
   DocumentSnapshot,
+  FileListRow,
   OutlineDoc,
   OutlineLink,
   ProjectUsageSnapshot,
@@ -250,6 +251,68 @@ export async function listFoldersProjection(
       },
     ];
   });
+}
+
+// Every live file with its corpus and corpus-relative path, in path order:
+// the files of the corpus tree, derived exactly as a document's location is.
+export async function listFilesProjection(
+  u: ProjectUnit,
+): Promise<readonly FileListRow[]> {
+  const [files, folders, links] = await Promise.all([
+    u.files.listLive(),
+    u.folders.listAll(),
+    u.cols.folderLinks(),
+  ]);
+  const corpusOfRoot = new Map(
+    links.map((link) => [link.folderSlug as string, link.corpusSlug] as const),
+  );
+  const byslug = new Map(folders.map((f) => [f.slug, f] as const));
+  const chainOf = (folderSlug: string): readonly string[] => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = folderSlug;
+    while (cursor !== null && !seen.has(cursor)) {
+      seen.add(cursor);
+      const folder = byslug.get(cursor);
+      if (folder === undefined) break;
+      names.unshift(folder.name);
+      cursor = folder.parentSlug;
+    }
+    return names;
+  };
+  const rootOf = (folderSlug: string): string => {
+    let cursor = folderSlug;
+    const seen = new Set<string>();
+    for (;;) {
+      const parent = byslug.get(cursor)?.parentSlug ?? null;
+      if (parent === null || seen.has(cursor)) return cursor;
+      seen.add(cursor);
+      cursor = parent;
+    }
+  };
+  return files
+    .flatMap(({ node, folderSlug }) => {
+      const root = rootOf(folderSlug);
+      const corpusSlug = corpusOfRoot.get(root);
+      if (corpusSlug === undefined) return [];
+      return [
+        {
+          slug: node.slug,
+          name: node.filename,
+          path: corpusRelativePath(chainOf(folderSlug), node.filename),
+          corpusSlug,
+          folderSlug: folderSlug === root ? null : folderSlug,
+          contentHash: node.contentHash,
+          contentType: node.contentType,
+          size: node.size,
+        },
+      ];
+    })
+    .sort(
+      (a, b) =>
+        comparePaths(a.corpusSlug, b.corpusSlug) ||
+        comparePaths(a.path, b.path),
+    );
 }
 
 export function listCorporaProjection(

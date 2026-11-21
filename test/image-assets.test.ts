@@ -1,5 +1,5 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -9,6 +9,7 @@ import {
   setImageAssets,
 } from "@/components/markdown/image-assets";
 import {
+  blockInsertion,
   insertionMarkdown,
   linkTargetFor,
   nameForUpload,
@@ -161,5 +162,48 @@ describe("what an upload becomes in the document", () => {
       "c.pdf",
       "d",
     ]);
+  });
+});
+
+describe("an inserted image is its own block", () => {
+  const MD = "![shot](./shot.png)";
+
+  // Apply the insertion exactly as the editor does, and report text + caret.
+  function insertAt(source: string, pos: number): [string, number] {
+    const doc = Text.of(source.split("\n"));
+    const block = blockInsertion(doc, pos, MD);
+    const state = EditorState.create({ doc }).update({
+      changes: { from: block.at, insert: block.insert },
+      selection: { anchor: block.caret },
+    }).state;
+    return [state.doc.toString(), state.selection.main.head];
+  }
+
+  it("goes after a line with text, blank-line separated, caret below", () => {
+    const text = "Before the image.";
+    const [out, caret] = insertAt(text, text.length);
+    expect(out).toBe(`Before the image.\n\n${MD}\n\n`);
+    expect(out.slice(0, caret).endsWith(`${MD}\n`)).toBe(true);
+  });
+
+  it("does not split the sentence when the caret is mid-line", () => {
+    const [out] = insertAt("Before the image. After.", 6);
+    expect(out).toBe(`Before the image. After.\n\n${MD}\n\n`);
+  });
+
+  it("separates it from text on the next line", () => {
+    const [out] = insertAt("One\nTwo", 3);
+    expect(out).toBe(`One\n\n${MD}\n\nTwo`);
+  });
+
+  it("reuses an existing blank line below instead of adding another", () => {
+    const [out] = insertAt("One\n\nTwo", 3);
+    expect(out).toBe(`One\n\n${MD}\n\nTwo`);
+  });
+
+  it("goes on an empty line, separated from text above and below", () => {
+    expect(insertAt("", 0)[0]).toBe(`${MD}\n\n`);
+    expect(insertAt("One\n\nTwo", 4)[0]).toBe(`One\n\n${MD}\n\nTwo`);
+    expect(insertAt("One\n\n\nTwo", 5)[0]).toBe(`One\n\n${MD}\n\nTwo`);
   });
 });

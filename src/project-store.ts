@@ -36,6 +36,7 @@ import {
   asDocumentSlug,
   type CorpusSlug,
   type DocumentSlug,
+  type FileSlug,
   type FolderSlug,
   asProjectId,
   type CallerRef,
@@ -102,6 +103,9 @@ import {
   attachFileCommand,
   type AttachFileInput,
   type AttachFileResult,
+  deleteFileCommand,
+  type DeleteFileResult,
+  moveFileCommand,
 } from "./project-store/commands/files";
 import {
   createFolderCommand,
@@ -158,6 +162,7 @@ import type {
   DocumentSearchHit,
   DocumentSnapshot,
   EnsureDefaultCorpusResult,
+  FileListRow,
   ImportDocResult,
   ImportIntoCorpusInput,
   ImportIntoCorpusResult,
@@ -205,6 +210,7 @@ import {
   listCorporaProjection,
   listDocumentRefsProjection,
   listDocumentsProjection,
+  listFilesProjection,
   listFoldersProjection,
   resolvedMembersProjection,
   resolvedViews,
@@ -245,6 +251,7 @@ import {
   FolderRepo,
   type MoveFolderResult,
   type PlaceDocumentResult,
+  type PlaceFileResult,
   type RenameFolderResult,
 } from "./store/repos/folder-repo";
 import { InstrumentationOutbox } from "./store/repos/instrumentation-outbox";
@@ -1200,6 +1207,32 @@ export class ProjectStore extends DurableObject<Env> {
   // Every hash a surviving node references: what the orphan sweep keeps.
   async referencedFileHashes(): Promise<readonly string[]> {
     return (await this.read()).files.referencedHashes();
+  }
+
+  // Every live file with its corpus and corpus-relative path.
+  async listFiles(): Promise<readonly FileListRow[]> {
+    return listFilesProjection(await this.read());
+  }
+
+  async deleteFile(
+    slug: FileSlug,
+    changedBy: string,
+  ): Promise<DeleteFileResult> {
+    const outcome = await this.writeCommand(new Date().toISOString(), (ctx) =>
+      deleteFileCommand(ctx, { slug, changedBy }),
+    );
+    return outcome.result;
+  }
+
+  async moveFile(
+    slug: FileSlug,
+    destination: CorpusLocation,
+    changedBy: string,
+  ): Promise<PlaceFileResult> {
+    const outcome = await this.writeCommand(new Date().toISOString(), (ctx) =>
+      moveFileCommand(ctx, { slug, destination, changedBy }),
+    );
+    return outcome.result;
   }
 
   // Live file count, for exports to report what they leave out.

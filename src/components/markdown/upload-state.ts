@@ -11,6 +11,8 @@ import {
   WidgetType,
 } from "@codemirror/view";
 
+import { blockInsertion } from "./image-upload";
+
 // An upload in flight, shown where its link will land. Nothing is written to
 // the document until the server has accepted the file: the pending marker is
 // editor state with a position that follows the text as it is edited around
@@ -91,22 +93,26 @@ function positionOf(state: EditorState, id: number): number | undefined {
   return state.field(pendingField, false)?.find((p) => p.id === id)?.pos;
 }
 
-// The upload succeeded: replace its marker with `text`, one transaction, so
-// undo removes the link and the image appears in the same step. The extra
-// effects (the new asset) ride along.
+// The upload succeeded: replace its marker with `markdown` as its own block
+// (see `blockInsertion`), one transaction, so undo removes the link and the
+// image appears in the same step. The extra effects (the new asset) ride along.
 export function finishUpload(
   view: EditorView,
   id: number,
-  text: string,
+  markdown: string,
   effects: readonly StateEffect<unknown>[],
 ): void {
   const pos = positionOf(view.state, id);
+  const block =
+    pos === undefined
+      ? undefined
+      : blockInsertion(view.state.doc, pos, markdown);
   view.dispatch({
-    ...(pos === undefined
+    ...(block === undefined
       ? {}
       : {
-          changes: { from: pos, insert: text },
-          selection: { anchor: pos + text.length },
+          changes: { from: block.at, insert: block.insert },
+          selection: { anchor: block.caret },
         }),
     effects: [settledUpload.of(id), ...effects],
   });

@@ -3,18 +3,31 @@ import {
   asFolderSlug,
   type CorpusSlug,
   type DocumentSlug,
+  type FileSlug,
 } from "../../ids";
-import { fileCreated } from "../../store/domain/change-events";
-import { corpusRelativePath } from "../../store/domain/corpus-drive";
+import {
+  fileCreated,
+  fileDeleted,
+  fileMoved,
+} from "../../store/domain/change-events";
+import {
+  corpusRelativePath,
+  type CorpusLocation,
+} from "../../store/domain/corpus-drive";
 import {
   type FileFormat,
   pastedFileName,
   uniqueFileName,
 } from "../../store/domain/file-kinds";
+import type { PlaceFileResult } from "../../store/repos/folder-repo";
 import { MAX_PROJECT_FILE_BYTES } from "../../util";
 import type { CommandOutcome, ProjectCommandContext } from "../command";
 
-import { corpusOfDocument } from "./corpus-tree";
+import {
+  corpusOfDocument,
+  corpusOfFolder,
+  resolveCorpusFolder,
+} from "./corpus-tree";
 
 // What an upload leaves behind in the DO. The bytes are already in R2 (the
 // transport puts them FIRST; see `src/files/http.ts`), so this is the
@@ -130,6 +143,88 @@ export async function attachFileCommand(
         contentHash: input.contentHash,
         contentType: input.format.contentType,
         size: input.size,
+        changedBy: input.changedBy,
+        changedAt: ctx.now,
+      }),
+    ],
+  };
+}
+
+export type DeleteFileResult = Readonly<
+  { ok: true } | { ok: false; reason: "missing" }
+>;
+
+// Delete a file: soft, like a page. It leaves its folder (so its name is
+// free again) and is stamped `deletedAt`; the node, and so the bytes in R2,
+// stay until the retention reaper and the orphan sweep reclaim them.
+export async function deleteFileCommand(
+  ctx: ProjectCommandContext,
+  input: Readonly<{ slug: FileSlug; changedBy: string }>,
+): Promise<CommandOutcome<DeleteFileResult>> {
+  const folderSlug = await ctx.u.files.folderOf(input.slug);
+  const corpusSlug =
+    folderSlug === undefined
+      ? undefined
+      : await corpusOfFolder(ctx.u, asFolderSlug(folderSlug));
+  if (
+    corpusSlug === undefined ||
+    !(await ctx.u.files.deleteOne(input.slug, ctx.now))
+  ) {
+    return { result: { ok: false, reason: "missing" }, changes: [] };
+  }
+  return {
+    result: { ok: true },
+    changes: [
+      fileDeleted({
+        fileSlug: input.slug,
+        corpusSlug,
+        changedBy: input.changedBy,
+        changedAt: ctx.now,
+      }),
+    ],
+  };
+}
+
+// Move a file to another folder or corpus. One corpus per file holds by
+// construction (a file is in exactly one folder); a name already taken in
+// the destination refuses the move, exactly as it does for a page. The bytes
+// and the content hash never change.
+export async function moveFileCommand(
+  ctx: ProjectCommandContext,
+  input: Readonly<{
+    slug: FileSlug;
+    destination: CorpusLocation;
+    changedBy: string;
+  }>,
+): Promise<CommandOutcome<PlaceFileResult>> {
+  const missing = {
+    result: { ok: false, reason: "missing" },
+    changes: [],
+  } as const;
+  const destination = await resolveCorpusFolder(ctx.u, input.destination);
+  const fromFolder = await ctx.u.files.folderOf(input.slug);
+  const node = await ctx.u.files.find(input.slug);
+  if (
+    destination === undefined ||
+    fromFolder === undefined ||
+    node === undefined
+  ) {
+    return missing;
+  }
+  const from = await corpusOfFolder(ctx.u, asFolderSlug(fromFolder));
+  const result = await ctx.u.folders.placeFile(input.slug, destination);
+  if (!result.ok || !result.changed || from === undefined) {
+    return { result, changes: [] };
+  }
+  return {
+    result,
+    changes: [
+      fileMoved({
+        fileSlug: input.slug,
+        corpusSlug: input.destination.corpusSlug,
+        fromCorpusSlug: from,
+        filename: node.filename,
+        contentHash: node.contentHash,
         changedBy: input.changedBy,
         changedAt: ctx.now,
       }),

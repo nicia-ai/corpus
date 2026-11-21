@@ -749,32 +749,37 @@ export function MarkdownEditor({
     if (cm === null || upload === undefined || files.length === 0) return;
     setUploadError(undefined);
     setUploading((n) => n + files.length);
-    const separator = files.length > 1 ? "\n" : "";
-    for (const file of files) {
-      const id = startUpload(cm, pos, file.name);
-      void upload(file, nameForUpload(file, pasted))
-        .then((asset) => {
-          if (view.current !== cm) return;
-          uploadedAssets.current = {
-            ...uploadedAssets.current,
-            [linkTargetFor(asset)]: asset,
-          };
-          assetsNow.current = { ...assets, ...uploadedAssets.current };
-          finishUpload(cm, id, insertionMarkdown(asset) + separator, [
-            setImageAssets.of(assetsNow.current),
-          ]);
-        })
-        .catch((error: unknown) => {
-          if (view.current === cm) failUpload(cm, id);
-          setUploadError(
-            error instanceof Error
-              ? error.message
-              : "The file could not be uploaded.",
-          );
-        })
-        .finally(() => {
-          setUploading((n) => n - 1);
-        });
+    // Markers for every file show at once; the uploads run one after another
+    // so the blocks land in the order the files were given.
+    const ids = files.map((file) => startUpload(cm, pos, file.name));
+    let chain = Promise.resolve();
+    for (const [i, file] of files.entries()) {
+      const id = ids[i] ?? 0;
+      chain = chain.then(() =>
+        upload(file, nameForUpload(file, pasted))
+          .then((asset) => {
+            if (view.current !== cm) return;
+            uploadedAssets.current = {
+              ...uploadedAssets.current,
+              [linkTargetFor(asset)]: asset,
+            };
+            assetsNow.current = { ...assets, ...uploadedAssets.current };
+            finishUpload(cm, id, insertionMarkdown(asset), [
+              setImageAssets.of(assetsNow.current),
+            ]);
+          })
+          .catch((error: unknown) => {
+            if (view.current === cm) failUpload(cm, id);
+            setUploadError(
+              error instanceof Error
+                ? error.message
+                : "The file could not be uploaded.",
+            );
+          })
+          .finally(() => {
+            setUploading((n) => n - 1);
+          }),
+      );
     }
   }
 
