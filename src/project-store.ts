@@ -202,6 +202,8 @@ import {
   corpusMetaProjection,
   corpusOutlineProjection,
   documentAssetsProjection,
+  pageFileRefsProjection,
+  type PageFileRef,
   documentHistoryPageProjection,
   documentHistoryProjection,
   documentHistoryVersionProjection,
@@ -1202,6 +1204,31 @@ export class ProjectStore extends DurableObject<Env> {
           contentType: file.contentType,
           size: file.size,
         };
+  }
+
+  // The files this page's CURRENT head references, by link target. A share
+  // link serves exactly this set, recomputed per request from the head, so an
+  // image removed from the page stops being served at once.
+  async pageFileRefs(
+    slug: DocumentSlug,
+  ): Promise<Readonly<Record<string, PageFileRef>>> {
+    return pageFileRefsProjection(
+      await this.read(),
+      slug,
+      this.parsedLinksByHash,
+    );
+  }
+
+  // The served file when `contentHash` is among the page's referenced files.
+  async pageFileByHash(
+    slug: DocumentSlug,
+    contentHash: string,
+  ): Promise<ServedFile | undefined> {
+    const refs = await this.pageFileRefs(slug);
+    const ref = Object.values(refs).find((r) => r.contentHash === contentHash);
+    return ref === undefined
+      ? undefined
+      : { filename: ref.name, contentType: ref.contentType, size: ref.size };
   }
 
   // Every hash a surviving node references: what the orphan sweep keeps.

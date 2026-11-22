@@ -1,8 +1,11 @@
 import { renderToString } from "react-dom/server";
 
+import type { ImageAssets } from "@/components/markdown/image-assets";
 import { MarkdownContent } from "@/components/markdown/Markdown";
 import { embassyPrompt } from "@/embassy/prompt";
+import { embassyFilePath } from "@/embassy/url";
 import type { Grant } from "@/grant";
+import type { PageFileRef } from "@/project-store/queries";
 import { documentBody } from "@/store/domain/frontmatter";
 
 const PAGE_CSS = `
@@ -47,10 +50,15 @@ export function embassyPageHtml(input: {
   url: string;
   grant: Grant;
   docVersion: number;
+  embassyId: string;
+  files: Readonly<Record<string, PageFileRef>>;
 }): string {
   const prompt = embassyPrompt({ url: input.url, grant: input.grant });
   const body = renderToString(
-    <MarkdownContent source={documentBody(input.markdown)} />,
+    <MarkdownContent
+      source={documentBody(input.markdown)}
+      assets={tokenAssets(input.embassyId, input.files)}
+    />,
   );
   const escaped = escapeHtml(prompt);
   const writable = input.grant !== "read";
@@ -145,6 +153,25 @@ export function embassyPageHtml(input: {
   </script>
 </body>
 </html>`;
+}
+
+// The page's images as this share link serves them: token URLs keyed by the
+// link target as written, never the session-only `/api/files` route.
+function tokenAssets(
+  embassyId: string,
+  files: Readonly<Record<string, PageFileRef>>,
+): ImageAssets {
+  return Object.fromEntries(
+    Object.entries(files).map(([target, file]) => [
+      target,
+      {
+        url: embassyFilePath(embassyId, file.contentHash),
+        name: file.name,
+        contentType: file.contentType,
+        size: file.size,
+      },
+    ]),
+  );
 }
 
 function escapeHtml(s: string): string {

@@ -26,6 +26,7 @@ import type { ConnectionRef } from "./control/refs";
 import { storeFor } from "./control/store-for";
 import { docsRoutes } from "./docs-rest";
 import {
+  embassyFile,
   embassyGet,
   embassyEdit,
   embassySection,
@@ -173,6 +174,7 @@ async function verifyOAuthJwt(
 export const api = new Hono<{ Bindings: Env }>()
   .get("/healthz", (c) => c.json({ ok: true }))
   .get("/s/:token", (c) => embassyGet(c))
+  .get("/s/:token/f/:hash", (c) => embassyFile(c))
   .post("/s/:token/suggest", (c) => embassySuggest(c))
   .put("/s/:token", (c) => embassyEdit(c))
   .put("/s/:token/section", (c) => embassySection(c))

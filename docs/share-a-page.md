@@ -215,6 +215,12 @@ Archiving or deleting a page, or deleting the project, also revokes its links.
   write through it. In a browser, an Edit link opens a page where a person can edit
   the full markdown by hand.
 - **One page per link.** A link never opens other documents.
+- **Images.** The page a person opens shows the images the current version
+  refers to, served from the link itself (`/s/<token>/f/<hash>`, five-minute
+  cache), so a revoked or expired link stops showing them. Nothing else in the
+  project is reachable, and you cannot upload through a link. An agent reading
+  the markdown gets the text unchanged, without the images. See
+  [Images and attachments](./files.md#images-on-a-shared-page).
 - **Document size.** 1,000,000 bytes (1 MB) per document and per request body.
 - **Writes per link.** Each link allows 1,000 writes over its lifetime, counting
   `PUT` and `POST /suggest`. A write that is refused (for example a `409`) does

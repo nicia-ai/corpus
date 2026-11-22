@@ -16,18 +16,28 @@ import { storeFor } from "@/control/store-for";
 import { embassyGoneHtml, embassyPageHtml } from "@/embassy/html";
 import { embassyPath } from "@/embassy/url";
 import { QuotaExceededError } from "@/errors";
+import {
+  FILES_NOT_ENABLED_MESSAGE,
+  objectStoreFor,
+} from "@/files/object-store-for";
 import { grantAllows, type Grant } from "@/grant";
 import { asEmbassyId, callerRefFromEmbassy } from "@/ids";
 import type {
   SaveSharedDraftResult,
   SaveSharedSectionResult,
 } from "@/project-store/contracts";
+import {
+  FILE_CACHE_SHARE_LINK,
+  FILE_HASH_PATTERN,
+  fileResponseHeaders,
+} from "@/store/domain/file-kinds";
 import { parseFrontmatter } from "@/store/domain/frontmatter";
 import {
   parseSectionTarget,
   type SectionMatch,
   type SectionTarget,
 } from "@/store/domain/sections";
+import { fileObjectKey } from "@/store/repos/object-store";
 import {
   isBlank,
   MARKDOWN_TOO_LARGE_MESSAGE,
@@ -199,8 +209,13 @@ export async function embassyGet(c: EnvC): Promise<Response> {
     // Metrics-only; a D1 failure must not surface as an unhandled rejection.
   });
   if (html) {
+    const files = await storeFor(c.env, row.projectId).pageFileRefs(
+      row.documentSlug,
+    );
     return c.html(
       embassyPageHtml({
+        embassyId: row.id,
+        files,
         title: doc.title,
         markdown: doc.markdown,
         url: new URL(embassyPath(row.id), c.req.url).toString(),
@@ -219,6 +234,43 @@ export async function embassyGet(c: EnvC): Promise<Response> {
     "x-doc-version": String(doc.docVersion),
     "referrer-policy": "no-referrer",
   });
+}
+
+// GET /s/:token/f/:hash: an image the shared page's CURRENT head references.
+// Authorization is the live link plus membership of the hash in that page's
+// resolved file set, recomputed per request; any other hash, even one the same
+// project holds, is a 404.
+export async function embassyFile(c: EnvC): Promise<Response> {
+  const row = await liveEmbassy(c, c.req.param("token"));
+  const hash = c.req.param("hash") ?? "";
+  if (row === undefined || !FILE_HASH_PATTERN.test(hash)) {
+    return c.text("not found", 404);
+  }
+  const objects = objectStoreFor(c.env);
+  if (objects === undefined) return c.text(FILES_NOT_ENABLED_MESSAGE, 404);
+  const file = await storeFor(c.env, row.projectId).pageFileByHash(
+    row.documentSlug,
+    hash,
+  );
+  if (file === undefined) return c.text("not found", 404);
+  const headers = fileResponseHeaders({
+    hash,
+    contentType: file.contentType,
+    filename: file.filename,
+    size: file.size,
+    fetchDest: c.req.header("sec-fetch-dest") ?? null,
+    cacheControl: FILE_CACHE_SHARE_LINK,
+  });
+  if (c.req.header("if-none-match") === `"${hash}"`) {
+    headers.delete("content-length");
+    return new Response(null, { status: 304, headers });
+  }
+  const object = await objects.get(fileObjectKey(row.projectId, hash));
+  if (object === undefined) {
+    console.error("[embassy] metadata without bytes", row.projectId, hash);
+    return c.text("not found", 404);
+  }
+  return new Response(object.body, { status: 200, headers });
 }
 
 export async function embassySuggest(c: EnvC): Promise<Response> {

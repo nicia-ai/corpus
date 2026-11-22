@@ -79,7 +79,24 @@ files in this version.
 - A **project export** (Settings → Export) does not include files. It says how
   many images and attachments it left out; relative links to them stay as they
   are and show the missing-image placeholder after an import.
-- Share links, the CLI, the Git mirror and MCP do not carry files yet.
+- The CLI, the Git mirror and MCP do not carry files yet.
+
+## Images on a shared page
+
+A person who opens a share link sees the page's images. The page the link
+opens shows each image from a link-specific address (`/s/<token>/f/<hash>`),
+which carries no file name or folder. The link can fetch only the images the
+page's **current** version refers to: an image you take out of the page stops
+loading for the link, and a file in the same project that the page does not
+use is never reachable through it. Images are cached for five minutes, so
+revoking or expiring a link, or removing an image, takes effect within that
+time. A link to a PDF or other attachment on the page downloads it.
+
+The share-link page is a plain page with a text box for edits, so there is no
+image upload there. A link with Edit or Suggest access can change the
+markdown but cannot add files. An agent that reads the link as markdown
+(`Accept: text/markdown`) still gets the page's text exactly as written, with
+the relative image paths and no image access.
 
 ## Turning it on
 
