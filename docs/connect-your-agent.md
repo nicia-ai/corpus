@@ -125,17 +125,19 @@ For API-key auth, add `"headers": { "Authorization": "Bearer <YOUR_API_KEY>" }`.
 Once connected, the agent has these tools, all scoped to
 the Connection's bound Corpus:
 
-| Tool                    | Does                                                                                                                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_corpora`          | The Corpus this connection is bound to (a connection targets exactly one).                                                                                                        |
-| `list_documents`        | Every document in the bound Corpus, in alphabetical order by path — path, slug, title, version, and size. Paths are relative to the corpus root.                                  |
-| `read_document`         | Read one document's markdown, verbatim, by `path` or `slug`.                                                                                                                      |
-| `read_document_meta`    | Parsed YAML frontmatter for one document in the bound Corpus, by `path` or `slug`.                                                                                                |
-| `verify_history`        | Verify a document's (or the bound Corpus's) version chain is intact.                                                                                                              |
-| `suggest_edit`          | Propose an edit to a document — or a NEW document (pass a fresh slug/path with `baseDocVersion: 0`). Always a reviewable suggestion a human applies; never an auto-applied write. |
-| `get_proposal_result`   | Check one of this caller's proposals for its human outcome, accepted hunks, resulting document version, and optional reviewer note. Other callers' proposals remain invisible.    |
-| `await_proposal_review` | Wait up to 25 seconds for one of this caller's open proposals to receive a human decision, returning early when it settles.                                                       |
-| `reply_to_proposal`     | Reply inside one of this caller's still-open proposals. It cannot access document comments, resolve feedback, or act on another caller's proposal.                                |
+| Tool                    | Does                                                                                                                                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_corpora`          | The Corpus this connection is bound to (a connection targets exactly one).                                                                                                                                                        |
+| `list_documents`        | Every document in the bound Corpus, in alphabetical order by path — path, slug, title, version, and size. Paths are relative to the corpus root.                                                                                  |
+| `read_document`         | Read one document's markdown, verbatim, by `path` or `slug`.                                                                                                                                                                      |
+| `read_document_meta`    | Parsed YAML frontmatter for one document in the bound Corpus, by `path` or `slug`.                                                                                                                                                |
+| `list_files`            | The images and attachments stored in the bound Corpus — path, size and content type. Documents are not included.                                                                                                                  |
+| `read_file`             | Read one image or attachment by `path`. PNG, JPEG, GIF and WebP come back as an image; SVG and PDF return metadata only; files over 5 MiB are refused. Pass `document` to resolve a page's `./diagram.png` relative to that page. |
+| `verify_history`        | Verify a document's (or the bound Corpus's) version chain is intact.                                                                                                                                                              |
+| `suggest_edit`          | Propose an edit to a document — or a NEW document (pass a fresh slug/path with `baseDocVersion: 0`). Always a reviewable suggestion a human applies; never an auto-applied write.                                                 |
+| `get_proposal_result`   | Check one of this caller's proposals for its human outcome, accepted hunks, resulting document version, and optional reviewer note. Other callers' proposals remain invisible.                                                    |
+| `await_proposal_review` | Wait up to 25 seconds for one of this caller's open proposals to receive a human decision, returning early when it settles.                                                                                                       |
+| `reply_to_proposal`     | Reply inside one of this caller's still-open proposals. It cannot access document comments, resolve feedback, or act on another caller's proposal.                                                                                |
 
 The same data is also exposed as MCP **resources**:
 `corpus://<slug>/outline` and `document://<slug>` — handy for clients that browse
@@ -168,6 +170,11 @@ requested change warrants one. Only the human reviewer can settle the review;
 the reply tool neither resolves feedback nor changes canonical content. A
 revised proposal starts a new review thread; the settled predecessor remains an
 immutable audit record rather than silently carrying messages into new work.
+
+Images the pages embed are reachable too: the agent calls `list_files`, or reads a
+page, sees `![chart](./chart.png)` and calls `read_file` with that exact `src` and the
+page as `document`. Files need [file storage](/files) to be turned on; without it
+`read_file` says files are not enabled.
 
 The agent has no built-in reading list. It calls `list_documents`, then
 reads the documents its task needs with `read_document`. A corpus has no

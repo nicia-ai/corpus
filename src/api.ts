@@ -33,6 +33,7 @@ import {
   embassySuggest,
 } from "./embassy/http";
 import { serveFile, uploadFile } from "./files/http";
+import { objectStoreFor } from "./files/object-store-for";
 import { asProjectId, callerRefFromApiKey, callerRefFromOAuth } from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
 import { scopedExecutor } from "./scoped-executor";
@@ -98,6 +99,7 @@ async function respondMcp(
   const exec = scopedExecutor(inner, ref.corpusSlug, members, callerRef, {
     baseUrl: env.BETTER_AUTH_URL,
     projectId: ref.projectId,
+    objects: objectStoreFor(env),
   });
   return Response.json(await handleMcp(parsed.data, exec));
 }

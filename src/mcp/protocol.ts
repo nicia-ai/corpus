@@ -27,6 +27,7 @@ export const SERVER_INSTRUCTIONS = [
   "This server gives you one Corpus: a folder of markdown files that a team maintains for you.",
   "Paths are relative to the Corpus root, like files in a directory (for example `README.md` or `policies/refunds.md`).",
   "Call list_documents to see every file with its path, then read_document with a path to read one. Nothing is loaded for you in advance: list first, then read what the task needs.",
+  "Pages can embed images and attachments (`![chart](./chart.png)`). Call list_files to see them, then read_file with the path as written in the page (pass that page as `document` so `./chart.png` resolves next to it) to see PNG, JPEG, GIF and WebP images; SVG and PDF files return metadata only, and files over 5 MiB are refused.",
   "You cannot change a file directly. Use suggest_edit to propose an edit or a new file; a person reviews it and decides.",
 ].join(" ");
 
@@ -56,6 +57,32 @@ export const TOOLS = [
     name: "read_document",
     description:
       "Read one file's markdown, verbatim, by its Corpus path such as `docs/brand-voice.md` (or by slug). The file must be in this Corpus.",
+  },
+  {
+    name: "list_files",
+    description:
+      "List the images and attachments stored in the Corpus: path (relative to the Corpus root), size in bytes and content type, ordered by path. Documents are not included; use list_documents for those.",
+  },
+  {
+    name: "read_file",
+    description:
+      "Read one image or attachment. PNG, JPEG, GIF and WebP come back as an image you can look at; SVG and PDF come back as metadata only (name, size, type). Files over 5 MiB are refused. Pass `path` as a Corpus path, or exactly as written in a page (such as `./diagram.png`) together with that page as `document`. The file must be in this Corpus.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "The file's Corpus path such as `images/diagram.png`, or a link target as written in a page (`./diagram.png`) when `document` is given.",
+        },
+        document: {
+          type: "string",
+          description:
+            "A page's Corpus path or slug. When given, `path` is resolved relative to that page, the way its links are.",
+        },
+      },
+      required: ["path"],
+    },
   },
   {
     name: "read_document_meta",
@@ -190,4 +217,14 @@ export function err(
 
 export function textContent(text: string) {
   return { content: [{ type: "text", text }] };
+}
+
+// A tool-level failure the agent reads and can act on (as opposed to a
+// protocol error): text content flagged `isError`.
+export function toolError(text: string) {
+  return { ...textContent(text), isError: true };
+}
+
+export function imageContent(data: string, mimeType: string) {
+  return { content: [{ type: "image", data, mimeType }] };
 }

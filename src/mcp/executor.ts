@@ -7,6 +7,17 @@ import type {
   SuggestCreateInput,
 } from "../project-store/commands/suggestions";
 import type { VerifyResult } from "../store/domain/verify";
+import type { ObjectStore } from "../store/repos/object-store";
+
+export type McpFile = Readonly<{
+  path: string;
+  size: number;
+  contentType: string;
+}>;
+
+export type McpFileRef = Readonly<
+  McpFile & { name: string; contentHash: string }
+>;
 
 // The per-request MCP executor port. `callerRef` carries the namespaced
 // caller identity (`apikey:<id>` | `oauth:<sub>:connection:<id>`) so downstream code can
@@ -33,6 +44,19 @@ export type McpExecutor = Readonly<{
       path: string;
     }[]
   >;
+  // The bound Corpus's image / attachment files in path order, a sibling of
+  // `listDocuments` so the document listing contract is untouched.
+  listFiles: () => Promise<readonly McpFile[]>;
+  // The file in the bound Corpus that `path` names: relative to the page
+  // `document` when given (a `src` as written in it), else to the Corpus
+  // root. Undefined when nothing is there, the path escapes the Corpus, or
+  // `document` is not in it.
+  getFile: (
+    target: Readonly<{ path: string; document?: DocumentSlug }>,
+  ) => Promise<McpFileRef | undefined>;
+  // The bytes behind a file, or undefined when this deployment has no file
+  // storage (`FILES` unbound). Keys are built from `projectId`.
+  objects: ObjectStore | undefined;
   corpusMembers: (slug: CorpusSlug) => Promise<readonly string[] | undefined>;
   getDocument: (
     slug: DocumentSlug,
