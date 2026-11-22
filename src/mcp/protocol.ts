@@ -30,13 +30,20 @@ export const SERVER_INSTRUCTIONS = [
   "You cannot change a file directly. Use suggest_edit to propose an edit or a new file; a person reviews it and decides.",
 ].join(" ");
 
-export const COLLECTION_URI = "collection://";
+export const CORPUS_URI = "corpus://";
+// Pre-rename scheme: still accepted on read, never advertised.
+export const LEGACY_COLLECTION_URI = "collection://";
 export const DOCUMENT_URI = "document://";
 export const OUTLINE_SUFFIX = "/outline";
 
+// Pre-rename tool names, still callable, never listed in TOOLS.
+export const LEGACY_TOOL_ALIASES: Readonly<Record<string, string>> = {
+  list_collections: "list_corpora",
+};
+
 export const TOOLS = [
   {
-    name: "list_collections",
+    name: "list_corpora",
     description:
       "Describe the Corpus this connection is bound to (a connection targets exactly one): its slug, name and description.",
   },

@@ -41,7 +41,7 @@ function CorpusRoute(): React.ReactElement {
         <BackLink
           to="/p/$projectId/documents"
           projectId={projectId}
-          label="Documents"
+          label="Corpora"
         />
         <p className="mt-4 text-slate-500">Corpus not found.</p>
       </div>

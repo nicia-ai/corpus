@@ -90,7 +90,7 @@ Either way, agents and API keys connected to the corpus are removed.
 A connected agent sees the corpus as a folder of markdown files. Its
 tools are listed in [Connect your agent](./connect-your-agent.md#what-the-agent-can-do):
 
-- `list_collections` describes the corpus the connection is bound to.
+- `list_corpora` describes the corpus the connection is bound to.
 - `list_documents` lists every file, by corpus-relative path, in
   alphabetical order.
 - `read_document` returns one document's markdown, verbatim, by path or

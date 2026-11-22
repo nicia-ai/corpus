@@ -51,7 +51,7 @@ exists to deliver.
   - base 1.0 (secondary text)
   - lg 1.125 (body, node titles, rendered-document body)
   - xl 1.25 (section headings)
-  - 2xl 1.5 (page titles, including "Documents")
+  - 2xl 1.5 (page titles, including "Corpora")
   - Line-height: 1.5 app body, 1.25 headings.
   - **Rendered-document prose (`.md`) is the exception** — a calmer
     reading surface authored by non-engineers and read far more than

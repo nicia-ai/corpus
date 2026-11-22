@@ -191,14 +191,14 @@ export function McpSetupPage({
   // Corpus: every panel below would render a partial broken state
   // (BackLink to a 404'd /corpora/<slug>, empty ApiKeysSection,
   // missing AgentPromptSection). Stop early with a single clear card so
-  // the owner can correct the link or jump back to Documents.
+  // the owner can correct the link or jump back to Corpora.
   if (corpus !== undefined && col !== undefined && !col.found) {
     return (
       <div className="pb-12">
         <BackLink
           to="/p/$projectId/documents"
           projectId={projectId}
-          label="Documents"
+          label="Corpora"
         />
         <PageHeader
           title="Corpus not found"
@@ -250,7 +250,7 @@ export function McpSetupPage({
         <BackLink
           to="/p/$projectId/documents"
           projectId={projectId}
-          label="Documents"
+          label="Corpora"
         />
       ) : (
         <BackLink

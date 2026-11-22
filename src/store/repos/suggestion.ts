@@ -16,6 +16,8 @@ import {
   type SuggestionStatus,
 } from "../../db";
 
+import { readInBatches } from "./in-batches";
+
 // Per-hunk suggestions, as a repository. Non-canonical review layer
 // (off-bundle, off-MCP). All row/status types inferred from the schema, so
 // an invalid status / op / decision cannot be written or queried.
@@ -54,15 +56,16 @@ export class SuggestionRepo {
     return r.id;
   }
 
-  messagesForSuggestions(
+  async messagesForSuggestions(
     ids: readonly number[],
   ): Promise<readonly SuggestionMessageRow[]> {
-    if (ids.length === 0) return Promise.resolve([]);
-    return this.db
-      .select()
-      .from(suggestionMessage)
-      .where(inArray(suggestionMessage.suggestionId, [...ids]))
-      .orderBy(suggestionMessage.id);
+    const rows = await readInBatches(ids, (batch) =>
+      this.db
+        .select()
+        .from(suggestionMessage)
+        .where(inArray(suggestionMessage.suggestionId, [...batch])),
+    );
+    return [...rows].sort((a, b) => a.id - b.id);
   }
 
   forDoc(documentSlug: string): Promise<readonly SuggestionRow[]> {
@@ -135,15 +138,16 @@ export class SuggestionRepo {
     return r;
   }
 
-  hunksForSuggestions(
+  async hunksForSuggestions(
     ids: readonly number[],
   ): Promise<readonly SuggestionHunkRow[]> {
-    if (ids.length === 0) return Promise.resolve([]);
-    return this.db
-      .select()
-      .from(suggestionHunk)
-      .where(inArray(suggestionHunk.suggestionId, [...ids]))
-      .orderBy(suggestionHunk.ordinal);
+    const rows = await readInBatches(ids, (batch) =>
+      this.db
+        .select()
+        .from(suggestionHunk)
+        .where(inArray(suggestionHunk.suggestionId, [...batch])),
+    );
+    return [...rows].sort((a, b) => a.ordinal - b.ordinal || a.id - b.id);
   }
 
   async setHunkDecision(hunkId: number, decision: HunkDecision): Promise<void> {

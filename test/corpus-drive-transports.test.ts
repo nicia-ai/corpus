@@ -122,6 +122,48 @@ describe("MCP: a corpus is a folder of markdown files", () => {
     expect((await read("b.md")).error).toBeDefined();
   });
 
+  it("still answers the pre-rename list_collections tool without advertising it", async () => {
+    const { exec } = await setup();
+    const listed = await rpc(exec, { method: "tools/list" });
+    const names = (listed.result?.tools ?? []).map((t) => t.name);
+    expect(names).toContain("list_corpora");
+    expect(names).not.toContain("list_collections");
+
+    const slugsOf = async (name: string) =>
+      JSON.parse(
+        (
+          await rpc(exec, {
+            method: "tools/call",
+            params: { name, arguments: {} },
+          })
+        ).result?.content?.[0]?.text ?? "null",
+      ) as { slug: string }[];
+    const current = await slugsOf("list_corpora");
+    expect(current.map((c) => c.slug)).toEqual(["alpha"]);
+    expect(await slugsOf("list_collections")).toEqual(current);
+  });
+
+  it("serves corpus:// outlines, accepts the old collection:// scheme, and advertises only the new one", async () => {
+    const { exec } = await setup();
+    const listed = (await rpc(exec, { method: "resources/list" })) as {
+      result?: { resources?: { uri: string }[] };
+    };
+    const uris = (listed.result?.resources ?? []).map((r) => r.uri);
+    expect(uris).toContain("corpus://alpha/outline");
+    expect(uris.some((u) => u.startsWith("collection://"))).toBe(false);
+
+    const read = async (uri: string) =>
+      (
+        (await rpc(exec, {
+          method: "resources/read",
+          params: { uri },
+        })) as { result?: { contents?: { text: string }[] } }
+      ).result?.contents?.[0]?.text;
+    const fresh = await read("corpus://alpha/outline");
+    expect(fresh).toBeDefined();
+    expect(await read("collection://alpha/outline")).toBe(fresh);
+  });
+
   it("does not offer the assembled collection resource", async () => {
     const { exec } = await setup();
     const res = await rpc(exec, {

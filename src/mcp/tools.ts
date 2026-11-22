@@ -10,7 +10,14 @@ import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "../util";
 
 import type { McpExecutor } from "./executor";
 import { documentSlugFromArgs, strField } from "./params";
-import { ERR, err, ok, textContent, TOOLS } from "./protocol";
+import {
+  ERR,
+  LEGACY_TOOL_ALIASES,
+  err,
+  ok,
+  textContent,
+  TOOLS,
+} from "./protocol";
 
 // suggest_edit args. The document is addressed by slug OR path (resolved
 // via documentSlugFromArgs, like the read tools); these two fields are the
@@ -132,7 +139,7 @@ type ToolHandler = (args: {
 }) => Promise<unknown>;
 
 const TOOL_HANDLERS: Record<string, ToolHandler> = {
-  list_collections: async ({ id, exec }) =>
+  list_corpora: async ({ id, exec }) =>
     ok(id, textContent(JSON.stringify(await exec.listCorpora()))),
 
   list_documents: async ({ id, exec }) =>
@@ -424,7 +431,10 @@ export async function handleToolCall(
 ): Promise<unknown> {
   const name = params.name;
   const args = (params.arguments ?? {}) as Record<string, unknown>;
-  const handler = typeof name === "string" ? TOOL_HANDLERS[name] : undefined;
+  const handler =
+    typeof name === "string"
+      ? TOOL_HANDLERS[LEGACY_TOOL_ALIASES[name] ?? name]
+      : undefined;
   return handler === undefined
     ? err(id, ERR.METHOD_NOT_FOUND, `unknown tool: ${String(name)}`)
     : handler({ id, exec, params: args });

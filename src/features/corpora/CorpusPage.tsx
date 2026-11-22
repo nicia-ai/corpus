@@ -406,7 +406,7 @@ export function CorpusPage({
         <BackLink
           to="/p/$projectId/documents"
           projectId={projectId}
-          label="Documents"
+          label="Corpora"
         />
         <EditCorpusForm
           slug={corpus.slug}
@@ -428,7 +428,7 @@ export function CorpusPage({
       <BackLink
         to="/p/$projectId/documents"
         projectId={projectId}
-        label="Documents"
+        label="Corpora"
       />
       <header className="mt-2 mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">

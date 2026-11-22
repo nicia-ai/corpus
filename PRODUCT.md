@@ -53,7 +53,7 @@ and agent consumption on separate sides of a human approval boundary.
 ## Operating Context
 
 Curators enter a project to work on documents. The populated project opens
-Documents, where recently modified documents — including newly created ones —
+Corpora, where recently modified documents — including newly created ones —
 are visible before the folder browser. Search and folders support finding the
 rest; Activity remains available when a curator needs the event history.
 

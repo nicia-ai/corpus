@@ -158,7 +158,7 @@ export function DocumentsPage({
         />
       )}
       <PageHeader
-        title="Documents"
+        title="Corpora"
         actions={
           <>
             <button
@@ -446,7 +446,7 @@ function SearchSnippetLine({
 // The empty-state IS the upload flow (matches the SeedChooser pattern
 // on Home). When the import lands, the route loader returns documents
 // and this component unmounts — no Done card needed because the user
-// is already on Documents.
+// is already on Corpora.
 function EmptyDocuments({
   projectId,
   corpora,

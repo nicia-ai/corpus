@@ -23,14 +23,14 @@ type NavEntry = Readonly<{
   icon: LucideIcon;
   ownerOnly?: boolean;
   // Routes that live under this entry in the product model but not in
-  // the URL tree (a corpus page is part of Documents).
+  // the URL tree (a corpus page is part of Corpora).
   alsoActiveUnder?: readonly string[];
 }>;
 
 const NAV: readonly NavEntry[] = [
   {
     to: "/p/$projectId/documents",
-    label: "Documents",
+    label: "Corpora",
     icon: FileText,
     alsoActiveUnder: ["/p/$projectId/corpora", "/p/$projectId/connectors"],
   },

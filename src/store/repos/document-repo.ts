@@ -4,6 +4,7 @@ import { DOCUMENT_SLUG_INDEX, type Document } from "../../graph";
 import type { DocumentSlug } from "../../ids";
 import type { GraphHandle } from "../handle";
 
+import { inBatches } from "./in-batches";
 import { findAll } from "./paginate";
 
 // Slugs per `bulkFindByIndex` statement. Each input binds several
@@ -51,12 +52,10 @@ export class DocumentRepo {
     slugs: readonly DocumentSlug[],
   ): Promise<readonly (DocumentNode | undefined)[]> {
     const heads: (DocumentNode | undefined)[] = [];
-    for (let i = 0; i < slugs.length; i += FIND_MANY_CHUNK) {
+    for (const batch of inBatches(slugs, FIND_MANY_CHUNK)) {
       const groups = await this.g.nodes.Document.bulkFindByIndex(
         DOCUMENT_SLUG_INDEX,
-        slugs
-          .slice(i, i + FIND_MANY_CHUNK)
-          .map((slug) => ({ props: { slug } })),
+        batch.map((slug) => ({ props: { slug } })),
         { limitPerInput: 1 },
       );
       heads.push(...groups.map((group) => group[0]));

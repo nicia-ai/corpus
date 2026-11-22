@@ -3,18 +3,12 @@ import { inArray, lt } from "drizzle-orm";
 import { contentBlobs, type LedgerDb } from "../../db";
 import { gunzip, gzip } from "../../util";
 
-// Stay comfortably below SQLite/D1's bound-parameter ceiling. A long-lived
-// document can accumulate thousands of versions; retention metadata must not
-// turn that valid history into one oversized `IN (...)` statement.
-const HASH_LOOKUP_BATCH_SIZE = 100;
+import { inBatches } from "./in-batches";
 
-function hashBatches(hashes: readonly string[]): readonly string[][] {
-  const unique = [...new Set(hashes)];
-  const batches: string[][] = [];
-  for (let i = 0; i < unique.length; i += HASH_LOOKUP_BATCH_SIZE) {
-    batches.push(unique.slice(i, i + HASH_LOOKUP_BATCH_SIZE));
-  }
-  return batches;
+function hashBatches(
+  hashes: readonly string[],
+): readonly (readonly string[])[] {
+  return inBatches([...new Set(hashes)]);
 }
 
 // The content-addressed blob store, as a repository. Bound to whichever
