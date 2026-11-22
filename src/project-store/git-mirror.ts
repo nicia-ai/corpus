@@ -1,4 +1,6 @@
+import type { SyncState, TrackedAsset } from "../../cli/sync-state";
 import type { MirrorStateRow } from "../db";
+import { InternalError } from "../errors";
 import { asCorpusSlug, type CorpusSlug, type ProjectId } from "../ids";
 import { MirrorServiceError } from "../mirror/errors";
 import type { GitMirror, MirrorHead } from "../mirror/port";
@@ -7,12 +9,15 @@ import type { Bytes } from "../store/domain/git/objects";
 import type { FileWrite } from "../store/domain/git/tree-edit";
 import {
   authorIdentity,
+  type ChangePlan,
+  chunkPlan,
   CLONE_TOKEN_TTL_SECONDS,
   commitMessage,
   COMMITTER_EMAIL,
   COMMITTER_NAME,
   type EnabledMirrorStatus,
   type GitMirrorStatus,
+  MIRROR_CHUNK_BYTES,
   mirrorManifest,
   type MirrorManifest,
   mirrorRepoName,
@@ -22,13 +27,15 @@ import {
   serializeState,
   STATE_FILE,
 } from "../store/domain/git-mirror";
+import { fileObjectKey, type ObjectStore } from "../store/repos/object-store";
+import { sha256Hex } from "../util";
 
 import { isDocumentChange, isFileChange, type DomainChange } from "./command";
 import {
   corpusOfDocument,
   corpusOfEveryDocument,
 } from "./commands/corpus-tree";
-import { resolvedViews } from "./queries";
+import { listFilesProjection, resolvedViews } from "./queries";
 import type { ProjectUnit } from "./unit";
 
 // The application side of the Git mirror: records, inside the same write
@@ -46,12 +53,19 @@ type MirrorDeps = Readonly<{
   // Ask for the DO alarm at (or before) this epoch-millisecond time.
   scheduleAlarm: (atMs: number) => Promise<void>;
   authorName: (changedBy: string) => Promise<string | undefined>;
+  // The bytes of uploaded files; `undefined` = no file storage configured.
+  objects: () => ObjectStore | undefined;
   now: () => number;
 }>;
 
 // Passes that find the branch moved under them before giving up for a retry
 // later (each pass re-reads the head, so a lost race is cheap).
 const MAX_STALE_RETRIES = 3;
+// Commits one pass may make while a large change goes out in pieces. The
+// project's file quota splits into well under this many, so reaching it means
+// the plan is not shrinking (a head whose state this version cannot read) and
+// the pass gives up for a retry rather than pushing forever.
+const MAX_PASS_COMMITS = 100;
 // A command that touches more documents than this (a folder move, a bundle
 // import) finds their corpora in one project-wide read instead of one lookup
 // each — inside the write transaction, where every statement counts.
@@ -59,6 +73,15 @@ const BULK_LOOKUP_THRESHOLD = 16;
 const ERROR_TEXT_LIMIT = 500;
 const MS_PER_SECOND = 1000;
 const SYSTEM_AUTHOR = "";
+
+// Test seam (module-level, like `setGitMirrorForTest`): the DO runs in the
+// tests' isolate, so a test can shrink the per-commit budget to watch a small
+// corpus split into several commits. Never set in production.
+let chunkBytesOverride: number | undefined;
+
+export function setMirrorChunkBytesForTest(bytes: number | undefined): void {
+  chunkBytesOverride = bytes;
+}
 
 type CorpusNow = Readonly<{
   manifest: MirrorManifest;
@@ -130,10 +153,17 @@ export class ProjectGitMirror {
         ? await corpusOfEveryDocument(u)
         : undefined;
     for (const change of changes) {
-      // The mirror does not carry files yet: a file change leaves the
-      // repository exactly as it was. (Mirroring files subscribes here, to
-      // the `file.*` events, and notes `change.corpusSlug`.)
-      if (isFileChange(change)) continue;
+      if (isFileChange(change)) {
+        note(change.corpusSlug, "sync", change);
+        // A file moved between corpora leaves the one it came from behind too.
+        if (
+          change.fromCorpusSlug !== undefined &&
+          change.fromCorpusSlug !== change.corpusSlug
+        ) {
+          note(change.fromCorpusSlug, "sync", change);
+        }
+        continue;
+      }
       if (isDocumentChange(change)) {
         const corpusSlug =
           bulk === undefined
@@ -337,7 +367,12 @@ export class ProjectGitMirror {
       presence = { kind: "missing" };
     }
 
-    for (let tries = 0; tries <= MAX_STALE_RETRIES; tries += 1) {
+    // The last commit this project is known to have pushed: it advances as a
+    // large change goes out in several commits.
+    let lastCommit = row.lastCommit;
+    let lostRaces = 0;
+    let commits = 0;
+    for (;;) {
       const now = await this.corpusNow(corpusSlug);
       // The corpus is gone: its repository goes with it.
       if (now === undefined) return this.removeRepo(port, repo, row);
@@ -347,7 +382,7 @@ export class ProjectGitMirror {
         presence = { kind: "empty" };
       }
       let head = presence.kind === "head" ? presence.head : undefined;
-      if (head !== undefined && !isExpected(head, row)) {
+      if (head !== undefined && !isExpected(head, lastCommit)) {
         console.warn(
           `[git-mirror] ${row.corpusSlug}: repository head is not the one this project pushed; rebuilding`,
         );
@@ -360,13 +395,25 @@ export class ProjectGitMirror {
       if (head !== undefined && planIsEmpty(plan)) {
         return this.synced(corpusSlug, row, head.commit);
       }
-      const writes = await this.contentOf(corpusSlug, plan.upserts, now);
+      // One commit per loop: the rest of a split plan is re-planned from the
+      // repository's new head, so a failure or a concurrent change between
+      // commits never leaves a stale plan to finish.
+      const [chunk, ...rest] = chunkPlan(
+        head?.state,
+        now.manifest.state,
+        plan,
+        chunkBytesOverride ?? MIRROR_CHUNK_BYTES,
+      );
+      if (chunk === undefined) {
+        throw new InternalError("a non-empty mirror plan produced no commit");
+      }
+      const writes = await this.contentOf(corpusSlug, chunk.plan, now);
       const outcome = await port.commit({
         repo,
         base: head,
         edit: {
-          writes: [...writes, stateFile(now.manifest)],
-          removals: plan.removals,
+          writes: [...writes, stateFile(chunk.state)],
+          removals: chunk.plan.removals,
         },
         author: await this.author(row),
         committer: {
@@ -374,16 +421,32 @@ export class ProjectGitMirror {
           email: COMMITTER_EMAIL,
           when: Math.floor(this.deps.now() / MS_PER_SECOND),
         },
-        message: commitMessage(plan, head === undefined),
+        message: commitMessage(chunk.plan, head === undefined),
       });
-      if (outcome.kind === "pushed") {
+      if (outcome.kind === "pushed" && rest.length === 0) {
         return this.synced(corpusSlug, row, outcome.commit);
+      }
+      if (outcome.kind === "pushed") {
+        commits += 1;
+        if (commits >= MAX_PASS_COMMITS) {
+          throw new MirrorServiceError(
+            "the mirror's change did not shrink after many commits; will retry",
+          );
+        }
+        lastCommit = outcome.commit;
+        await this.deps.write((u) =>
+          u.mirror.recordPushed(corpusSlug, outcome.commit),
+        );
+      } else {
+        lostRaces += 1;
+        if (lostRaces > MAX_STALE_RETRIES) {
+          throw new MirrorServiceError(
+            "the repository branch kept moving while pushing; will retry",
+          );
+        }
       }
       presence = await port.inspect(repo);
     }
-    throw new MirrorServiceError(
-      "the repository branch kept moving while pushing; will retry",
-    );
   }
 
   private async removeRepo(
@@ -401,15 +464,25 @@ export class ProjectGitMirror {
   private async corpusNow(
     corpusSlug: CorpusSlug,
   ): Promise<CorpusNow | undefined> {
-    const views = await resolvedViews(await this.deps.read(), corpusSlug);
+    const u = await this.deps.read();
+    const views = await resolvedViews(u, corpusSlug);
     if (views === undefined) return undefined;
+    const files = (await listFilesProjection(u))
+      .filter((file) => file.corpusSlug === corpusSlug)
+      .map((file) => ({
+        slug: file.slug,
+        path: file.path,
+        contentHash: file.contentHash,
+        size: file.size,
+      }));
     const manifest = mirrorManifest(
       { projectId: this.deps.projectId(), slug: corpusSlug },
       views,
+      files,
     );
     if (manifest.skipped.length > 0) {
       console.warn(
-        `[git-mirror] ${corpusSlug}: ${String(manifest.skipped.length)} document(s) not mirrored: their paths cannot be files in a checkout`,
+        `[git-mirror] ${corpusSlug}: ${String(manifest.skipped.length)} document(s) or file(s) not mirrored: their paths cannot be files in a checkout, or a file is over the size cap`,
       );
     }
     return {
@@ -418,18 +491,20 @@ export class ProjectGitMirror {
     };
   }
 
-  // The bytes of the files the plan writes: one batched blob read for just
-  // those documents, however large the corpus is.
+  // The bytes of the files one commit writes: one batched blob read for just
+  // those documents, however large the corpus is, then the images and
+  // attachments, fetched from file storage one at a time.
   private async contentOf(
     corpusSlug: CorpusSlug,
-    upserts: readonly { path: string }[],
+    plan: ChangePlan,
     now: CorpusNow,
   ): Promise<readonly FileWrite[]> {
+    const { upserts } = plan;
     const hashes = upserts.map((f) => now.hashByPath.get(f.path) ?? "");
     const u = await this.deps.read();
     const markdown = await u.blobs.getMany(hashes);
     const encoder = new TextEncoder();
-    return upserts.map((file) => {
+    const documents = upserts.map((file) => {
       const body = markdown.get(now.hashByPath.get(file.path) ?? "");
       if (body === undefined) {
         throw new MirrorServiceError(
@@ -438,6 +513,56 @@ export class ProjectGitMirror {
       }
       return { path: file.path, content: encoder.encode(body) };
     });
+    return [...documents, ...(await this.assetContent(corpusSlug, plan))];
+  }
+
+  // Each file's bytes are read whole, checked against the hash and size the
+  // project recorded, and only then handed on: a mirror never commits bytes
+  // the graph does not vouch for.
+  private async assetContent(
+    corpusSlug: CorpusSlug,
+    plan: ChangePlan,
+  ): Promise<readonly FileWrite[]> {
+    if (plan.assetUpserts.length === 0) return [];
+    const objects = this.deps.objects();
+    if (objects === undefined) {
+      throw new MirrorServiceError(
+        `${corpusSlug}: this corpus has images or attachments but the deployment has no file storage (the FILES binding) to read them from`,
+      );
+    }
+    const writes: FileWrite[] = [];
+    for (const asset of plan.assetUpserts) {
+      writes.push({
+        path: asset.path,
+        content: await this.assetBytes(objects, corpusSlug, asset),
+      });
+    }
+    return writes;
+  }
+
+  private async assetBytes(
+    objects: ObjectStore,
+    corpusSlug: CorpusSlug,
+    asset: TrackedAsset,
+  ): Promise<Bytes> {
+    const object = await objects.get(
+      fileObjectKey(this.deps.projectId(), asset.sha256),
+    );
+    if (object === undefined) {
+      throw new MirrorServiceError(
+        `${corpusSlug}: the stored bytes of ${asset.path} are missing`,
+      );
+    }
+    const bytes = new Uint8Array(await new Response(object.body).arrayBuffer());
+    if (
+      bytes.byteLength !== asset.size ||
+      (await sha256Hex(bytes)) !== asset.sha256
+    ) {
+      throw new MirrorServiceError(
+        `${corpusSlug}: the stored bytes of ${asset.path} do not match the recorded hash`,
+      );
+    }
+    return bytes;
   }
 
   private async author(row: MirrorStateRow): Promise<{
@@ -473,10 +598,8 @@ export class ProjectGitMirror {
   }
 }
 
-function stateFile(manifest: MirrorManifest): FileWrite {
-  const content: Bytes = new TextEncoder().encode(
-    serializeState(manifest.state),
-  );
+function stateFile(state: SyncState): FileWrite {
+  const content: Bytes = new TextEncoder().encode(serializeState(state));
   return { path: STATE_FILE, content };
 }
 
@@ -484,9 +607,9 @@ function stateFile(manifest: MirrorManifest): FileWrite {
 // right after it, which is what remains when a push landed but the record of
 // it did not (a crash between the two). Anything else means someone or
 // something else has written to the repository: start over.
-function isExpected(head: MirrorHead, row: MirrorStateRow): boolean {
-  if (row.lastCommit === null) return false;
-  return head.commit === row.lastCommit || head.parents[0] === row.lastCommit;
+function isExpected(head: MirrorHead, lastCommit: string | null): boolean {
+  if (lastCommit === null) return false;
+  return head.commit === lastCommit || head.parents[0] === lastCommit;
 }
 
 function statusOf(row: MirrorStateRow): EnabledMirrorStatus {

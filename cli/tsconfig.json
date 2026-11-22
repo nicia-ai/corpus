@@ -21,6 +21,7 @@
     "sourceMap": false
   },
   "include": [
+    "asset-kinds.ts",
     "checkout-guard.ts",
     "config.ts",
     "config-path.ts",
@@ -32,8 +33,11 @@
     "rest-write.ts",
     "mcp-add.ts",
     "errors.ts",
+    "files-rest.ts",
     "git.ts",
+    "push-assets.ts",
     "sync.ts",
+    "sync-assets.ts",
     "sync-state.ts"
   ]
 }

@@ -981,6 +981,34 @@ export class FolderRepo {
     return { ok: true, changed: true };
   }
 
+  // Give a file a new place: a folder and a name in one step, so the
+  // sibling-namespace check is made against the name it will HAVE there. Writes
+  // the folder edge only; the caller sets the `filename` property.
+  async relocateFile(
+    fileSlug: FileSlug,
+    folderSlug: FolderSlug,
+    filename: string,
+  ): Promise<PlaceFileResult> {
+    const node = await this.files.find(fileSlug);
+    if (
+      node === undefined ||
+      node.deletedAt !== undefined ||
+      (await this.nodeBySlug(folderSlug)) === undefined
+    ) {
+      return { ok: false, reason: "missing" };
+    }
+    const sameFolder = (await this.files.folderOf(fileSlug)) === folderSlug;
+    if (sameFolder && node.filename === filename) {
+      return { ok: true, changed: false };
+    }
+    const siblings = await this.siblingSegments(folderSlug);
+    if (segmentCollides(siblings, filename, { kind: "file", slug: fileSlug })) {
+      return { ok: false, reason: "segment-collision" };
+    }
+    if (!sameFolder) await this.files.rehome(fileSlug, folderSlug);
+    return { ok: true, changed: true };
+  }
+
   // Give a document a new place: a folder and a file name in one step, so
   // the sibling-namespace check is made against the name it will HAVE
   // there (placing then renaming could collide in between). Writes the

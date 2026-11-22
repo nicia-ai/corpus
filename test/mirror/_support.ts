@@ -18,7 +18,13 @@ import {
   type UserId,
 } from "../../src/ids";
 import type { ProjectStore } from "../../src/project-store";
+import { sniffFormat } from "../../src/store/domain/file-kinds";
 import { mirrorRepoName } from "../../src/store/domain/git-mirror";
+import {
+  fileObjectKey,
+  r2ObjectStore,
+} from "../../src/store/repos/object-store";
+import { sha256Hex } from "../../src/util";
 import { createConnection, createOrg, signUp } from "../_helpers";
 
 // A real project (org, owner, API key bound to one corpus) over the local
@@ -101,14 +107,19 @@ export async function slugAt(
 export type MirrorSnapshot = Readonly<{
   commits: readonly ArtifactsCommitMetadata[];
   head: ArtifactsCommitMetadata;
+  // Every file as text (lossy for binaries) and as the exact bytes.
   files: ReadonlyMap<string, string>;
+  bytes: ReadonlyMap<string, Uint8Array>;
 }>;
 
 async function walk(
   repo: ArtifactsRepo,
   treeHash: string,
   prefix: string,
-  into: Map<string, string>,
+  into: Readonly<{
+    files: Map<string, string>;
+    bytes: Map<string, Uint8Array>;
+  }>,
 ): Promise<void> {
   for (const entry of (await repo.readTree(treeHash)) ?? []) {
     const path = `${prefix}${entry.name}`;
@@ -116,7 +127,13 @@ async function walk(
       await walk(repo, entry.hash, `${path}/`, into);
     } else {
       const blob = await repo.readBlob(entry.hash);
-      into.set(path, (await blob?.text()) ?? "<missing>");
+      const raw =
+        blob === null ? undefined : new Uint8Array(await blob.arrayBuffer());
+      into.bytes.set(path, raw ?? new Uint8Array());
+      into.files.set(
+        path,
+        raw === undefined ? "<missing>" : new TextDecoder().decode(raw),
+      );
     }
   }
 }
@@ -139,8 +156,9 @@ export async function readMirror(
   const [head] = commits;
   if (head === undefined) return undefined;
   const files = new Map<string, string>();
-  await walk(repo, head.treeHash, "", files);
-  return { commits, head, files };
+  const bytes = new Map<string, Uint8Array>();
+  await walk(repo, head.treeHash, "", { files, bytes });
+  return { commits, head, files, bytes };
 }
 
 export async function mirrorExists(repoName: string): Promise<boolean> {
@@ -149,20 +167,28 @@ export async function mirrorExists(repoName: string): Promise<boolean> {
   );
 }
 
-// What `corpus pull --all` writes for this corpus, as a path → text map:
-// the reference the mirror must equal byte for byte.
-export async function cliCheckout(
-  fixture: Fixture,
-): Promise<ReadonlyMap<string, string>> {
-  const map = new Map<string, string>();
+type Checkout = Readonly<{
+  text: ReadonlyMap<string, string>;
+  binary: ReadonlyMap<string, Uint8Array>;
+}>;
+
+async function pullCheckout(fixture: Fixture): Promise<Checkout> {
+  const text = new Map<string, string>();
+  const binary = new Map<string, Uint8Array<ArrayBuffer>>();
   const files: TreeFiles = {
-    readText: (path) => Promise.resolve(map.get(path)),
+    readText: (path) => Promise.resolve(text.get(path)),
     writeText: (path, data) => {
-      map.set(path, data);
+      text.set(path, data);
+      return Promise.resolve();
+    },
+    readBytes: (path) => Promise.resolve(binary.get(path)),
+    writeBytes: (path, data) => {
+      binary.set(path, data);
       return Promise.resolve();
     },
     remove: (path) => {
-      map.delete(path);
+      text.delete(path);
+      binary.delete(path);
       return Promise.resolve();
     },
   };
@@ -174,9 +200,74 @@ export async function cliCheckout(
     files,
   };
   await pullAll(config, CHECKOUT);
-  return new Map(
-    [...map].map(([path, text]) => [path.slice(CHECKOUT.length + 1), text]),
+  const relative = <T>(map: ReadonlyMap<string, T>): Map<string, T> =>
+    new Map([...map].map(([path, v]) => [path.slice(CHECKOUT.length + 1), v]));
+  return { text: relative(text), binary: relative(binary) };
+}
+
+// What `corpus pull --all` writes for this corpus, as a path → text map
+// (documents and `.corpus.json`): the reference the mirror must equal byte
+// for byte.
+export async function cliCheckout(
+  fixture: Fixture,
+): Promise<ReadonlyMap<string, string>> {
+  return (await pullCheckout(fixture)).text;
+}
+
+// The same checkout as exact bytes, images and attachments included.
+export async function cliCheckoutBytes(
+  fixture: Fixture,
+): Promise<ReadonlyMap<string, Uint8Array>> {
+  const { text, binary } = await pullCheckout(fixture);
+  const encoder = new TextEncoder();
+  return new Map([
+    ...[...text].map(([path, body]) => [path, encoder.encode(body)] as const),
+    ...binary,
+  ]);
+}
+
+// Store an image or attachment in the corpus at a corpus-relative path, the
+// way an upload does: bytes into R2 first, then the metadata through the DO.
+export async function putAsset(
+  fixture: Fixture,
+  path: string,
+  bytes: Uint8Array<ArrayBuffer>,
+  baseHash?: string,
+): Promise<string> {
+  if (env.FILES === undefined) throw new Error("fixture: FILES is not bound");
+  const format = sniffFormat(bytes);
+  if (format === undefined) throw new Error(`fixture: ${path} is not an image`);
+  const contentHash = await sha256Hex(bytes);
+  await r2ObjectStore(env.FILES).put(
+    fileObjectKey(fixture.projectId, contentHash),
+    bytes,
   );
+  const result = await fixture.store.putFileAtPath({
+    corpusSlug: fixture.corpusSlug,
+    path,
+    contentHash,
+    size: bytes.byteLength,
+    format,
+    baseHash,
+    changedBy: fixture.ownerUserId,
+  });
+  if (!result.ok) {
+    throw new Error(`fixture: could not store ${path}: ${result.reason}`);
+  }
+  return result.file.slug;
+}
+
+// Every file of one commit's tree, as exact bytes.
+export async function readCommitFiles(
+  repoName: string,
+  treeHash: string,
+): Promise<ReadonlyMap<string, Uint8Array>> {
+  const repo = await artifacts().get(repoName);
+  using _repo = repo;
+  const files = new Map<string, string>();
+  const bytes = new Map<string, Uint8Array>();
+  await walk(repo, treeHash, "", { files, bytes });
+  return bytes;
 }
 
 // Run the drain to completion — the same method the DO alarm calls.

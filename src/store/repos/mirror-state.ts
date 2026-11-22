@@ -157,6 +157,18 @@ export class MirrorStateRepo {
       .where(eq(mirrorState.corpusSlug, corpusSlug));
   }
 
+  // A commit landed that is not the last of the pass (a large change is
+  // pushed as several). The repository head moved, so the record follows it:
+  // a crash before the next commit then leaves a head this project recognizes
+  // as its own, never one that looks foreign and is rebuilt from nothing. The
+  // row stays owed: nothing is marked synced.
+  async recordPushed(corpusSlug: CorpusSlug, commit: string): Promise<void> {
+    await this.db
+      .update(mirrorState)
+      .set({ lastCommit: commit })
+      .where(eq(mirrorState.corpusSlug, corpusSlug));
+  }
+
   // The pass failed: remember why, count it, and say when to try again.
   async markFailed(
     corpusSlug: CorpusSlug,

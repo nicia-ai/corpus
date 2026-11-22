@@ -30,10 +30,12 @@ import { resolveUserNames } from "./control/users";
 import type { LedgerDb } from "./db";
 import { EMBASSY_ACTOR_LABEL } from "./embassy/actor";
 import { ConflictError, isUniqueViolation, RollbackProbe } from "./errors";
+import { objectStoreFor } from "./files/object-store-for";
 import { canonicalGraph } from "./graph";
 import {
   asCorpusSlug,
   asDocumentSlug,
+  asFolderSlug,
   type CorpusSlug,
   type DocumentSlug,
   type FileSlug,
@@ -77,7 +79,17 @@ import {
   moveDocumentToPathCommand,
 } from "./project-store/commands/corpus-documents";
 import {
+  deleteFileInCorpusCommand,
+  type DeleteFileInCorpusResult,
+  moveFileToPathCommand,
+  type MoveFileToPathResult,
+  putFileAtPathCommand,
+  type PutFileAtPathInput,
+  type PutFileAtPathResult,
+} from "./project-store/commands/corpus-files";
+import {
   corpusOfDocument,
+  corpusOfFolder,
   corpusTreeChanged,
 } from "./project-store/commands/corpus-tree";
 import { deleteCorpusCommand } from "./project-store/commands/delete-corpus";
@@ -321,6 +333,8 @@ export type ServedFile = Readonly<{
   filename: string;
   contentType: string;
   size: number;
+  // The content address, for callers that fetch the bytes themselves.
+  contentHash: string;
 }>;
 
 export type DocumentReviewSnapshot = Readonly<{
@@ -469,6 +483,7 @@ export class ProjectStore extends DurableObject<Env> {
       write: (fn) => this.write(fn),
       scheduleAlarm: (atMs) => this.scheduleAlarmAt(atMs),
       authorName: (changedBy) => this.mirrorAuthorName(changedBy),
+      objects: () => objectStoreFor(this.env),
       now: () => Date.now(),
     }));
   }
@@ -1204,6 +1219,7 @@ export class ProjectStore extends DurableObject<Env> {
           filename: file.filename,
           contentType: file.contentType,
           size: file.size,
+          contentHash: file.contentHash,
         };
   }
 
@@ -1229,7 +1245,12 @@ export class ProjectStore extends DurableObject<Env> {
     const ref = Object.values(refs).find((r) => r.contentHash === contentHash);
     return ref === undefined
       ? undefined
-      : { filename: ref.name, contentType: ref.contentType, size: ref.size };
+      : {
+          filename: ref.name,
+          contentType: ref.contentType,
+          size: ref.size,
+          contentHash: ref.contentHash,
+        };
   }
 
   // Every hash a surviving node references: what the orphan sweep keeps.
@@ -1276,6 +1297,94 @@ export class ProjectStore extends DurableObject<Env> {
       moveFileCommand(ctx, { slug, destination, changedBy }),
     );
     return outcome.result;
+  }
+
+  // — Corpus-scoped files (the REST surface and the CLI) ——————————————
+  // The bytes are in R2 first, exactly as for an upload.
+
+  // The live files of one corpus, by path.
+  async corpusFiles(corpusSlug: CorpusSlug): Promise<readonly FileListRow[]> {
+    return (await listFilesProjection(await this.read())).filter(
+      (file) => file.corpusSlug === corpusSlug,
+    );
+  }
+
+  // One live file when it is in `corpusSlug`; a file elsewhere answers
+  // exactly like one that does not exist.
+  async corpusFile(
+    slug: FileSlug,
+    corpusSlug: CorpusSlug,
+  ): Promise<ServedFile | undefined> {
+    const u = await this.read();
+    const node = await u.files.find(slug);
+    const folderSlug = await u.files.folderOf(slug);
+    if (
+      node === undefined ||
+      node.deletedAt !== undefined ||
+      folderSlug === undefined ||
+      (await corpusOfFolder(u, asFolderSlug(folderSlug))) !== corpusSlug
+    ) {
+      return undefined;
+    }
+    return {
+      filename: node.filename,
+      contentType: node.contentType,
+      size: node.size,
+      contentHash: node.contentHash,
+    };
+  }
+
+  // Create the file at a corpus-relative path, or replace it while it is
+  // still `baseHash`. Atomic: a name taken there changes nothing.
+  async putFileAtPath(
+    input: PutFileAtPathInput,
+  ): Promise<
+    PutFileAtPathResult | Readonly<{ ok: false; reason: "segment-collision" }>
+  > {
+    try {
+      const outcome = await this.writeCommand(new Date().toISOString(), (ctx) =>
+        putFileAtPathCommand(ctx, input),
+      );
+      return outcome.result;
+    } catch (err) {
+      if (err instanceof FilenameCollision) {
+        return { ok: false, reason: "segment-collision" };
+      }
+      throw err;
+    }
+  }
+
+  async deleteFileInCorpus(
+    slug: FileSlug,
+    corpusSlug: CorpusSlug,
+    baseHash: string | undefined,
+    changedBy: string,
+  ): Promise<DeleteFileInCorpusResult> {
+    const outcome = await this.writeCommand(new Date().toISOString(), (ctx) =>
+      deleteFileInCorpusCommand(ctx, { slug, corpusSlug, baseHash, changedBy }),
+    );
+    return outcome.result;
+  }
+
+  async moveFileToPath(
+    slug: FileSlug,
+    corpusSlug: CorpusSlug,
+    path: string,
+    changedBy: string,
+  ): Promise<
+    MoveFileToPathResult | Readonly<{ ok: false; reason: "segment-collision" }>
+  > {
+    try {
+      const outcome = await this.writeCommand(new Date().toISOString(), (ctx) =>
+        moveFileToPathCommand(ctx, { slug, corpusSlug, path, changedBy }),
+      );
+      return outcome.result;
+    } catch (err) {
+      if (err instanceof FilenameCollision) {
+        return { ok: false, reason: "segment-collision" };
+      }
+      throw err;
+    }
   }
 
   // Live file count, for exports to report what they leave out.

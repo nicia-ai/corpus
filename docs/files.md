@@ -71,8 +71,28 @@ means adding a new one.
 ## Who can add files
 
 Anyone who can edit the page. Credentials that can only suggest edits (share
-links set to suggest, and agent API keys with the suggest grant) cannot add
-files in this version.
+links set to suggest, and agent API keys with the suggest grant) cannot add,
+replace, delete or move files: a binary cannot be merged or reviewed line by
+line, so there is nothing to propose.
+
+## In a repository: Git and the CLI
+
+Images and attachments travel with the pages that link them.
+
+- The [Git mirror](./git-mirror.md) of a corpus holds each file at its
+  corpus-relative path, byte for byte, so a clone has the pictures next to the
+  markdown that shows them.
+- [`corpus pull --all`](./cli.md#pull---all-dir---overwrite) writes the same
+  files, verifies each against its hash, and never overwrites one you changed
+  locally. [`corpus push --all`](./cli.md#push---all-dir---dry-run) sends new,
+  changed, deleted and renamed ones back with an `edit` key; a change is refused,
+  not overwritten, if someone else replaced the file since you pulled it.
+  Update the CLI to 0.2.0 or newer to carry images; an older one ignores them.
+- The REST API behind the CLI is under `/api/v1/files` (see the
+  [CLI guide](./cli.md#rest-api)).
+
+Both write the same `.corpus.json`, which lists the files in an `assets` array
+beside the documents.
 
 ## Agents (MCP)
 

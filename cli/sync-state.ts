@@ -25,6 +25,16 @@ const TrackedFileSchema = z.object({
   docVersion: z.number().int().nonnegative(),
   sha256: z.string().regex(SHA256_HEX),
 });
+// An uploaded image or attachment a checkout tracks beside its documents. It
+// lives in its own optional `assets` array, so a CLI that predates files
+// parses the same state (the schema is not strict) and simply never sees
+// them: the format stays version 1 in both directions.
+const TrackedAssetSchema = z.object({
+  path: SafePathSchema,
+  slug: z.string().min(1),
+  sha256: z.string().regex(SHA256_HEX),
+  size: z.number().int().nonnegative(),
+});
 // A change `push --all` filed as a proposal instead of writing it. It is NOT
 // a synced file: the tracked entry keeps recording what was last pulled, so a
 // later `pull --all` still sees the local edit. This only remembers what was
@@ -45,18 +55,25 @@ const SyncStateSchema = z.object({
   version: z.literal(STATE_VERSION),
   corpus: CorpusIdentitySchema,
   files: z.array(TrackedFileSchema),
+  assets: z.array(TrackedAssetSchema).optional(),
   proposals: z.array(PendingProposalSchema).optional(),
 });
 
 export type TrackedFile = Readonly<z.infer<typeof TrackedFileSchema>>;
+export type TrackedAsset = Readonly<z.infer<typeof TrackedAssetSchema>>;
 export type PendingProposal = Readonly<z.infer<typeof PendingProposalSchema>>;
 export type CorpusIdentity = Readonly<z.infer<typeof CorpusIdentitySchema>>;
 export type SyncState = Readonly<{
   version: typeof STATE_VERSION;
   corpus: CorpusIdentity;
   files: readonly TrackedFile[];
+  assets?: readonly TrackedAsset[] | undefined;
   proposals?: readonly PendingProposal[] | undefined;
 }>;
+
+export function trackedAssets(state: SyncState): readonly TrackedAsset[] {
+  return state.assets ?? [];
+}
 
 export function pendingProposals(state: SyncState): readonly PendingProposal[] {
   return state.proposals ?? [];
@@ -137,6 +154,14 @@ export function serializeState(state: SyncState): string {
       docVersion: f.docVersion,
       sha256: f.sha256,
     }));
+  const assets = [...trackedAssets(state)]
+    .sort((a, b) => compareCodePoints(a.path, b.path))
+    .map((a) => ({
+      path: a.path,
+      slug: a.slug,
+      sha256: a.sha256,
+      size: a.size,
+    }));
   const proposals = pendingProposals(state)
     .filter((p) => stillPending(p, state.files))
     .sort((a, b) => compareCodePoints(a.path, b.path))
@@ -153,19 +178,23 @@ export function serializeState(state: SyncState): string {
       slug: state.corpus.slug,
     },
     files,
+    ...(assets.length === 0 ? {} : { assets }),
     ...(proposals.length === 0 ? {} : { proposals }),
   };
   return `${JSON.stringify(ordered, null, 2)}\n`;
 }
 
-export async function sha256Hex(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
+export async function sha256HexOfBytes(
+  bytes: Uint8Array<ArrayBuffer>,
+): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+export function sha256Hex(text: string): Promise<string> {
+  return sha256HexOfBytes(new TextEncoder().encode(text));
 }
 
 export type StateCandidate = Readonly<{ statePath: string; relPath: string }>;

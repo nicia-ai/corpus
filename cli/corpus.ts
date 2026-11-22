@@ -25,6 +25,7 @@ import { text as readAll } from "node:stream/consumers";
 import { promisify } from "node:util";
 
 import {
+  containedRead,
   containedReadText,
   regularFilesOnly,
   type CheckoutFs,
@@ -122,6 +123,18 @@ const files: TreeFiles = {
     await writeFile(path, data);
   },
   remove: (path) => rm(path, { force: true }),
+  readBytes: async (path) => {
+    try {
+      return new Uint8Array(await readFile(path));
+    } catch (error) {
+      if (isMissing(error)) return undefined;
+      throw error;
+    }
+  },
+  writeBytes: async (path, data) => {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, data);
+  },
 };
 
 const execFileAsync = promisify(execFile);
@@ -188,6 +201,7 @@ function pushFilesFor(dir: string): PushFiles {
   return {
     ...files,
     readText: containedReadText(dir, checkoutFs, files.readText),
+    readBytes: containedRead(dir, checkoutFs, files.readBytes),
     listFiles: async (root) =>
       regularFilesOnly(root, await listCandidateFiles(root), checkoutFs, join),
   };
@@ -208,6 +222,7 @@ function pullConfig(
     files: {
       ...files,
       readText: containedReadText(dir, checkoutFs, files.readText),
+      readBytes: containedRead(dir, checkoutFs, files.readBytes),
     },
   };
 }
@@ -422,12 +437,14 @@ Commands:
           [--url URL] [--name NAME] Write an OAuth MCP entry for an agent client
   list                              List documents in the bound corpus
   pull <slug> [path]                Download markdown + version sidecar
-  pull --all [dir] [--overwrite]    Write the whole corpus into dir (default .)
+  pull --all [dir] [--overwrite]    Write the whole corpus (pages, images, attachments) into
+                                    dir (default .)
                                     exit 0 ok, 1 error, 2 local edits kept, 3 server/auth
   push <slug> [file] [--path P]     Upload a new conflict-checked version; --path places a
                                     NEW document at corpus path P (default: top level)
   push --all [dir] [--dry-run]      Send the directory's changes back (per the key's access:
-                                    edit applies, suggest files proposals, read refuses)
+                                    edit applies, suggest files proposals, read refuses;
+                                    images and attachments need edit)
                                     exit 0 ok, 1 error/failed, 2 conflicts, 3 server/auth
   git clone [dir] [--helper]        Print a ready-to-run read-only \`git clone\`
   git credential <get|store|erase>  Git credential helper for \`git pull\`

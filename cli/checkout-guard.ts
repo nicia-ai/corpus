@@ -21,14 +21,14 @@ function isWithin(root: string, path: string): boolean {
   );
 }
 
-// Wraps a `readText` so it refuses any path whose canonical location is
-// outside `root`. An absent path is still `undefined` (a dangling link reads
-// as a missing file).
-export function containedReadText(
+// Wraps a read (`readText`, `readBytes`) so it refuses any path whose
+// canonical location is outside `root`. An absent path is still `undefined`
+// (a dangling link reads as a missing file).
+export function containedRead<T>(
   root: string,
   fs: CheckoutFs,
-  readText: (path: string) => Promise<string | undefined>,
-): (path: string) => Promise<string | undefined> {
+  read: (path: string) => Promise<T | undefined>,
+): (path: string) => Promise<T | undefined> {
   return async (path) => {
     const real = await fs.realPath(path);
     if (real === undefined) return undefined;
@@ -39,9 +39,11 @@ export function containedReadText(
         `refusing to read "${path}": it resolves outside ${root} (a symbolic link?). Nothing was changed.`,
       );
     }
-    return readText(path);
+    return read(path);
   };
 }
+
+export const containedReadText = containedRead<string>;
 
 // Candidate files for a push: regular files only. Symbolic links are never
 // followed, so a link to a file or folder elsewhere is never a document.

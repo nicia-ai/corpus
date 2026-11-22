@@ -89,6 +89,7 @@ export class ChangeLog {
           fromCorpusSlug: change.fromCorpusSlug,
           filename: change.filename,
           contentHash: change.contentHash,
+          previousHash: change.previousHash,
           contentType: change.contentType,
           size: change.size,
         }),

@@ -34,6 +34,7 @@ import {
 } from "./embassy/http";
 import { serveFile, uploadFile } from "./files/http";
 import { objectStoreFor } from "./files/object-store-for";
+import { filesRoutes } from "./files-rest";
 import { asProjectId, callerRefFromApiKey, callerRefFromOAuth } from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
 import { scopedExecutor } from "./scoped-executor";
@@ -214,6 +215,7 @@ export const api = new Hono<{ Bindings: Env }>()
   .put("/api/files", (c) => uploadFile(c))
   .get("/api/files/:projectId/:hash", (c) => serveFile(c))
   .route("/", docsRoutes)
+  .route("/", filesRoutes)
   .get("/.well-known/oauth-authorization-server", (c) =>
     // See `asBetterAuthPlugin` in better-auth-plugin-compat.ts: widening the
     // oauth-provider plugin to `BetterAuthPlugin` erases the literal

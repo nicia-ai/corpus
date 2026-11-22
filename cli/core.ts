@@ -34,11 +34,16 @@ export type Files = Readonly<{
   writeText: (path: string, data: string) => Promise<void>;
 }>;
 
-// The filesystem a whole-corpus sync needs: `Files` plus deletion. Writing
-// a nested path must create its parent folders; removing an absent path is
-// not an error.
+// The filesystem a whole-corpus sync needs: `Files` plus deletion and the
+// binary half images and attachments use. Writing a nested path must create
+// its parent folders; removing an absent path is not an error, and
+// `readBytes` resolves to `undefined` for an absent path like `readText`.
 export type TreeFiles = Files &
-  Readonly<{ remove: (path: string) => Promise<void> }>;
+  Readonly<{
+    remove: (path: string) => Promise<void>;
+    readBytes: (path: string) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+    writeBytes: (path: string, data: Uint8Array<ArrayBuffer>) => Promise<void>;
+  }>;
 
 export type CorpusConfig = Readonly<ApiConfig & { files: Files }>;
 

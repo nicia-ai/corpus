@@ -6,6 +6,16 @@ import {
   type SyncConfig,
 } from "./core.js";
 import { CliError } from "./errors.js";
+import { listRemoteFiles } from "./files-rest.js";
+import {
+  applyAssets,
+  type AssetDecision,
+  type AssetReport,
+  assetReport,
+  assetsAfter,
+  planAssets,
+  validatedAssets,
+} from "./sync-assets.js";
 import {
   collisionKey,
   type CorpusIdentity,
@@ -153,14 +163,57 @@ export async function pullAll(
     );
   }
 
+  // A server that predates files has no listing: its images are not ours to
+  // judge, so the state keeps whatever it already tracked.
+  const remoteFiles = await listRemoteFiles(cfg);
+  const assetInput =
+    remoteFiles === undefined
+      ? undefined
+      : {
+          cfg,
+          state,
+          remote: validatedAssets(
+            remoteFiles,
+            remote.map((r) => r.path),
+          ),
+          overwrite,
+          at,
+        };
+  const assetDecisions =
+    assetInput === undefined ? [] : await planAssets(assetInput);
+
   const settled = settlePathContention(decisions);
   await apply(cfg, dir, settled, readLocal);
-  const nextState = buildState(state, settled);
-  const serialized = serializeState(nextState);
-  if (serialized !== (await files.readText(at(STATE_FILE)))) {
-    await files.writeText(at(STATE_FILE), serialized);
+  const completed = new Set<AssetDecision>();
+  try {
+    if (assetInput !== undefined) {
+      await applyAssets(assetInput, assetDecisions, completed);
+    }
+  } finally {
+    const documentState = buildState(state, settled);
+    const nextState =
+      assetInput === undefined
+        ? documentState
+        : { ...documentState, assets: assetsAfter(assetDecisions, completed) };
+    const serialized = serializeState(nextState);
+    if (serialized !== (await files.readText(at(STATE_FILE)))) {
+      await files.writeText(at(STATE_FILE), serialized);
+    }
   }
-  return buildReport(settled);
+  return mergeReports(buildReport(settled), assetReport(assetDecisions));
+}
+
+function mergeReports(docs: SyncReport, assets: AssetReport): SyncReport {
+  return {
+    added: [...docs.added, ...assets.added].sort(changeByPath),
+    updated: [...docs.updated, ...assets.updated].sort(changeByPath),
+    removed: [...docs.removed, ...assets.removed].sort(byPath),
+    unchanged: [...docs.unchanged, ...assets.unchanged].sort(byPath),
+    keptLocal: [...docs.keptLocal, ...assets.keptLocal].sort(byPath),
+    conflicts: [...docs.conflicts, ...assets.conflicts].sort((a, b) =>
+      byPath(a.path, b.path),
+    ),
+  };
 }
 
 export function requireIdentity(

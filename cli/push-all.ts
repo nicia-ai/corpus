@@ -1,3 +1,4 @@
+import { isAssetPath } from "./asset-kinds.js";
 import {
   type DocSummary,
   fetchDocument,
@@ -6,7 +7,14 @@ import {
   type TreeFiles,
 } from "./core.js";
 import { CliError } from "./errors.js";
+import { listRemoteFiles } from "./files-rest.js";
 import { type Grant, grantAllows } from "./grant.js";
+import {
+  type AssetAction,
+  describeAsset,
+  performAsset,
+  planAssetPush,
+} from "./push-assets.js";
 import {
   createDocument,
   moveDocument,
@@ -22,7 +30,9 @@ import {
   sha256Hex,
   STATE_FILE,
   type SyncState,
+  type TrackedAsset,
   type TrackedFile,
+  trackedAssets,
   unsafePathProblem,
 } from "./sync-state.js";
 import { joinPath, readState, requireIdentity } from "./sync.js";
@@ -34,6 +44,9 @@ import { joinPath, readState, requireIdentity } from "./sync.js";
 //   suggest — modified and new files are filed as proposals a person reviews;
 //             removals and renames cannot be proposed and are reported
 //   read    — refused before anything is sent
+//
+// Images and attachments (`push-assets.ts`) are applied under edit access
+// only: a binary cannot be merged, so there is nothing to propose.
 //
 // The run is planned completely (listing, local reads) before the first write
 // request. A tracked file whose upstream moved since the last pull is a
@@ -57,6 +70,7 @@ export type PushConfig = Readonly<
 export type PushAllOptions = Readonly<{ dryRun?: boolean }>;
 
 export type PlannedAction = Readonly<
+  | AssetAction
   | {
       kind: "update";
       path: string;
@@ -91,7 +105,8 @@ export type PushConflict = Readonly<{
   reason: PushConflictReason;
 }>;
 
-export type PushSkipReason = "removal-needs-edit" | "already-proposed";
+export type PushSkipReason =
+  "removal-needs-edit" | "binary-needs-edit" | "already-proposed";
 
 export type PushSkip = Readonly<{
   path: string;
@@ -138,6 +153,7 @@ type Plan = Readonly<{
   // Tracked entries whose bytes now match upstream's newer version: the
   // change was already applied there, so the state just catches up.
   caughtUp: readonly TrackedFile[];
+  caughtUpAssets: readonly TrackedAsset[];
 }>;
 
 export async function pushAll(
@@ -188,7 +204,7 @@ export async function pushAll(
       failed: [],
     };
   }
-  const run = new Execution(cfg, state, plan.caughtUp, plan.conflicts);
+  const run = new Execution(cfg, state, plan, at);
   try {
     for (const action of orderForExecution(plan.actions)) {
       await run.perform(action);
@@ -211,9 +227,13 @@ export async function pushAll(
 // Removals first, so a path they free can be taken by a move or a create.
 const EXECUTION_ORDER: Readonly<Record<PlannedAction["kind"], number>> = {
   archive: 0,
+  "file-remove": 0,
   move: 1,
+  "file-move": 1,
   update: 2,
+  "file-replace": 2,
   create: 3,
+  "file-upload": 3,
 };
 
 function orderForExecution(
@@ -259,14 +279,28 @@ async function planPush(
   const trackedPaths = new Set(state.files.map((f) => f.path));
   const pending = pendingProposals(state);
 
+  // A server that predates files cannot carry images: they stay ignored.
+  const remoteFiles = await listRemoteFiles(cfg);
+  const carriesAssets = (path: string): boolean =>
+    remoteFiles !== undefined && isAssetPath(path);
+  const trackedAssetPaths = new Set(trackedAssets(state).map((a) => a.path));
+
   const candidates = (await cfg.files.listFiles(dir)).filter(
     (p) => !isBookkeeping(p),
   );
-  const ignored = candidates.filter((p) => !isMarkdown(p)).sort();
+  const ignored = candidates
+    .filter((p) => !isMarkdown(p) && !carriesAssets(p))
+    .sort();
   const newPaths = candidates
     .filter((p) => isMarkdown(p) && !trackedPaths.has(p))
     .sort();
-  requireSafeNewPaths(newPaths, state.files);
+  const newAssetPaths = candidates
+    .filter((p) => carriesAssets(p) && !trackedAssetPaths.has(p))
+    .sort();
+  requireSafeNewPaths(newPaths, newAssetPaths, [
+    ...state.files,
+    ...trackedAssets(state),
+  ]);
 
   const actions: PlannedAction[] = [];
   const skipped: PushSkip[] = [];
@@ -398,7 +432,26 @@ async function planPush(
     });
   }
 
-  return { actions, skipped, conflicts, ignored, unchanged, caughtUp };
+  const assets =
+    remoteFiles === undefined
+      ? undefined
+      : await planAssetPush({
+          cfg,
+          grant,
+          state,
+          remote: remoteFiles,
+          newPaths: newAssetPaths,
+          at,
+        });
+  return {
+    actions: [...actions, ...(assets?.actions ?? [])],
+    skipped: [...skipped, ...(assets?.skipped ?? [])],
+    conflicts: [...conflicts, ...(assets?.conflicts ?? [])],
+    ignored,
+    unchanged: unchanged + (assets?.unchanged ?? 0),
+    caughtUp,
+    caughtUpAssets: assets?.caughtUp ?? [],
+  };
 }
 
 function conflict(
@@ -413,12 +466,13 @@ function conflict(
 // another path on a case-insensitive filesystem.
 function requireSafeNewPaths(
   newPaths: readonly string[],
-  tracked: readonly TrackedFile[],
+  newAssetPaths: readonly string[],
+  tracked: readonly Readonly<{ path: string }>[],
 ): void {
   const seen = new Map(
     tracked.map((f) => [collisionKey(f.path), f.path] as const),
   );
-  for (const path of newPaths) {
+  for (const path of [...newPaths, ...newAssetPaths]) {
     const problem = unsafePathProblem(path);
     if (problem !== undefined) {
       throw new CliError(
@@ -447,30 +501,55 @@ class Execution {
   readonly failed: PushFailure[] = [];
   readonly conflicts: PushConflict[];
   private readonly files: Map<string, TrackedFile>;
+  private readonly assets: Map<string, TrackedAsset>;
   private proposals: PendingProposal[];
 
   constructor(
     private readonly cfg: PushConfig,
     private readonly previous: SyncState,
-    caughtUp: readonly TrackedFile[],
-    conflicts: readonly PushConflict[],
+    plan: Plan,
+    private readonly at: (path: string) => string,
   ) {
     this.files = new Map(previous.files.map((f) => [f.path, f] as const));
-    for (const entry of caughtUp) this.files.set(entry.path, entry);
+    for (const entry of plan.caughtUp) this.files.set(entry.path, entry);
+    this.assets = new Map(
+      trackedAssets(previous).map((a) => [a.path, a] as const),
+    );
+    for (const entry of plan.caughtUpAssets) {
+      this.assets.set(entry.path, entry);
+    }
     this.proposals = [...pendingProposals(previous)];
-    this.conflicts = [...conflicts];
+    this.conflicts = [...plan.conflicts];
   }
 
   state(): SyncState {
     return {
       ...this.previous,
       files: [...this.files.values()],
+      assets: [...this.assets.values()],
       proposals: this.proposals,
     };
   }
 
   async perform(action: PlannedAction): Promise<void> {
     switch (action.kind) {
+      case "file-upload":
+      case "file-replace":
+      case "file-remove":
+      case "file-move": {
+        const settled = await performAsset(
+          this.cfg,
+          action,
+          this.assets,
+          this.at,
+        );
+        if (settled.applied !== undefined) this.applied.push(settled.applied);
+        if (settled.conflict !== undefined) {
+          this.conflicts.push(settled.conflict);
+        }
+        if (settled.failed !== undefined) this.failed.push(settled.failed);
+        return;
+      }
       case "update": {
         this.settleUpdate(
           action,
@@ -673,12 +752,19 @@ const CONFLICT_TEXT: Readonly<Record<PushConflictReason, string>> = {
 const SKIP_TEXT: Readonly<Record<PushSkipReason, string>> = {
   "removal-needs-edit":
     "deleted locally, but a removal cannot be proposed; it needs edit access (a later pull restores the file)",
+  "binary-needs-edit":
+    "images and attachments cannot be proposed for review; sending one needs edit access",
   "already-proposed": "already proposed; unchanged since",
 };
 
 function describePlanned(action: PlannedAction, grant: Grant): string {
   const proposing = !grantAllows(grant, "edit");
   switch (action.kind) {
+    case "file-upload":
+    case "file-replace":
+    case "file-remove":
+    case "file-move":
+      return describeAsset(action);
     case "update":
       return `${proposing ? "propose edit" : "update"}  ${action.path}  [${action.slug} v${String(action.baseVersion)}]`;
     case "create":
@@ -743,7 +829,7 @@ export function formatPushReport(
   }
   if (report.ignored.length > 0) {
     lines.push(
-      `ignored ${String(report.ignored.length)} non-markdown file(s):`,
+      `ignored ${String(report.ignored.length)} file(s) that are not markdown, an image or a PDF Corpus can carry:`,
     );
     for (const path of report.ignored) lines.push(`  ${path}`);
   }

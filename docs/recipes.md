@@ -177,7 +177,7 @@ How it behaves:
   scheduled pull will restore it. Archive documents in Corpus, or use an `edit`
   key for jobs that must propagate deletions.
 
-Not supported: images or other non-markdown content (ignored and listed); Corpus
+Not supported: files other than markdown, images and PDFs (ignored and listed); Corpus
 writing to git (it never does); merging two sides' edits to one file; renaming
 and editing a file in one commit while keeping history (that becomes an archive
 plus a new document); more than one corpus per directory.

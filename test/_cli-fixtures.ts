@@ -32,16 +32,25 @@ export const DIR = "checkout";
 export const OWNER = "sync-owner";
 
 export type MemoryTree = PushFiles &
-  Readonly<{ map: Map<string, string>; writes: string[]; removes: string[] }>;
+  Readonly<{
+    // Text files by path; images and attachments are in `binary`.
+    map: Map<string, string>;
+    binary: Map<string, Uint8Array<ArrayBuffer>>;
+    writes: string[];
+    removes: string[];
+  }>;
 
-// In-memory TreeFiles that records every mutation, so "writes nothing" is an
-// assertion on the log rather than on file contents alone.
+// In-memory TreeFiles that records every mutation (text and binary alike), so
+// "writes nothing" is an assertion on the log rather than on file contents
+// alone. A path read as bytes that was written as text yields its UTF-8.
 export function memoryTree(): MemoryTree {
   const map = new Map<string, string>();
+  const binary = new Map<string, Uint8Array<ArrayBuffer>>();
   const writes: string[] = [];
   const removes: string[] = [];
   return {
     map,
+    binary,
     writes,
     removes,
     readText: (path) => Promise.resolve(map.get(path)),
@@ -50,15 +59,28 @@ export function memoryTree(): MemoryTree {
       map.set(path, data);
       return Promise.resolve();
     },
+    readBytes: (path) => {
+      const text = map.get(path);
+      return Promise.resolve(
+        binary.get(path) ??
+          (text === undefined ? undefined : new TextEncoder().encode(text)),
+      );
+    },
+    writeBytes: (path, data) => {
+      writes.push(path);
+      binary.set(path, data);
+      return Promise.resolve();
+    },
     remove: (path) => {
       removes.push(path);
       map.delete(path);
+      binary.delete(path);
       return Promise.resolve();
     },
     listFiles: (dir) => {
       const prefix = `${dir}/`;
       return Promise.resolve(
-        [...map.keys()]
+        [...map.keys(), ...binary.keys()]
           .filter((key) => key.startsWith(prefix))
           .map((key) => key.slice(prefix.length)),
       );
@@ -74,6 +96,7 @@ export type Corpus = Readonly<{
   corpusSlug: CorpusSlug;
   projectId: ProjectId;
   organizationId: Parameters<typeof createConnection>[0]["organizationId"];
+  connectionId: Awaited<ReturnType<typeof createConnection>>["connectionId"];
   ownerUserId: Awaited<ReturnType<typeof signUp>>;
 }>;
 
@@ -98,6 +121,16 @@ export async function mintKey(
   return token;
 }
 
+// Another key, with `grant`, bound to the same corpus as `corpus`.
+export function keyFor(corpus: Corpus, grant: Grant): Promise<string> {
+  return mintKey(
+    corpus.ownerUserId,
+    corpus.organizationId,
+    corpus.connectionId,
+    grant,
+  );
+}
+
 export async function newCorpus(grant: Grant = "edit"): Promise<Corpus> {
   const ownerUserId = await signUp("sync");
   const ref = await createOrg(ownerUserId, "Org sync");
@@ -116,6 +149,7 @@ export async function newCorpus(grant: Grant = "edit"): Promise<Corpus> {
     corpusSlug: conn.corpusSlug,
     projectId: ref.projectId,
     organizationId: ref.organizationId,
+    connectionId: conn.connectionId,
     ownerUserId,
   };
 }
@@ -133,6 +167,7 @@ export async function siblingCorpus(
   return {
     ...corpus,
     corpusSlug: conn.corpusSlug,
+    connectionId: conn.connectionId,
     token: await mintKey(
       corpus.ownerUserId,
       corpus.organizationId,
