@@ -149,6 +149,21 @@ export function sniffFormat(bytes: Uint8Array): FileFormat | undefined {
   return FORMATS.find((format) => format.id === id);
 }
 
+const COMPRESSED_FORMATS: ReadonlySet<FileFormat["id"]> = new Set([
+  "png",
+  "jpeg",
+  "gif",
+  "webp",
+  "avif",
+]);
+
+// True for the raster formats whose bytes are already entropy-coded, so
+// deflating them again costs CPU and gains nothing.
+export function isAlreadyCompressed(bytes: Uint8Array): boolean {
+  const format = sniffFormat(bytes);
+  return format !== undefined && COMPRESSED_FORMATS.has(format.id);
+}
+
 // — SVG safety (layer one of three; the other two are serving headers) ——
 
 const NUMERIC_ENTITY = /&#(x[0-9a-f]+|\d+);?/gi;

@@ -165,8 +165,17 @@ Write the **whole corpus** into a directory (default: the current directory),
 one file per document, at the document's path in the corpus (relative to the corpus root, the way an
 agent sees it), creating folders as
 needed and preserving each file's bytes exactly (including a missing trailing
-newline and CRLF line endings). The directory can be anywhere: Corpus assumes
-nothing about what surrounds it, and the files are an ordinary folder tree.
+newline and CRLF line endings). The corpus's [images and
+attachments](./files.md) come with it, next to the pages that link them, byte
+for byte. The directory can be anywhere: Corpus assumes nothing about what
+surrounds it, and the files are an ordinary folder tree.
+
+> **Upgrade the CLI to carry images** (0.2.0 or newer). An older CLI does not
+> fail on a corpus with images: it never reads them, so `pull --all` writes only
+> the pages and `push --all` reports image files as ignored. It does rewrite
+> `.corpus.json` without the image entries, so a checkout shared between old and
+> new CLIs loses its image tracking each time the old one runs; the new CLI
+> then re-matches the files by their hash and uploads nothing.
 
 ```sh
 $ corpus pull --all ./agent-docs
@@ -185,12 +194,19 @@ CI](#keep-a-repository-in-sync-from-ci)):
   Drafts, or archived) are deleted locally, and renamed or moved documents are moved, but only files recorded in
   the [state file](#the-sync-state-file). Other files in the directory are never
   touched. Folders left empty by a removal or move are not deleted.
-- **Cheap.** Unchanged documents (same version, same path) are not downloaded.
-- **Safe paths.** A document path that is absolute, contains `..`, `\`, or a
-  `.git` segment, or that collides with another path on a case-insensitive
-  filesystem is refused before anything is written (exit `1`).
-- **Do-nothing on failure.** Everything is fetched before the first write, so a
-  network or auth error leaves the directory as it was.
+- **Cheap.** Unchanged documents (same version, same path) are not downloaded,
+  and neither is an image whose hash already matches. Images are downloaded one
+  at a time.
+- **Safe paths.** A document or image path that is absolute, contains `..`,
+  `\`, or a `.git` segment, or that collides with another path on a
+  case-insensitive filesystem is refused before anything is written (exit `1`).
+- **Verified.** Every downloaded image is checked against the hash Corpus
+  listed before it touches the disk; bytes that do not match are never written.
+- **Do-nothing on failure.** The listing and every document are fetched before
+  the first write, so a network or auth error leaves the directory as it was.
+  Images are downloaded after the pages are written; if one fails, the pages
+  and the images already done are recorded in `.corpus.json` and the next run
+  carries on.
 
 Output is plain text, one path per line under the counts. There is no
 machine-readable mode; the exit code is the contract:
@@ -215,6 +231,8 @@ to the hash recorded when it last wrote the file:
 | Untracked file at that path with identical bytes            | Adopted into the state file; not a conflict.    |
 | Tracked file deleted locally, upstream unchanged            | Restored.                                       |
 
+The same table holds for images and attachments.
+
 Non-conflicting files are still applied in the same run. To resolve a conflict,
 keep a copy of your version, run `corpus pull <slug> <path>` to take upstream's,
 reapply your edit, and `corpus push <slug> <path>`. Or re-run with
@@ -234,6 +252,16 @@ back to Corpus. It compares the directory to its `.corpus.json` and sends:
 - **deleted files**: tracked files that no longer exist locally;
 - **renamed files**: a deleted tracked file plus a new file with the **same
   bytes** is one rename, so the document keeps its identity and history.
+
+Images and attachments (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`,
+`.svg`, `.pdf`, up to 10 MiB each) go the same way, with the key's `edit`
+access: an untracked one is **uploaded**, a changed tracked one is **replaced**
+(sent with the hash you last pulled, so it is refused if someone else replaced
+it since), a deleted one is **removed**, and a renamed one is **moved**. Corpus
+decides what a file is from its bytes, so a renamed program or a PNG called
+`.pdf` is refused (listed as `failed`). A binary cannot be merged or reviewed
+line by line, so it has **no proposal path**: a `suggest` key reports each as
+needing edit access and sends nothing.
 
 ```sh
 $ corpus push --all ./agent-docs --dry-run
@@ -256,8 +284,8 @@ How it behaves:
 - **Conflicts never overwrite.** A tracked file whose upstream version (or
   path) moved since your last pull is a **conflict**: it is left untouched and
   reported, and the rest of the run continues. Exit `2`, as for `pull --all`.
-- **Only markdown, only under `dir`.** Files that are not `.md` are ignored and
-  listed once. `.git/` and `.corpus.json` are always ignored. Inside a git
+- **Only markdown and images, only under `dir`.** Files that are neither `.md`
+  nor an allowed image or attachment type are ignored and listed once. `.git/` and `.corpus.json` are always ignored. Inside a git
   work tree the file list comes from git (`git ls-files --cached --others
 --exclude-standard`), so your `.gitignore`, `.git/info/exclude` and global
   ignore file are respected; outside one, every file under `dir` is a
@@ -288,13 +316,14 @@ The key's grant decides what `push` and `push --all` do with a change. The
 owner sets it when minting the key and can change it any time (see
 [API keys](./api-keys.md#grants)); existing keys can edit.
 
-| Change you made       | `read`  | `suggest`                                                | `edit`                                                               |
-| --------------------- | ------- | -------------------------------------------------------- | -------------------------------------------------------------------- |
-| `list`, `pull`        | yes     | yes                                                      | yes                                                                  |
-| Modify a file         | refused | **proposal** against the version you pulled              | new version, written directly                                        |
-| Add a new `.md` file  | refused | **proposal** for a new document at that path             | document created at that path                                        |
-| Delete a file         | refused | not sent, reported (a removal cannot be proposed)        | document **archived** (kept, not erased; the app has no restore yet) |
-| Rename or move a file | refused | new path becomes a proposal; the old file is not removed | document moved, history kept                                         |
+| Change you made                                      | `read`  | `suggest`                                                      | `edit`                                                               |
+| ---------------------------------------------------- | ------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `list`, `pull`                                       | yes     | yes                                                            | yes                                                                  |
+| Modify a file                                        | refused | **proposal** against the version you pulled                    | new version, written directly                                        |
+| Add a new `.md` file                                 | refused | **proposal** for a new document at that path                   | document created at that path                                        |
+| Delete a file                                        | refused | not sent, reported (a removal cannot be proposed)              | document **archived** (kept, not erased; the app has no restore yet) |
+| Rename or move a file                                | refused | new path becomes a proposal; the old file is not removed       | document moved, history kept                                         |
+| Add, change, delete or rename an image or attachment | refused | not sent, reported: needs `edit` (a binary cannot be proposed) | uploaded, replaced (`If-Match`), deleted or moved                    |
 
 A `read` key stops before sending anything. A `suggest` key reports each
 proposal's number and where to review it, and the server answers any attempt
@@ -344,9 +373,10 @@ pull --all   ->  edit in git (engineers, agents)   ->  push --all
 5. The next `corpus pull --all docs` brings the result back; files you edited
    that were applied are already up to date.
 
-Not supported: images or other non-markdown content; mirroring git history into
-Corpus (or Corpus writing to git); merging two sides' edits to the same file
-(that is a conflict you resolve by hand); proposing a removal or a move.
+Not supported: files other than markdown, images and PDFs; mirroring git
+history into Corpus (or Corpus writing to git); merging two sides' edits to the
+same file (that is a conflict you resolve by hand); proposing a removal, a move,
+or any change to an image.
 
 ## The sync-state file
 
@@ -365,9 +395,17 @@ directory, `.corpus.json`:
       "sha256": "…"
     }
   ],
+  "assets": [{ "path": "runbooks/arch.png", "slug": "…", "sha256": "…", "size": 48213 }],
   "proposals": [{ "path": "style/api.md", "baseVersion": 2, "sha256": "…", "proposalId": 31 }]
 }
 ```
+
+`assets` lists the tracked images and attachments (path, stable `slug`, `sha256`
+and `size` of the bytes) and appears only when there are some. The format is
+still `version: 1`: a CLI that predates images reads the same file and ignores
+`assets`, and this CLI reads a file written without them. The
+[Git mirror](./git-mirror.md)'s `.corpus.json` is byte-identical to the one
+`pull --all` writes for the same corpus.
 
 `proposals` appears only while `push --all` has filed proposals that are not yet
 applied; entries drop out on their own once the file is tracked at a newer
@@ -517,11 +555,23 @@ bearer token and is scoped to the key's corpus:
 | `POST /api/v1/docs`                         | suggest | `{ markdown, path, title? }`: create at a corpus-relative path with a server-derived slug (`201`, `edit`) or propose it (`202`, `suggest`).                                                                                                                            |
 | `DELETE /api/v1/docs/:slug?clientVersion=N` | edit    | Archive the document; `409` if it moved past `N`.                                                                                                                                                                                                                      |
 | `POST /api/v1/docs/:slug/move`              | edit    | `{ path }`: move within the corpus (folders created), keeping history; `409` if the name is taken.                                                                                                                                                                     |
+| `GET /api/v1/files`                         | read    | List the corpus's images and attachments (`slug`, `path`, `sha256`, `size`, `contentType`). `404` (`files_not_enabled`) when the server has no file storage.                                                                                                           |
+| `GET /api/v1/files/:slug`                   | read    | The file's bytes, checked against their hash before they are sent. `404` if it is not in the corpus.                                                                                                                                                                   |
+| `PUT /api/v1/files?path=P`                  | edit    | Raw bytes in. With `If-Match: "<sha256>"`, replace the file at `P` if it is still that (`412` with `currentSha256` if not, `null` when it is gone). Without it, create (`201`) where `P` is free; the same bytes again are `200`, different bytes `412`.               |
+| `DELETE /api/v1/files/:slug`                | edit    | Delete the file, optionally with `If-Match` (`412` if it changed).                                                                                                                                                                                                     |
+| `POST /api/v1/files/:slug/move`             | edit    | `{ path }`: move or rename within the corpus, keeping the slug; `409` if the name is taken, `422` if the new name would change the file's type.                                                                                                                        |
 
 ```sh
 curl -H "Authorization: Bearer $CORPUS_API_KEY" \
   "$CORPUS_URL/api/v1/docs/api-style-guide"
 ```
+
+File writes use the server's upload rules: the type comes from the bytes
+(`415` for an unsupported one, `422` for an extension that does not match or an
+unsafe SVG), at most 10 MiB (`413`), and the name in `P` must already be one the
+server would keep (letters, digits, `.`, `_`, `-`, a lowercase extension).
+There is no proposal path for a binary, so a `suggest` key's file write is a
+`403` saying it needs `edit` access.
 
 A write with too low a grant returns `403` with `{ error, code: "grant_too_low",
 grant, needed, allowed }`, where `allowed` lists what the key may do instead. A
@@ -546,6 +596,9 @@ type Files = {
   writeText: (path: string, data: string) => Promise<void>;
 };
 ```
+
+(`pull --all` and `push --all` add `remove`, and `readBytes` / `writeBytes` for
+images.)
 
 The published `corpus` binary is the Node shell that wires `node:fs` + `node:process`
 to that core. To run the CLI elsewhere — Deno, Bun, a Cloudflare Worker, or

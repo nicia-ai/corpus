@@ -34,7 +34,7 @@ import { FILES_NOT_ENABLED_MESSAGE, objectStoreFor } from "./object-store-for";
 // state and needs no such check (the response's CORP header keeps another
 // origin from embedding it).
 
-type FilesContext = Readonly<Context<{ Bindings: Env }>>;
+export type FilesContext = Readonly<Context<{ Bindings: Env }>>;
 
 const STATUS = {
   created: 201,
@@ -49,7 +49,7 @@ const STATUS = {
   unprocessable: 422,
 } as const;
 
-const REJECTION_STATUS: Readonly<Record<FileRejectionReason, number>> = {
+export const REJECTION_STATUS: Readonly<Record<FileRejectionReason, number>> = {
   empty: STATUS.badRequest,
   "too-large": STATUS.tooLarge,
   "unsupported-type": STATUS.unsupported,
@@ -58,7 +58,7 @@ const REJECTION_STATUS: Readonly<Record<FileRejectionReason, number>> = {
   "invalid-name": STATUS.unprocessable,
 };
 
-const QUOTA_MESSAGE = "This project's file storage is full.";
+export const QUOTA_MESSAGE = "This project's file storage is full.";
 
 const UploadQuery = z.object({
   project: z.string().min(1),
@@ -66,8 +66,11 @@ const UploadQuery = z.object({
   name: z.string().optional(),
 });
 
-const fail = (c: FilesContext, message: string, status: number): Response =>
-  c.json({ error: message }, status as 400);
+export const fail = (
+  c: FilesContext,
+  message: string,
+  status: number,
+): Response => c.json({ error: message }, status as 400);
 
 // The project the session belongs to, or the refusal to send.
 async function authorize(
@@ -93,7 +96,7 @@ async function authorize(
 // The request body, or undefined once it passes `max` bytes. Counting as it
 // reads, so a body with no (or a lying) Content-Length cannot buffer past the
 // cap.
-async function readCapped(
+export async function readCapped(
   request: Request,
   max: number,
 ): Promise<Uint8Array<ArrayBuffer> | undefined> {
@@ -120,7 +123,7 @@ async function readCapped(
   return bytes;
 }
 
-async function assertEntitled(
+export async function assertEntitled(
   c: FilesContext,
   ref: ProjectRef,
   bytes: number,

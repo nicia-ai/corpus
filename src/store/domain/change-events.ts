@@ -22,13 +22,14 @@ export const DOCUMENT_EVENT_TYPES = [
 ] as const;
 export type DocumentEventType = (typeof DOCUMENT_EVENT_TYPES)[number];
 
-// A file is created (uploaded) or deleted. A file has no version chain, so
-// there is no "updated" yet; replacing one in place (the CLI and REST
-// writes) adds `file.replaced` with before/after hashes when it lands. The
-// Git mirror subscribes to this family, never to R2.
+// A file is created (uploaded), moved, replaced in place (a REST or CLI
+// write: same slug, new bytes, with the before and after hashes) or deleted. A
+// file has no version chain, so a replacement is a head edit. The Git mirror
+// subscribes to this family, never to R2.
 export const FILE_EVENT_TYPES = [
   "file.created",
   "file.moved",
+  "file.replaced",
   "file.deleted",
 ] as const;
 export type FileEventType = (typeof FILE_EVENT_TYPES)[number];
@@ -101,11 +102,29 @@ export type FileChange = Readonly<{
   fromCorpusSlug?: CorpusSlug;
   filename?: string;
   contentHash?: string;
+  // `file.replaced`: the hash the file had before.
+  previousHash?: string;
   contentType?: string;
   size?: number;
   changedBy: string;
   changedAt: string;
 }>;
+
+export function fileReplaced(
+  args: Readonly<{
+    fileSlug: FileSlug;
+    corpusSlug: CorpusSlug;
+    filename: string;
+    contentHash: string;
+    previousHash: string;
+    contentType: string;
+    size: number;
+    changedBy: string;
+    changedAt: string;
+  }>,
+): FileChange {
+  return { kind: "file.replaced", ...args };
+}
 
 export function fileCreated(
   args: Readonly<{

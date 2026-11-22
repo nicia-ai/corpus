@@ -185,6 +185,17 @@ Design and evidence: `notes/files.md`.
 - **Markdown bytes are canonical.** Relative image links are resolved at
   projection time (`documentAssetsProjection`) and never rewritten; an
   unresolved one is a placeholder, not an error.
+- **A binary has no proposal path.** The REST file routes
+  (`src/files-rest.ts`) need `edit` for every write; a `suggest` key gets the
+  `grant_too_low` 403, never a silent proposal. Replacement is `If-Match` the
+  content hash. Keeper: `test/files/files-rest.test.ts`.
+- **`.corpus.json` stays `version: 1`**; images are an optional `assets` array
+  so an old CLI still parses new state and a new CLI old state. The mirror and
+  `pull --all` must write the same bytes for the same corpus; extend
+  `cli/sync-state.ts`, never fork the format. `cli/asset-kinds.ts` mirrors the
+  server's allowlist and cap. A missing files route (404) means "not carried",
+  never "empty": reading it as empty would delete every tracked image. Keepers:
+  `test/cli-assets.test.ts`, `test/mirror/files.test.ts`.
 
 ## Data-plane layering
 
@@ -379,6 +390,12 @@ binding, never in `src/`).
   Artifacts. Object, pack and wire code is pure and lives in
   `src/store/domain/git/`; its hashes are pinned to ids real `git`
   produced (`test/git-objects.test.ts`).
+- Files are in the tree: bytes come from R2 one at a time, and a large change
+  is pushed as several commits (`chunkPlan`, about 16 MiB each, one per
+  loop, re-planned from the new head) that each leave a consistent checkout;
+  `recordPushed` moves `lastCommit` between them. Already-compressed images
+  go into the pack as stored zlib blocks. A file over the cap is `skipped`.
+  Keepers: `test/mirror/files.test.ts`, `test/git-mirror-plan.test.ts`.
 - Decide a rejected push from the branch (did the head move?), not from the
   reason text. Keepers: `test/mirror/sync.test.ts` (stale ref, crash
   recovery, rebuild), `test/mirror/mirror-cost.test.ts` (a one-file change

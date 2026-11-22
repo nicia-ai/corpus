@@ -143,6 +143,20 @@ export class FileRepo {
     return nodes.map((node) => asFileSlug(node.slug));
   }
 
+  // Replace a live file's bytes in place: the slug, name and place stay, the
+  // content address, type and size move. The old bytes stay in R2 until the
+  // orphan sweep finds nothing referencing them.
+  async replaceContent(
+    node: FileNode,
+    next: Readonly<{ contentHash: string; contentType: string; size: number }>,
+  ): Promise<void> {
+    await this.g.nodes.File.update(node.id, next);
+  }
+
+  async setFilename(node: FileNode, filename: string): Promise<void> {
+    await this.g.nodes.File.update(node.id, { filename });
+  }
+
   // Give a file a new home folder. Reconstruction only (no sibling-namespace
   // check), like `FolderRepo.rehomeDocument`.
   async rehome(slug: FileSlug, folderSlug: FolderSlug): Promise<void> {

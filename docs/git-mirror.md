@@ -16,15 +16,29 @@ thrown away and rebuilt at any time; you cannot push to it.
 ## What is in the repository
 
 The tree is exactly what `corpus pull --all` writes: every document at its
-corpus-relative path, byte for byte, plus one `.corpus.json` at the root. A
-clone and a CLI checkout are interchangeable.
+corpus-relative path, byte for byte, every [image and attachment](./files.md) at
+its path next to them, plus one `.corpus.json` at the root. A clone and a CLI
+checkout are interchangeable. `.corpus.json` keeps `version: 1` and lists the
+files in an optional `assets` array (path, slug, sha-256, size), so a CLI from
+before images reads it too.
 
 Every change in Corpus becomes one commit, authored by the person who made it
 (under a non-identifying `…@users.noreply.corpus.invalid` address; the
 committer is always `Corpus`). Renaming a document, archiving it, or moving it
-out of the corpus is an ordinary commit that deletes the file. **Drafts is
-never mirrored.** A document whose path cannot be a file in a checkout (a
-`.git` segment, for example) is left out.
+out of the corpus is an ordinary commit that deletes the file, and so is
+deleting an image. **Drafts is never mirrored.** A document or file whose path
+cannot be a file in a checkout (a `.git` segment, for example) is left out, and
+so is a file over 10 MiB.
+
+Images are binary, so each one is committed as stored: Corpus does not spend CPU
+compressing a PNG or JPEG a second time. Their bytes are read from file storage
+one at a time, and a large change is pushed as **several commits** of about
+16 MiB each (documents first, then images in path order). Each commit leaves a
+complete, consistent checkout and an accurate `.corpus.json`, so a clone taken
+between two of them is valid, and a failure part-way simply continues from the
+last commit on the next attempt. A mirror whose corpus has images needs the
+`FILES` binding (see [Images and files](./files.md#turning-it-on)); without it
+the mirror reports an error rather than leaving the images out silently.
 
 Mirroring is asynchronous. Saving a document never waits on it and never fails
 because of it: the change is recorded in the same transaction, and a background
@@ -78,8 +92,10 @@ head is not a commit Corpus pushed.
 ## Limits
 
 A single push carries at most about 48 MiB and 40,000 objects (Artifacts allows
-64 MiB and 50,000). A corpus larger than that cannot be mirrored and the
-status says so. Artifacts bills each clone, fetch and push as an operation.
+64 MiB and 50,000). Images are split across commits, so a corpus of images is
+not bound by that; the documents and the files of any one commit are. A file
+larger than 10 MiB is not mirrored. A corpus whose documents alone exceed the
+single-push limit cannot be mirrored and the status says so. Artifacts bills each clone, fetch and push as an operation.
 
 ## Turning it on (self-hosters)
 

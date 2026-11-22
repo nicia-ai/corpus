@@ -27,17 +27,19 @@ import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "./util";
 //   suggest — also submit changes, which become proposals a person reviews
 //   edit    — also write directly, create, move and archive
 
-type RestContext = Readonly<Context<{ Bindings: Env }>>;
+export type RestContext = Readonly<Context<{ Bindings: Env }>>;
 
-const MAX_PATH_LENGTH = 1_024;
+export const MAX_PATH_LENGTH = 1_024;
 const STATUS_ACCEPTED = 202;
 const STATUS_CREATED = 201;
 
 export const GRANT_TOO_LOW_CODE = "grant_too_low";
 
+export type GrantCapabilities = Readonly<Record<Grant, readonly string[]>>;
+
 // What each grant can do over this surface, in the words a 403 uses to tell
 // a client what it may do instead.
-const GRANT_CAPABILITIES: Readonly<Record<Grant, readonly string[]>> = {
+const GRANT_CAPABILITIES: GrantCapabilities = {
   read: [
     "list documents (GET /api/v1/docs)",
     "fetch one (GET /api/v1/docs/:slug)",
@@ -58,14 +60,15 @@ const GRANT_CAPABILITIES: Readonly<Record<Grant, readonly string[]>> = {
   ],
 };
 
-function refuseBelow(
+export function refuseBelow(
   c: RestContext,
   scope: ApiKeyScope,
   needed: Grant,
   action: string,
+  capabilities: GrantCapabilities = GRANT_CAPABILITIES,
 ): Response | undefined {
   if (grantAllows(scope.grant, needed)) return undefined;
-  const allowed = GRANT_CAPABILITIES[scope.grant];
+  const allowed = capabilities[scope.grant];
   return c.json(
     {
       error:
@@ -127,7 +130,10 @@ function badBody(c: RestContext, error: z.ZodError): Response {
 
 // The server-side path validation every transport shares: no `..`, absolute
 // paths, backslashes or control characters.
-function invalidPath(c: RestContext, path: string): Response | undefined {
+export function invalidPath(
+  c: RestContext,
+  path: string,
+): Response | undefined {
   try {
     checkedPathSegments(path);
     return undefined;

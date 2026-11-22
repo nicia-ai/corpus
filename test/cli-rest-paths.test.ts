@@ -127,6 +127,11 @@ describe("REST create: where a new document lands", () => {
         written.push(path);
         return Promise.resolve();
       },
+      readBytes: () => Promise.resolve(undefined),
+      writeBytes: (path) => {
+        written.push(path);
+        return Promise.resolve();
+      },
       remove: () => Promise.resolve(),
     };
     await pullAll(
