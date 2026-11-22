@@ -48,10 +48,14 @@ afterEach(() => {
 // Run `build` with the mirror unable to push, so the whole corpus is built
 // before the first (alarm-driven) pass sees any of it; then let it through. A
 // pass that failed meanwhile is made due again. Without this, how many commits
-// a corpus takes would depend on when the alarm happened to fire.
+// a corpus takes would depend on when the alarm happened to fire. `release`
+// is the mirror the pass runs against afterwards (the real one by default); it
+// is installed BEFORE the row is made due, so an alarm that fires at once
+// cannot slip a pass through on the wrong mirror.
 async function builtWhileHeld(
   fixture: Fixture,
   build: () => Promise<void>,
+  release?: GitMirror,
 ): Promise<void> {
   const held = (): Promise<never> =>
     Promise.reject(new Error("held while the corpus is built"));
@@ -65,7 +69,7 @@ async function builtWhileHeld(
   try {
     await build();
   } finally {
-    setGitMirrorForTest(undefined);
+    setGitMirrorForTest(release);
   }
   await makeDue(fixture);
 }
@@ -224,15 +228,23 @@ describe("a large change goes out in several commits", () => {
   // Each image alone fills a commit's budget.
   const BUDGET = 100;
 
-  async function corpusOfImages(): Promise<Fixture> {
+  async function corpusOfImages(release?: GitMirror): Promise<Fixture> {
     const fixture = await newFixture();
-    await builtWhileHeld(fixture, async () => {
-      await put(fixture, "readme.md", "# Readme\n");
-      await put(fixture, "docs/guide.md", "# Guide\n");
-      for (let i = 0; i < COUNT; i += 1) {
-        await putAsset(fixture, `img/${String(i)}.png`, noisyPng(SIZE, i + 1));
-      }
-    });
+    await builtWhileHeld(
+      fixture,
+      async () => {
+        await put(fixture, "readme.md", "# Readme\n");
+        await put(fixture, "docs/guide.md", "# Guide\n");
+        for (let i = 0; i < COUNT; i += 1) {
+          await putAsset(
+            fixture,
+            `img/${String(i)}.png`,
+            noisyPng(SIZE, i + 1),
+          );
+        }
+      },
+      release,
+    );
     return fixture;
   }
 
@@ -259,7 +271,6 @@ describe("a large change goes out in several commits", () => {
 
   it("survives a failure between two commits and carries on from where it stopped", async () => {
     setMirrorChunkBytesForTest(BUDGET);
-    const fixture = await corpusOfImages();
 
     const real = artifactsMirror(env.ARTIFACTS as Artifacts);
     let commits = 0;
@@ -274,7 +285,7 @@ describe("a large change goes out in several commits", () => {
         return real.commit(request);
       },
     };
-    setGitMirrorForTest(flaky);
+    const fixture = await corpusOfImages(flaky);
 
     await settle(fixture);
     const [failed] = await mirrorRows(fixture);

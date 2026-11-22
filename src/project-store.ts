@@ -1245,7 +1245,12 @@ export class ProjectStore extends DurableObject<Env> {
     const ref = Object.values(refs).find((r) => r.contentHash === contentHash);
     return ref === undefined
       ? undefined
-      : { filename: ref.name, contentType: ref.contentType, size: ref.size };
+      : {
+          filename: ref.name,
+          contentType: ref.contentType,
+          size: ref.size,
+          contentHash: ref.contentHash,
+        };
   }
 
   // Every hash a surviving node references: what the orphan sweep keeps.
