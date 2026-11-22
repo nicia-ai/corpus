@@ -11,6 +11,7 @@ import {
 } from "@/store/domain/frontmatter";
 import { scanWikilinks, splitWikiTarget } from "@/store/domain/links";
 
+import { type ImageAssets, resolveImageSource } from "./image-assets";
 import type { WikiResolve } from "./inline-spans";
 
 // The reader-first surface: canonical documents are authored by non-engineers
@@ -71,6 +72,7 @@ export const Markdown = memo(function Markdown({
   bodyClassName,
   bare,
   wikiResolve,
+  assets,
   onFollowLink,
 }: Readonly<{
   source: string;
@@ -79,6 +81,9 @@ export const Markdown = memo(function Markdown({
   // first-paint fallback, so it matches the borderless live-preview surface.
   bare?: boolean;
   wikiResolve?: WikiResolve | undefined;
+  // The stored files relative images resolve to. Without it relative images
+  // render as written (history and diffs have no page to resolve against).
+  assets?: ImageAssets | undefined;
   onFollowLink?: ((href: string) => void) | undefined;
 }>): React.ReactElement {
   const fm = parseFrontmatter(source);
@@ -100,6 +105,7 @@ export const Markdown = memo(function Markdown({
       <MarkdownContent
         source={body}
         wikiResolve={wikiResolve}
+        assets={assets}
         onFollowLink={onFollowLink}
       />
     </div>
@@ -108,6 +114,7 @@ export const Markdown = memo(function Markdown({
       <MarkdownContent
         source={body}
         wikiResolve={wikiResolve}
+        assets={assets}
         onFollowLink={onFollowLink}
       />
     </div>
@@ -185,13 +192,52 @@ function remarkWikilinks(resolve: WikiResolve): (tree: MdastNode) => MdastNode {
   return transform;
 }
 
+// A relative image resolved through the stored-file map, or a plain
+// placeholder when no stored file answers to it (the same rule the editor's
+// live preview applies; see ./image-assets).
+function ResolvedImage({
+  src,
+  alt,
+  assets,
+}: Readonly<{
+  src: string | undefined;
+  alt: string | undefined;
+  assets: ImageAssets;
+}>): React.ReactElement | null {
+  if (src === undefined) return null;
+  const source = resolveImageSource(assets, src);
+  switch (source.kind) {
+    case "external":
+      return <img src={source.src} alt={alt ?? ""} loading="lazy" />;
+    case "image":
+      return <img src={source.asset.url} alt={alt ?? ""} loading="lazy" />;
+    case "file":
+      return (
+        <a href={source.asset.url} target="_blank" rel="noopener">
+          {alt === undefined || alt === "" ? source.asset.name : alt}
+        </a>
+      );
+    case "missing":
+      return (
+        <span
+          className="inline-flex max-w-full items-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500 [overflow-wrap:anywhere]"
+          title={`No file named ${source.name} is stored beside this page.`}
+        >
+          Missing image: {source.name}
+        </span>
+      );
+  }
+}
+
 export function MarkdownContent({
   source,
   wikiResolve,
+  assets,
   onFollowLink,
 }: Readonly<{
   source: string;
   wikiResolve?: WikiResolve | undefined;
+  assets?: ImageAssets | undefined;
   onFollowLink?: ((href: string) => void) | undefined;
 }>): React.ReactElement {
   return (
@@ -203,9 +249,9 @@ export function MarkdownContent({
           : [() => remarkWikilinks(wikiResolve)]),
       ]}
       rehypePlugins={[rehypeSanitize]}
-      components={
-        onFollowLink === undefined
-          ? undefined
+      components={{
+        ...(onFollowLink === undefined
+          ? {}
           : {
               a: ({ href, children }) => (
                 <a
@@ -219,8 +265,19 @@ export function MarkdownContent({
                   {children}
                 </a>
               ),
-            }
-      }
+            }),
+        ...(assets === undefined
+          ? {}
+          : {
+              img: ({ src, alt }) => (
+                <ResolvedImage
+                  src={typeof src === "string" ? src : undefined}
+                  alt={alt}
+                  assets={assets}
+                />
+              ),
+            }),
+      }}
     >
       {source}
     </ReactMarkdown>

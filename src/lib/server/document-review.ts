@@ -4,6 +4,7 @@ import { z } from "zod";
 import { connectControlDb } from "@/control/db";
 import { resolveAuthorLabels, resolveUserNames } from "@/control/users";
 import { EMBASSY_ACTOR_LABEL } from "@/embassy/actor";
+import { objectStoreFor } from "@/files/object-store-for";
 import { asDocumentSlug, parseCallerRef } from "@/ids";
 import { projectMiddleware } from "@/lib/middleware";
 import type {
@@ -18,6 +19,7 @@ import type {
 import { changedBy, storeOf } from "@/lib/server/shared";
 import type { SuggestionsResult } from "@/lib/server/suggestions";
 import { assertServerContext as srv } from "@/lib/server-context";
+import type { AssetRef } from "@/store/domain/file-kinds";
 import { compact } from "@/util";
 
 // The head version was written through a share link. `docVersion` lets the
@@ -43,6 +45,13 @@ export type DocumentReviewResult = Readonly<{
     path: string;
     corpusSlug: string;
   }>[];
+  // The stored files the page's relative links resolve to, keyed by the link
+  // target exactly as written. The editor renders images from this map and
+  // nothing else: a target absent from it shows a missing-image placeholder.
+  assets: Readonly<Record<string, AssetRef>>;
+  // Whether this deployment stores files at all. Off, the editor hides its
+  // upload affordances.
+  filesEnabled: boolean;
 }>;
 
 export type DocumentHistoryResult = Readonly<{
@@ -133,6 +142,8 @@ export const getDocumentReview = createServerFn({ method: "GET" })
         names: Object.fromEntries(suggestionNames),
       },
       viewerId: changedBy(c),
+      assets: snapshot.assets,
+      filesEnabled: objectStoreFor(c.env) !== undefined,
       docRefs: docRefs.map((ref) => ({
         slug: ref.slug,
         path: ref.path,

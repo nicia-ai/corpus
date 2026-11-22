@@ -108,6 +108,15 @@ export const alwaysIncludeBudgetTokensZ = z
 // into the form, while the handler throws a clean ValidationError.
 export const MAX_MARKDOWN_BYTES = 1_000_000;
 
+// Hard cap on one uploaded file (an image or attachment), in bytes. Files
+// live in R2, not the DO, so this is a product limit rather than a storage
+// one: an upload is buffered whole in the Worker to hash and sniff it.
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+// Per-project ceiling on the bytes of live files. Enforced by the DO inside
+// the attach transaction, where the running total is exact.
+export const MAX_PROJECT_FILE_BYTES = 1024 * 1024 * 1024;
+
 // The one human-readable refusal shared by every transport (web
 // ValidationError 400, REST 413, MCP INVALID_PARAMS) so the limit is
 // named identically everywhere it surfaces.
@@ -142,6 +151,19 @@ export async function sha256(text: string): Promise<string> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
   return `sha256:${hex}`;
+}
+
+// Content address for a file: bare lowercase hex SHA-256 over its bytes.
+// Unlike `sha256` above (markdown, `sha256:`-prefixed in the blob ledger and
+// bundle contract) this is also the object's R2 key suffix, so it carries no
+// prefix.
+export async function sha256Hex(
+  bytes: Uint8Array<ArrayBuffer>,
+): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // — Compression ————————————————————————————————————————————

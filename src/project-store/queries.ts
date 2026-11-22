@@ -5,7 +5,13 @@ import {
   corpusRelativePath,
   resolveCorpusLink,
 } from "../store/domain/corpus-drive";
+import {
+  type AssetRef,
+  fileUrl,
+  formatOfExtension,
+} from "../store/domain/file-kinds";
 import { type ParsedLink, parseLinks } from "../store/domain/links";
+import { pathSegments, resolveRelativePath } from "../store/domain/paths";
 import { toSafeFulltextQuery } from "../store/domain/search";
 import {
   type DocumentChain,
@@ -29,6 +35,7 @@ import type {
   DocumentRef,
   DocumentSearchHit,
   DocumentSnapshot,
+  FileListRow,
   OutlineDoc,
   OutlineLink,
   ProjectUsageSnapshot,
@@ -244,6 +251,68 @@ export async function listFoldersProjection(
       },
     ];
   });
+}
+
+// Every live file with its corpus and corpus-relative path, in path order:
+// the files of the corpus tree, derived exactly as a document's location is.
+export async function listFilesProjection(
+  u: ProjectUnit,
+): Promise<readonly FileListRow[]> {
+  const [files, folders, links] = await Promise.all([
+    u.files.listLive(),
+    u.folders.listAll(),
+    u.cols.folderLinks(),
+  ]);
+  const corpusOfRoot = new Map(
+    links.map((link) => [link.folderSlug as string, link.corpusSlug] as const),
+  );
+  const byslug = new Map(folders.map((f) => [f.slug, f] as const));
+  const chainOf = (folderSlug: string): readonly string[] => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = folderSlug;
+    while (cursor !== null && !seen.has(cursor)) {
+      seen.add(cursor);
+      const folder = byslug.get(cursor);
+      if (folder === undefined) break;
+      names.unshift(folder.name);
+      cursor = folder.parentSlug;
+    }
+    return names;
+  };
+  const rootOf = (folderSlug: string): string => {
+    let cursor = folderSlug;
+    const seen = new Set<string>();
+    for (;;) {
+      const parent = byslug.get(cursor)?.parentSlug ?? null;
+      if (parent === null || seen.has(cursor)) return cursor;
+      seen.add(cursor);
+      cursor = parent;
+    }
+  };
+  return files
+    .flatMap(({ node, folderSlug }) => {
+      const root = rootOf(folderSlug);
+      const corpusSlug = corpusOfRoot.get(root);
+      if (corpusSlug === undefined) return [];
+      return [
+        {
+          slug: node.slug,
+          name: node.filename,
+          path: corpusRelativePath(chainOf(folderSlug), node.filename),
+          corpusSlug,
+          folderSlug: folderSlug === root ? null : folderSlug,
+          contentHash: node.contentHash,
+          contentType: node.contentType,
+          size: node.size,
+        },
+      ];
+    })
+    .sort(
+      (a, b) =>
+        comparePaths(a.corpusSlug, b.corpusSlug) ||
+        comparePaths(a.path, b.path),
+    );
 }
 
 export function listCorporaProjection(
@@ -507,6 +576,70 @@ export async function corpusOutlineProjection(
     name: colNode.name,
     documents,
   };
+}
+
+// The files a page's relative links point at, keyed by the link target
+// exactly as written. The page's own links (cached by content hash like every
+// link lens) are resolved against its corpus-relative path, then looked up as
+// files in the same corpus; a target that is not a stored file is simply
+// absent, which the editor renders as a missing-image placeholder. Only
+// targets with an allowlisted extension are looked up.
+export async function documentAssetsProjection(
+  u: ProjectUnit,
+  slug: DocumentSlug,
+  projectId: string,
+  parsedLinksByHash: Map<string, readonly ParsedLink[]>,
+): Promise<Readonly<Record<string, AssetRef>>> {
+  const node = await u.docs.find(slug);
+  if (node === undefined || node.archivedAt !== undefined) return {};
+  const location = await documentLocationProjection(u, slug);
+  const root =
+    location === undefined
+      ? undefined
+      : await u.cols.rootFolderSlug(location.corpusSlug);
+  if (location === undefined || root === undefined) return {};
+  const links = await parsedLinks(
+    parsedLinksByHash,
+    node.contentHash,
+    async () => (await u.blobs.get(node.contentHash)) ?? "",
+  );
+  const assets: Record<string, AssetRef> = {};
+  for (const link of links) {
+    if (link.kind !== "path") continue;
+    const resolved = resolveRelativePath(location.path, linkPath(link.target));
+    const segments = resolved === undefined ? [] : pathSegments(resolved);
+    const name = segments.pop();
+    if (name === undefined || !hasFileExtension(name)) continue;
+    const folderSlug = await u.folders.folderAt(root, segments);
+    const file =
+      folderSlug === undefined ? undefined : await u.files.at(folderSlug, name);
+    if (file === undefined) continue;
+    assets[link.target] = {
+      url: fileUrl(projectId, file.contentHash),
+      name: file.filename,
+      contentType: file.contentType,
+      size: file.size,
+    };
+  }
+  return assets;
+}
+
+// A link destination without its query string, percent-decoded where it is
+// valid (`./my%20pic.png` names `my pic.png`); the fragment is left for
+// `resolveRelativePath` to strip.
+function linkPath(target: string): string {
+  const query = target.indexOf("?");
+  const bare = query === -1 ? target : target.slice(0, query);
+  try {
+    return decodeURI(bare);
+  } catch {
+    return bare;
+  }
+}
+
+function hasFileExtension(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  return dot !== -1 && formatOfExtension(name.slice(dot + 1)) !== undefined;
 }
 
 async function parsedLinks(

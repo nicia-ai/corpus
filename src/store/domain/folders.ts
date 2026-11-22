@@ -2,11 +2,11 @@
 // these to decide; no DB access here. Unit-tested without a DO
 // (test/folders.test.ts). `null` parent = project root throughout.
 
-export type SiblingKind = "folder" | "document";
+export type SiblingKind = "folder" | "document" | "file";
 
 // One child as it competes in its parent's single namespace. A
-// document's segment is its `filename`; a folder's is its `name`. The
-// namespace is cross-type: a folder and a document cannot share a
+// document or file segment is its `filename`; a folder's is its `name`. The
+// namespace is cross-type: a folder, a document and a file cannot share a
 // segment under the same parent, or relative-link path resolution is
 // ambiguous. `kind` is required because folder slugs and document slugs
 // are INDEPENDENT namespaces (separate TypeGraph unique scopes) and may

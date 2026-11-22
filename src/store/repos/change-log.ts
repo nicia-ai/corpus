@@ -2,7 +2,11 @@ import { count, desc, lt, max } from "drizzle-orm";
 
 import { changeEvents, type LedgerDb } from "../../db";
 import { compact } from "../../util";
-import type { CollectionChange, DocumentChange } from "../domain/change-events";
+import type {
+  CollectionChange,
+  DocumentChange,
+  FileChange,
+} from "../domain/change-events";
 
 export type RecentChange = Readonly<{
   id: number;
@@ -65,6 +69,30 @@ export class ChangeLog {
         change.before === undefined ? null : JSON.stringify(change.before),
       afterJson:
         change.after === undefined ? null : JSON.stringify(change.after),
+      changedAt: change.changedAt,
+      changedBy: change.changedBy,
+    });
+  }
+
+  // File events live in the local ledger only: they carry no instrumentation
+  // envelope (the event stream has no file vocabulary), and the file's slug
+  // rides `afterJson` because the ledger's `documentSlug` column is a document.
+  appendFile(change: FileChange): Promise<number> {
+    return this.insert({
+      eventType: change.kind,
+      documentSlug: null,
+      corpusSlug: change.corpusSlug,
+      beforeJson: null,
+      afterJson: JSON.stringify(
+        compact({
+          fileSlug: change.fileSlug,
+          fromCorpusSlug: change.fromCorpusSlug,
+          filename: change.filename,
+          contentHash: change.contentHash,
+          contentType: change.contentType,
+          size: change.size,
+        }),
+      ),
       changedAt: change.changedAt,
       changedBy: change.changedBy,
     });

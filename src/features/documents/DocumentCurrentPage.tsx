@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { ImageAssets } from "@/components/markdown/image-assets";
 import { CHANGE_FLASH_DURATION_MS } from "@/components/markdown/live-review";
 import type { DocRef } from "@/components/markdown/MarkdownEditor";
 import {
@@ -46,6 +47,8 @@ export function DocumentCurrentPage({
   suggestions,
   viewerId,
   docRefs,
+  assets,
+  filesEnabled,
   isOwner,
 }: Readonly<{
   doc: DocSnapshot | undefined;
@@ -56,6 +59,8 @@ export function DocumentCurrentPage({
   suggestions: SuggestionsResult;
   viewerId: string;
   docRefs: readonly DocRef[];
+  assets: ImageAssets;
+  filesEnabled: boolean;
   isOwner: boolean;
 }>): React.ReactElement | null {
   const nextFlashId = useRef(0);
@@ -128,6 +133,8 @@ export function DocumentCurrentPage({
       suggestions={suggestions}
       viewerId={viewerId}
       docRefs={docRefs}
+      assets={assets}
+      filesEnabled={filesEnabled}
       changeFlash={changeFlash}
       onRemoteContentChange={queueRemoteContentFlash}
       onRemoteSuggestionChange={queueRemoteSuggestionFlash}

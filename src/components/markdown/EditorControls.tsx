@@ -2,6 +2,7 @@ import {
   Bold,
   Code,
   IndentDecrease,
+  ImagePlus,
   IndentIncrease,
   Italic,
   Link,
@@ -60,11 +61,14 @@ export function EditorControls({
   disabled,
   sourceMode,
   onAction,
+  onInsertImage,
   onToggleSource,
 }: Readonly<{
   disabled: boolean;
   sourceMode: boolean;
   onAction: (action: AuthoringAction) => void;
+  // Present only where this deployment stores files: opens the file picker.
+  onInsertImage?: (() => void) | undefined;
   onToggleSource: () => void;
 }>): React.ReactElement {
   // Keep SSR and the first hydration render identical, then use platform labels.
@@ -92,6 +96,21 @@ export function EditorControls({
             <Icon size={18} aria-hidden="true" />
           </button>
         ))}
+        {onInsertImage !== undefined && (
+          <button
+            type="button"
+            disabled={disabled}
+            className={`${CONTROL} inline-flex size-11 items-center justify-center px-0`}
+            aria-label="Insert image"
+            title="Insert image or file"
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+            onClick={onInsertImage}
+          >
+            <ImagePlus size={18} aria-hidden="true" />
+          </button>
+        )}
         <select
           aria-label="Insert or change block"
           className={`${CONTROL} bg-transparent`}

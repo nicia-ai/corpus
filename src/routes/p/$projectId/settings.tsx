@@ -47,7 +47,9 @@ function ProjectSettings() {
   // it client-side and trigger a download via an object URL so the user
   // sees a single click → file landing in Downloads, no extra route.
   const exportProject = useSubmit(async () => {
-    const bundle = await exportBundle({ data: { projectId } });
+    const { bundle, excludedFiles } = await exportBundle({
+      data: { projectId },
+    });
     const json = JSON.stringify(bundle, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -62,6 +64,11 @@ function ProjectSettings() {
     // later tick after a.click(), so a synchronous revoke can race
     // with download initiation and produce a zero-byte file.
     setTimeout(() => URL.revokeObjectURL(url), 0);
+    if (excludedFiles > 0) {
+      showToast(
+        `${String(excludedFiles)} ${excludedFiles === 1 ? "image or attachment was" : "images and attachments were"} not included`,
+      );
+    }
   });
 
   const archive = useSubmit(async () => {

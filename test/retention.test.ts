@@ -154,6 +154,7 @@ describe("reapExpired (DO end-to-end, clock-seamed)", () => {
       versionsDeleted: 0,
       eventsDeleted: 0,
       blobsDeleted: 0,
+      filesDeleted: 0,
     });
     expect(await store.versionCount(docSlug("k"))).toBe(1);
   });

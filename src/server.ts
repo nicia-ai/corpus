@@ -47,6 +47,7 @@ const startHandler = createStartHandler(defaultStreamHandler);
 // Everything else (incl. TanStack Start server functions) is the app.
 const API_PREFIXES = [
   "/api/auth/",
+  "/api/files",
   "/api/ws/",
   "/api/v1/",
   "/mcp",

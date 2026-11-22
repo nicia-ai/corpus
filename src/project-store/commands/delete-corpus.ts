@@ -8,6 +8,7 @@ import {
 import {
   collectionDeleted,
   documentMovedIn,
+  fileDeleted,
 } from "../../store/domain/change-events";
 import {
   DEFAULT_CORPUS_SLUG,
@@ -69,7 +70,9 @@ async function movePagesToDefault(
   const root = tree.get(rootSlug);
   if (
     root === undefined ||
-    (root.childFolders.length === 0 && root.documents.length === 0)
+    (root.childFolders.length === 0 &&
+      root.documents.length === 0 &&
+      root.files.length === 0)
   ) {
     return { moved: 0, changes: [] };
   }
@@ -102,6 +105,9 @@ async function movePagesToDefault(
   }
   for (const doc of root.documents) {
     await ctx.u.folders.rehomeDocument(asDocumentSlug(doc.slug), keptSlug);
+  }
+  for (const file of root.files) {
+    await ctx.u.files.rehome(file.slug, keptSlug);
   }
   return {
     moved: moved.length,
@@ -153,7 +159,17 @@ export async function deleteCorpusCommand(
   await ctx.u.cols.deleteCorpus(corpus);
   const archivedSlugs: DocumentSlug[] = [];
   if (rootSlug !== undefined) {
-    const removed = await ctx.u.folders.delete(rootSlug);
+    const removed = await ctx.u.folders.delete(rootSlug, ctx.now);
+    for (const fileSlug of removed.ok ? removed.fileSlugs : []) {
+      changes.push(
+        fileDeleted({
+          fileSlug,
+          corpusSlug: input.slug,
+          changedBy: input.changedBy,
+          changedAt: ctx.now,
+        }),
+      );
+    }
     for (const slug of removed.ok ? removed.documentSlugs : []) {
       const outcome = await archiveOneDocumentCommand(ctx, {
         slug,

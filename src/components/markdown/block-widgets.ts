@@ -8,6 +8,13 @@ import {
 } from "@/store/domain/frontmatter";
 
 import {
+  assetsOf,
+  type ImageAssets,
+  type ImageSource,
+  resolveImageSource,
+  sourceKey,
+} from "./image-assets";
+import {
   type InlineNode,
   type InlineSpan,
   inlineSpans,
@@ -30,27 +37,62 @@ import { wikiLinkResolver } from "./wikilink-facet";
 // Shared by the standalone image widget and images inside table cells.
 const IMAGE_CLASS = "my-1 inline-block max-w-full rounded-md align-bottom";
 
-function imageElement(src: string, alt: string): HTMLElement {
-  const img = document.createElement("img");
-  img.className = IMAGE_CLASS;
-  img.src = src;
-  img.alt = alt;
-  img.loading = "lazy";
-  return img;
+// A relative destination no stored file answers to. Plain, not alarming:
+// moving a page away from its images (or deleting one) is ordinary, and the
+// markdown bytes are never rewritten, so the page says what it cannot find.
+// The slate dashed hairline is the "empty slot" idiom; the words carry the
+// meaning, not the colour.
+const MISSING_IMAGE_CLASS =
+  "my-1 inline-flex max-w-full items-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500 align-bottom [overflow-wrap:anywhere]";
+
+// What an image destination becomes in the DOM. External URLs render as
+// written (as react-markdown does); a relative destination renders only
+// through a stored file the loader resolved, else as a placeholder.
+function imageElement(source: ImageSource, alt: string): HTMLElement {
+  switch (source.kind) {
+    case "external":
+    case "image": {
+      const img = document.createElement("img");
+      img.className = IMAGE_CLASS;
+      img.src = source.kind === "external" ? source.src : source.asset.url;
+      img.alt = alt;
+      img.loading = "lazy";
+      return img;
+    }
+    case "file": {
+      const link = document.createElement("a");
+      link.className = "cm-md-link";
+      link.href = source.asset.url;
+      link.textContent = alt === "" ? source.asset.name : alt;
+      link.target = "_blank";
+      link.rel = "noopener";
+      return link;
+    }
+    case "missing": {
+      const el = document.createElement("span");
+      el.className = MISSING_IMAGE_CLASS;
+      el.textContent = `Missing image: ${source.name}`;
+      el.title = `No file named ${source.name} is stored beside this page.`;
+      return el;
+    }
+  }
 }
 
 class ImageWidget extends WidgetType {
   constructor(
-    readonly src: string,
+    readonly source: ImageSource,
     readonly alt: string,
   ) {
     super();
   }
   override eq(other: ImageWidget): boolean {
-    return other.src === this.src && other.alt === this.alt;
+    return (
+      sourceKey(other.source) === sourceKey(this.source) &&
+      other.alt === this.alt
+    );
   }
   override toDOM(): HTMLElement {
-    return imageElement(this.src, this.alt);
+    return imageElement(this.source, this.alt);
   }
   // A click places the caret in the image syntax (revealing it for editing).
   override ignoreEvent(): boolean {
@@ -60,18 +102,18 @@ class ImageWidget extends WidgetType {
 
 // Replace `![alt](src)` [from, to) with a rendered <img>. src/alt are extracted
 // by the caller (live-preview) from the Image node, mirroring how it reads a
-// Link's URL child; src passes through as-written (external/relative/data),
-// exactly as react-markdown renders it.
+// Link's URL child. An external src passes through as-written; a relative one
+// resolves through the editor's stored-file map (`assets`).
 export function imageReplace(
   from: number,
   to: number,
   src: string,
   alt: string,
+  assets: ImageAssets,
 ): CmRange<Decoration> {
-  return Decoration.replace({ widget: new ImageWidget(src, alt) }).range(
-    from,
-    to,
-  );
+  return Decoration.replace({
+    widget: new ImageWidget(resolveImageSource(assets, src), alt),
+  }).range(from, to);
 }
 
 // --- GFM tables -------------------------------------------------------------
@@ -191,7 +233,11 @@ export function tableModelFromTree(
 // `data-href`, so the editor's shared mousedown handler (plain click in
 // read views, Cmd/Ctrl-click while editing) follows them from inside the
 // table exactly like a body link.
-function appendSpans(el: HTMLElement, spans: readonly InlineSpan[]): void {
+function appendSpans(
+  el: HTMLElement,
+  spans: readonly InlineSpan[],
+  assets: ImageAssets,
+): void {
   for (const s of spans) {
     switch (s.kind) {
       case "text":
@@ -205,20 +251,20 @@ function appendSpans(el: HTMLElement, spans: readonly InlineSpan[]): void {
         break;
       }
       case "image":
-        el.appendChild(imageElement(s.src, s.alt));
+        el.appendChild(imageElement(resolveImageSource(assets, s.src), s.alt));
         break;
       case "link": {
         const link = document.createElement("span");
         link.className = "cm-md-link";
         link.title = s.href;
         link.setAttribute("data-href", s.href);
-        appendSpans(link, s.children);
+        appendSpans(link, s.children, assets);
         el.appendChild(link);
         break;
       }
       default: {
         const wrap = document.createElement(s.kind);
-        appendSpans(wrap, s.children);
+        appendSpans(wrap, s.children, assets);
         el.appendChild(wrap);
         break;
       }
@@ -233,11 +279,12 @@ class TableWidget extends WidgetType {
   constructor(
     readonly src: string,
     readonly model: TableModel,
+    readonly assets: ImageAssets,
   ) {
     super();
   }
   override eq(other: TableWidget): boolean {
-    return other.src === this.src;
+    return other.src === this.src && other.assets === this.assets;
   }
   override toDOM(): HTMLElement {
     const { model } = this;
@@ -265,7 +312,7 @@ class TableWidget extends WidgetType {
     model.header.forEach((cell, i) => {
       const th = document.createElement("th");
       th.className = thClass[i] ?? "";
-      appendSpans(th, cell);
+      appendSpans(th, cell, this.assets);
       htr.appendChild(th);
     });
     thead.appendChild(htr);
@@ -277,7 +324,7 @@ class TableWidget extends WidgetType {
       for (let i = 0; i < colCount; i += 1) {
         const td = document.createElement("td");
         td.className = tdClass[i] ?? "";
-        appendSpans(td, row[i] ?? []);
+        appendSpans(td, row[i] ?? [], this.assets);
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
@@ -305,7 +352,7 @@ export function tableReplace(
   if (model === undefined) return undefined;
   const src = state.doc.sliceString(from, to);
   return Decoration.replace({
-    widget: new TableWidget(src, model),
+    widget: new TableWidget(src, model, assetsOf(state)),
     block: true,
   }).range(from, to);
 }

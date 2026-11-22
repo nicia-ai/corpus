@@ -23,7 +23,7 @@ import {
   STATE_FILE,
 } from "../store/domain/git-mirror";
 
-import { isDocumentChange, type DomainChange } from "./command";
+import { isDocumentChange, isFileChange, type DomainChange } from "./command";
 import {
   corpusOfDocument,
   corpusOfEveryDocument,
@@ -130,6 +130,10 @@ export class ProjectGitMirror {
         ? await corpusOfEveryDocument(u)
         : undefined;
     for (const change of changes) {
+      // The mirror does not carry files yet: a file change leaves the
+      // repository exactly as it was. (Mirroring files subscribes here, to
+      // the `file.*` events, and notes `change.corpusSlug`.)
+      if (isFileChange(change)) continue;
       if (isDocumentChange(change)) {
         const corpusSlug =
           bulk === undefined

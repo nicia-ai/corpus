@@ -1,6 +1,8 @@
 import { and, eq, inArray } from "drizzle-orm";
 
 import { AppError } from "../errors";
+import { objectStoreFor } from "../files/object-store-for";
+import { purgeProjectObjects, sweepOrphanObjects } from "../files/orphan-sweep";
 import { asProjectId, type ProjectId } from "../ids";
 import { DEFAULT_CORPUS_SLUG } from "../store/domain/default-corpus";
 import { parseRetention } from "../store/domain/retention";
@@ -20,8 +22,10 @@ export async function reconcileProjects(env: Env): Promise<number> {
     .select({ id: project.id })
     .from(project)
     .where(eq(project.status, "deleted"));
+  const objects = objectStoreFor(env);
   for (const p of deleted) {
     const projectId = asProjectId(p.id);
+    if (objects !== undefined) await purgeProjectObjects(objects, projectId);
     await storeFor(env, projectId).purge();
     await eventLogFor(env, projectId).purge();
   }
@@ -29,24 +33,45 @@ export async function reconcileProjects(env: Env): Promise<number> {
 }
 
 // Reconcile sweep: reap each live project's records past its retention
-// window. Control plane owns policy; the per-Project DO owns deletion.
-export async function reconcileRetention(env: Env): Promise<number> {
+// window, and (when file storage is configured) reclaim its orphaned R2
+// objects. Control plane owns policy; the per-Project DO owns deletion.
+// Returns how many projects had records reaped. `nowMs` is a test-only clock
+// seam for the orphan sweep's grace window; production uses the wall clock.
+export async function reconcileRetention(
+  env: Env,
+  nowMs: number = Date.now(),
+): Promise<number> {
   const db = connectControlDb(env.DB);
   const rows = await db
     .select({ id: project.id, policy: project.policy })
     .from(project)
     .where(inArray(project.status, ACCESSIBLE_STATUSES));
+  const objects = objectStoreFor(env);
   let sweptProjects = 0;
   for (const p of rows) {
+    const projectId = asProjectId(p.id);
+    if (objects !== undefined) {
+      // A storage hiccup on one project must not skip its retention reap or
+      // the next project.
+      await sweepOrphanObjects({
+        store: objects,
+        projectId,
+        referencedHashes: () => storeFor(env, projectId).referencedFileHashes(),
+        nowMs,
+      }).catch((error: unknown) => {
+        console.error("[scheduled] orphan sweep", error);
+      });
+    }
     const retention = parseRetention(p.policy);
     if (
       retention.documentVersionDays === undefined &&
       retention.changeEventDays === undefined &&
-      retention.blobDays === undefined
+      retention.blobDays === undefined &&
+      retention.fileDays === undefined
     ) {
       continue;
     }
-    await storeFor(env, asProjectId(p.id)).reapExpired(retention);
+    await storeFor(env, projectId).reapExpired(retention, nowMs);
     sweptProjects += 1;
   }
   return sweptProjects;

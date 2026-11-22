@@ -4,6 +4,7 @@ import type { ChangeLog } from "../store/repos/change-log";
 import type { CorpusGraph } from "../store/repos/collection-graph";
 import type { CommentRepo } from "../store/repos/comment";
 import type { DocumentRepo } from "../store/repos/document-repo";
+import type { FileRepo } from "../store/repos/file-repo";
 import type { FolderRepo } from "../store/repos/folder-repo";
 import type { InstrumentationOutbox } from "../store/repos/instrumentation-outbox";
 import type { MirrorStateRepo } from "../store/repos/mirror-state";
@@ -18,6 +19,7 @@ export type ProjectUnit = Readonly<{
   docs: DocumentRepo;
   cols: CorpusGraph;
   folders: FolderRepo;
+  files: FileRepo;
   log: ChangeLog;
   blobs: BlobStore;
   versions: VersionRepo;

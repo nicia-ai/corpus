@@ -31,13 +31,27 @@ export type ImportResult = Readonly<
 const BUNDLE_ADMIN_MSG =
   "Only an organization owner can export or import a project bundle";
 
+// The bundle is a cross-product contract with no place for uploaded files,
+// so an export leaves them out. `excludedFiles` is a sidecar OUTSIDE the
+// contract, so the Settings page can say how many images and attachments the
+// download does not carry. Import leaves relative links to them dangling.
+export type ExportBundleResult = Readonly<{
+  bundle: Bundle;
+  excludedFiles: number;
+}>;
+
 export const exportBundle = createServerFn({ method: "GET" })
   .middleware([projectMiddleware])
-  .handler(async ({ context }): Promise<Bundle> => {
+  .handler(async ({ context }): Promise<ExportBundleResult> => {
     const c = srv(context);
     const ref = requireProjectOwner(c.project, BUNDLE_ADMIN_MSG);
     const source = await projectSlugs(connectControlDb(c.env.DB), ref);
-    return storeOf(c).exportBundle(source);
+    const store = storeOf(c);
+    const [bundle, excludedFiles] = await Promise.all([
+      store.exportBundle(source),
+      store.liveFileCount(),
+    ]);
+    return { bundle, excludedFiles };
   });
 
 // Import takes `unknown` so the version/shape check can surface as a

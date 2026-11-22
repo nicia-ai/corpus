@@ -2,13 +2,14 @@ import type { CorpusSlug } from "../ids";
 import type {
   CollectionChange,
   DocumentChange,
+  FileChange,
 } from "../store/domain/change-events";
 import type { CollectionVersionSnapshot } from "../store/domain/versions";
 import type { CorpusDocView } from "../store/repos/collection-graph";
 
 import type { ProjectUnit } from "./unit";
 
-export type DomainChange = DocumentChange | CollectionChange;
+export type DomainChange = DocumentChange | CollectionChange | FileChange;
 
 export type CommandOutcome<T> = Readonly<{
   result: T;
@@ -39,6 +40,16 @@ export function isDocumentChange(
   change: DomainChange,
 ): change is DocumentChange {
   return "slug" in change;
+}
+
+export function isFileChange(change: DomainChange): change is FileChange {
+  return "fileSlug" in change;
+}
+
+export function isCollectionChange(
+  change: DomainChange,
+): change is CollectionChange {
+  return "collectionSlug" in change;
 }
 
 export function commandOutcome<T>(

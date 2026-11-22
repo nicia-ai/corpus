@@ -477,7 +477,7 @@ export async function layOutAsDrivesCommand(
     (folder) => folder.parentSlug === null && !roots.has(folder.slug),
   );
   for (const folder of leftovers) {
-    await ctx.u.folders.delete(asFolderSlug(folder.slug));
+    await ctx.u.folders.delete(asFolderSlug(folder.slug), ctx.now);
   }
   if (
     batch.length === 0 &&

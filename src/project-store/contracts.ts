@@ -141,6 +141,19 @@ export type DocumentLocation = Readonly<{
   folderSlug: string | null;
 }>;
 
+// A live file in the corpus tree: where it is and what it is. `path` is
+// relative to the corpus root, like a document's.
+export type FileListRow = Readonly<{
+  slug: string;
+  name: string;
+  path: string;
+  corpusSlug: CorpusSlug;
+  folderSlug: string | null;
+  contentHash: string;
+  contentType: string;
+  size: number;
+}>;
+
 export type DocumentRef = Readonly<{
   slug: string;
   path: string;
@@ -198,6 +211,7 @@ export type ReapResult = Readonly<{
   versionsDeleted: number;
   eventsDeleted: number;
   blobsDeleted: number;
+  filesDeleted: number;
 }>;
 
 // Only what the DO method itself can return. Parse-time variants

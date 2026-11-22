@@ -4,6 +4,7 @@ import { CALLER_CHANNELS } from "../ids";
 import {
   COLLECTION_EVENT_TYPES,
   DOCUMENT_EVENT_TYPES,
+  FILE_EVENT_TYPES,
 } from "../store/domain/change-events";
 
 // The real-time channel's wire vocabulary + presence aggregation. Pure and
@@ -51,6 +52,7 @@ const REVIEW_ACTIONS = [
 const RealtimeActions = [
   ...DOCUMENT_EVENT_TYPES,
   ...COLLECTION_EVENT_TYPES,
+  ...FILE_EVENT_TYPES,
   ...REVIEW_ACTIONS,
 ] as const;
 

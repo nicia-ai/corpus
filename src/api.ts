@@ -31,6 +31,7 @@ import {
   embassySection,
   embassySuggest,
 } from "./embassy/http";
+import { serveFile, uploadFile } from "./files/http";
 import { asProjectId, callerRefFromApiKey, callerRefFromOAuth } from "./ids";
 import { handleMcp, RpcSchema } from "./mcp";
 import { scopedExecutor } from "./scoped-executor";
@@ -203,6 +204,11 @@ export const api = new Hono<{ Bindings: Env }>()
       new Request(url, c.req.raw),
     );
   })
+  // Uploaded images and attachments (see src/files/http.ts): a session-authed
+  // upload (checked same-origin there, since Hono routes bypass the server-fn
+  // CSRF middleware) and the membership-gated read.
+  .put("/api/files", (c) => uploadFile(c))
+  .get("/api/files/:projectId/:hash", (c) => serveFile(c))
   .route("/", docsRoutes)
   .get("/.well-known/oauth-authorization-server", (c) =>
     // See `asBetterAuthPlugin` in better-auth-plugin-compat.ts: widening the

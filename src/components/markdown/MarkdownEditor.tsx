@@ -31,6 +31,7 @@ import {
 } from "react";
 
 import type { ReviewRailLayout } from "@/components/review/ReviewRail";
+import type { AssetRef } from "@/store/domain/file-kinds";
 import {
   documentWithStarterFrontmatter,
   hasFrontmatterFence,
@@ -66,6 +67,19 @@ import {
 } from "./doc-refs";
 import { type AuthoringAction, EditorControls } from "./EditorControls";
 import { markdownEditorHostClass } from "./host-class";
+import {
+  type ImageAssets,
+  imageAssetsExtension,
+  setImageAssets,
+} from "./image-assets";
+import {
+  FILE_PICKER_ACCEPT,
+  insertionMarkdown,
+  linkTargetFor,
+  nameForUpload,
+  UNSUPPORTED_PICK_MESSAGE,
+  uploadableFiles,
+} from "./image-upload";
 import type { WikiResolve } from "./inline-spans";
 import { LinkEditor } from "./LinkEditor";
 import {
@@ -83,6 +97,12 @@ import {
   type SourceRange,
 } from "./live-review";
 import { Markdown } from "./Markdown";
+import {
+  failUpload,
+  finishUpload,
+  startUpload,
+  uploadStateExtension,
+} from "./upload-state";
 import { wikiLinkResolver } from "./wikilink-facet";
 
 const useClientLayoutEffect =
@@ -466,6 +486,7 @@ function seedFrontmatter(cm: EditorView, body: string): void {
 export type { DocRef } from "./doc-refs";
 
 const NO_DOCS: readonly DocRef[] = [];
+const NO_ASSETS: ImageAssets = {};
 
 // Reconfigure presentation only. History, review marks, selection, and the
 // canonical Markdown buffer remain in the same EditorState.
@@ -512,6 +533,14 @@ type Props = Readonly<{
   ariaDescribedBy?: string | undefined;
   // Cmd/Ctrl-click on a rendered link; receives the raw href.
   onFollowLink?: (href: string) => void;
+  // The stored files the page's relative links resolve to, by link target
+  // (from the route loader). A relative image not in it is a placeholder.
+  assets?: ImageAssets;
+  // Upload a pasted, dropped or picked file next to the page and resolve to
+  // the stored file. Absent where this deployment stores no files: the editor
+  // then offers no upload affordance and leaves paste and drop alone.
+  onUploadFile?:
+    ((file: File, name: string | undefined) => Promise<AssetRef>) | undefined;
   // Cmd/Ctrl-S in the editor.
   onSave?: () => void;
   // Inline review: paint comment/suggestion ranges, surface a selection popover,
@@ -554,6 +583,8 @@ export function MarkdownEditor({
   ariaLabel,
   ariaDescribedBy,
   onFollowLink,
+  assets = NO_ASSETS,
+  onUploadFile,
   onSave,
   review,
   reviewMarks,
@@ -573,6 +604,18 @@ export function MarkdownEditor({
   const [mounted, setMounted] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
   const [editingLink, setEditingLink] = useState<LinkDraft>();
+  // Uploads in flight, and the last refusal worth telling the author about.
+  const [uploading, setUploading] = useState(0);
+  const [uploadError, setUploadError] = useState<string>();
+  const picker = useRef<HTMLInputElement>(null);
+  // The loader's assets plus what this session has uploaded since: what the
+  // editor renders and what link clicks resolve against.
+  const uploadedAssets = useRef<ImageAssets>({});
+  const assetsNow = useRef<ImageAssets>(assets);
+  const onUploadRef = useRef(onUploadFile);
+  const uploadFilesRef = useRef<
+    (files: readonly File[], pos: number, pasted: boolean) => void
+  >(() => undefined);
   const previewC = useRef(new Compartment());
   // Linter inputs change with route data, not per keystroke; a compartment
   // lets us reconfigure the rule without tearing down the editor. The latest
@@ -595,6 +638,8 @@ export function MarkdownEditor({
     onFollowLinkRef.current = onFollowLink;
     onSaveRef.current = onSave;
     onReviewLayoutRef.current = onReviewLayoutChange;
+    onUploadRef.current = onUploadFile;
+    uploadFilesRef.current = uploadFiles;
   });
 
   // Report frontmatter presence. The first-line guard keeps a metadata-less
@@ -691,6 +736,67 @@ export function MarkdownEditor({
     cm.focus();
   }
 
+  // Upload files for the cursor (or a drop point). Every file gets its own
+  // "Uploading…" marker at once; each becomes markdown only when the server
+  // has accepted it, and a refusal inserts nothing and says why.
+  function uploadFiles(
+    files: readonly File[],
+    pos: number,
+    pasted: boolean,
+  ): void {
+    const cm = view.current;
+    const upload = onUploadRef.current;
+    if (cm === null || upload === undefined || files.length === 0) return;
+    setUploadError(undefined);
+    setUploading((n) => n + files.length);
+    // Markers for every file show at once; the uploads run one after another
+    // so the blocks land in the order the files were given.
+    const ids = files.map((file) => startUpload(cm, pos, file.name));
+    let chain = Promise.resolve();
+    for (const [i, file] of files.entries()) {
+      const id = ids[i] ?? 0;
+      chain = chain.then(() =>
+        upload(file, nameForUpload(file, pasted))
+          .then((asset) => {
+            if (view.current !== cm) return;
+            uploadedAssets.current = {
+              ...uploadedAssets.current,
+              [linkTargetFor(asset)]: asset,
+            };
+            assetsNow.current = { ...assets, ...uploadedAssets.current };
+            finishUpload(cm, id, insertionMarkdown(asset), [
+              setImageAssets.of(assetsNow.current),
+            ]);
+          })
+          .catch((error: unknown) => {
+            if (view.current === cm) failUpload(cm, id);
+            setUploadError(
+              error instanceof Error
+                ? error.message
+                : "The file could not be uploaded.",
+            );
+          })
+          .finally(() => {
+            setUploading((n) => n - 1);
+          }),
+      );
+    }
+  }
+
+  function pickFiles(list: FileList | null): void {
+    const cm = view.current;
+    if (cm === null) return;
+    const files = uploadableFiles(list);
+    if (files.length === 0) {
+      if (list !== null && list.length > 0) {
+        setUploadError(UNSUPPORTED_PICK_MESSAGE);
+      }
+      return;
+    }
+    uploadFiles(files, cm.state.selection.main.head, false);
+    cm.focus();
+  }
+
   function toggleSource(): void {
     const cm = view.current;
     if (cm === null || readOnly === true) return;
@@ -738,6 +844,8 @@ export function MarkdownEditor({
             if (node.name !== "URL" || node.node.parent?.name !== "Link") {
               return;
             }
+            // A link to a stored file is not a missing document.
+            if (assetsNow.current[v.state.sliceDoc(node.from, node.to)]) return;
             const message = classifyInternalRef(
               v.state.sliceDoc(node.from, node.to),
               known,
@@ -891,6 +999,44 @@ export function MarkdownEditor({
         // Wikilink resolution rides its own compartment (read views
         // render wikilinks too, so it mounts regardless of `editing`).
         wikiC.current.of(wikiFacetExtension(docRefs, selfSlug, selfCorpusSlug)),
+        // The stored files relative images resolve against. Seeded from the
+        // loader; an upload and a loader refresh replace it by effect.
+        imageAssetsExtension(assets),
+        ...(editing && onUploadFile !== undefined
+          ? [
+              uploadStateExtension,
+              // Paste and drop of files: upload them instead of letting the
+              // browser embed or navigate to them. Text pastes are left alone.
+              EditorView.domEventHandlers({
+                paste: (event, cm) => {
+                  const files = uploadableFiles(event.clipboardData?.files);
+                  if (files.length === 0) return false;
+                  event.preventDefault();
+                  uploadFilesRef.current(
+                    files,
+                    cm.state.selection.main.head,
+                    true,
+                  );
+                  return true;
+                },
+                drop: (event, cm) => {
+                  const files = uploadableFiles(event.dataTransfer?.files);
+                  if (files.length === 0) return false;
+                  event.preventDefault();
+                  const at = cm.posAtCoords({
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                  uploadFilesRef.current(
+                    files,
+                    at ?? cm.state.selection.main.head,
+                    false,
+                  );
+                  return true;
+                },
+              }),
+            ]
+          : []),
         // Read-only: a plain click follows a rendered link (nothing to edit).
         // Editing: require Cmd/Ctrl so a plain click can place the caret.
         EditorView.domEventHandlers({
@@ -903,7 +1049,14 @@ export function MarkdownEditor({
             const href = el?.getAttribute("data-href") ?? null;
             if (href === null) return false;
             event.preventDefault();
-            onFollowLinkRef.current?.(href);
+            // A link to a stored file (a PDF) opens that file; anything else
+            // is a document or an external URL.
+            const stored = assetsNow.current[href];
+            if (stored === undefined) {
+              onFollowLinkRef.current?.(href);
+            } else {
+              window.open(stored.url, "_blank", "noopener");
+            }
             return true;
           },
         }),
@@ -996,6 +1149,13 @@ export function MarkdownEditor({
     view.current?.dispatch({ effects });
   }, [readOnly, docRefs, selfSlug, selfCorpusSlug]);
 
+  // The loader's assets changed (a file arrived or went away elsewhere):
+  // re-resolve every relative image, keeping what this session uploaded.
+  useEffect(() => {
+    assetsNow.current = { ...assets, ...uploadedAssets.current };
+    view.current?.dispatch({ effects: setImageAssets.of(assetsNow.current) });
+  }, [assets]);
+
   // Post-mount re-apply (e.g. a validation error id appears after a failed
   // submit). No-op until the view exists; the mount effect seeds the initial
   // value.
@@ -1043,8 +1203,37 @@ export function MarkdownEditor({
             disabled={!mounted}
             sourceMode={sourceMode}
             onAction={author}
+            onInsertImage={
+              onUploadFile === undefined
+                ? undefined
+                : () => picker.current?.click()
+            }
             onToggleSource={toggleSource}
           />
+          {onUploadFile !== undefined && (
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              accept={FILE_PICKER_ACCEPT}
+              aria-label="Choose images or files to insert"
+              onChange={(event) => {
+                pickFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+          )}
+          {/* Polite status while files upload; an upload that fails says why
+              and has inserted nothing. */}
+          <p className="sr-only" role="status">
+            {uploading > 0 ? "Uploading…" : ""}
+          </p>
+          {uploadError !== undefined && (
+            <p role="alert" className="mb-2 text-sm text-red-700">
+              {uploadError}
+            </p>
+          )}
           {editingLink !== undefined && (
             <LinkEditor
               draft={editingLink}
@@ -1070,6 +1259,7 @@ export function MarkdownEditor({
               source={value}
               bare
               wikiResolve={wikiResolverFor(docRefs, selfSlug, selfCorpusSlug)}
+              assets={assets}
             />
           </div>
         )}

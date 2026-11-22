@@ -9,25 +9,27 @@ import { CorpusPage } from "@/features/corpora/CorpusPage";
 import { asCorpusSlug, asProjectId } from "@/ids";
 import { getCorpusList } from "@/lib/server/corpora";
 import { getDocumentList } from "@/lib/server/documents";
+import { getFileList } from "@/lib/server/files";
 import { getFolderList } from "@/lib/server/folders";
 
 export const Route = createFileRoute("/p/$projectId/corpora/$slug")({
   component: CorpusRoute,
   loader: async ({ params }) => {
     const { projectId } = params;
-    const [corpora, documents, folders] = await Promise.all([
+    const [corpora, documents, folders, files] = await Promise.all([
       getCorpusList({ data: { projectId } }),
       getDocumentList({ data: { projectId } }),
       getFolderList({ data: { projectId } }),
+      getFileList({ data: { projectId } }),
     ]);
-    return { corpora, documents, folders };
+    return { corpora, documents, folders, files };
   },
 });
 
 const layout = getRouteApi("/p/$projectId");
 
 function CorpusRoute(): React.ReactElement {
-  const { corpora, documents, folders } = Route.useLoaderData();
+  const { corpora, documents, folders, files } = Route.useLoaderData();
   const params = Route.useParams();
   const projectId = asProjectId(params.projectId);
   const slug = asCorpusSlug(params.slug);
@@ -54,6 +56,7 @@ function CorpusRoute(): React.ReactElement {
       corpus={corpus}
       corpora={corpora}
       documents={documents.filter((d) => d.corpusSlug === slug)}
+      files={files.filter((f) => f.corpusSlug === slug)}
       folders={folders.filter((f) => f.corpusSlug === slug)}
       allFolders={folders}
       isOwner={isOwner}

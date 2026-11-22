@@ -9,6 +9,7 @@ import { DocHeader } from "@/components/document/DocHeader";
 import { DocumentActionBar } from "@/components/document/DocumentActionBar";
 import { RenameField } from "@/components/document/RenameField";
 import { ShareDialog } from "@/components/document/ShareDialog";
+import type { ImageAssets } from "@/components/markdown/image-assets";
 import type {
   ReviewMark,
   SourceRange,
@@ -37,6 +38,7 @@ import {
   sourceRangeToBlockAnchor,
 } from "@/lib/block-offsets";
 import { cn } from "@/lib/cn";
+import { uploadFile } from "@/lib/files-client";
 import { useSubmit } from "@/lib/forms";
 import { buildReviewModel, type ReviewModel } from "@/lib/review-items";
 import {
@@ -102,6 +104,8 @@ export function DocumentEditor({
   suggestions,
   viewerId,
   docRefs,
+  assets,
+  filesEnabled,
   changeFlash,
   onRemoteContentChange,
   onRemoteSuggestionChange,
@@ -115,6 +119,9 @@ export function DocumentEditor({
   suggestions: SuggestionsResult;
   viewerId: string;
   docRefs: readonly DocRef[];
+  assets: ImageAssets;
+  // Whether this deployment stores files; off, no upload affordance shows.
+  filesEnabled: boolean;
   changeFlash?: ChangeFlash | undefined;
   onRemoteContentChange: (snapshot: VisibleDocSnapshot) => void;
   onRemoteSuggestionChange: (
@@ -159,6 +166,12 @@ export function DocumentEditor({
     (doc.docVersion === base.docVersion && doc.updatedAt > base.updatedAt)
       ? doc
       : base;
+  // Files are uploaded next to this page (its own folder, so `./name.png`).
+  const uploadToPage = useCallback(
+    (file: File, name: string | undefined) =>
+      uploadFile({ projectId, documentSlug: doc.slug, file, name }),
+    [projectId, doc.slug],
+  );
   const setEditorValue = useCallback((next: string): void => {
     draftRef.current = next;
     setEditorSeed(next);
@@ -1049,6 +1062,8 @@ export function DocumentEditor({
             editorRef={editorRef}
             onDirtyChange={setDraftDirty}
             docRefs={docRefs}
+            assets={assets}
+            onUploadFile={filesEnabled ? uploadToPage : undefined}
             selfSlug={head.slug}
             onBrokenChange={setBroken}
             onHasFrontmatterChange={setHasFrontmatter}
@@ -1164,6 +1179,9 @@ function collabToastMessage(
     case "collection.detached":
     case "collection.reordered":
     case "collection.deleted":
+    case "file.created":
+    case "file.moved":
+    case "file.deleted":
       // Project/corpus-level changes don't warrant a per-document toast.
       return undefined;
     default: {
@@ -1196,7 +1214,11 @@ function shouldRefreshDocumentPage(
   return (
     change.action === "document.created" ||
     change.action === "document.filename_changed" ||
-    change.action === "document.archived"
+    change.action === "document.archived" ||
+    // A page's images resolve against the stored files beside it.
+    change.action === "file.created" ||
+    change.action === "file.moved" ||
+    change.action === "file.deleted"
   );
 }
 

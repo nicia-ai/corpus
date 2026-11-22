@@ -21,11 +21,14 @@ export const GRAPH_ID = "corpus";
 export const DOCUMENT_BY_SLUG = "DocumentBySlug";
 export const COLLECTION_BY_SLUG = "CollectionBySlug";
 export const FOLDER_BY_SLUG = "FolderBySlug";
+export const FILE_BY_SLUG = "FileBySlug";
 export const DOCUMENT_VERSION_BY_SLUG_VERSION = "DocumentVersionBySlugVersion";
 export const COLLECTION_VERSION_BY_SLUG_VERSION =
   "CollectionVersionBySlugVersion";
 export const DOCUMENT_SLUG_INDEX = "corpus_document_slug_idx";
 export const FOLDER_SLUG_INDEX = "corpus_folder_slug_idx";
+export const FILE_SLUG_INDEX = "corpus_file_slug_idx";
+export const FILE_HASH_INDEX = "corpus_file_hash_idx";
 
 // A canonical document. The node holds only the mutable head pointer;
 // content is content-addressed in `content_blobs` (src/db.ts) and
@@ -124,6 +127,27 @@ export const Folder = defineNode("Folder", {
   }),
 });
 
+// An uploaded image or attachment. The bytes are NOT here: they live in R2,
+// content-addressed under the project (`p/<projectId>/<contentHash>`), so
+// this node is only metadata and the head of a file's one and only version
+// (replacing a file moves `contentHash`; there is no version chain). It is a
+// node, not a side table, because it shares its parent's path namespace with
+// documents and folders. `filename` is the path segment; the path is derived
+// from the folder ancestry exactly as for a document. Soft-deleted
+// (`deletedAt`) until the retention reaper removes it; the R2 object outlives
+// it until the orphan sweep finds no node referencing the hash.
+export const StoredFile = defineNode("File", {
+  schema: z.object({
+    slug: z.string().min(1),
+    filename: z.string().min(1),
+    contentHash: z.string().min(1),
+    contentType: z.string().min(1),
+    size: z.number().int().nonnegative(),
+    createdAt: z.string(),
+    deletedAt: z.string().optional(),
+  }),
+});
+
 const collectionMembershipSchema = z.object({
   position: z.number().int().nonnegative(),
   // Retired tier (`core` / `reference`), kept so edges written before
@@ -177,6 +201,14 @@ export const inFolder = defineEdge("in_folder", {
   to: [Folder],
 });
 
+// File -> its single home Folder, mirroring `in_folder`. At most one per
+// file (repo-enforced); "files in this folder" is `findTo`.
+export const fileInFolder = defineEdge("file_in_folder", {
+  schema: z.object({}),
+  from: [StoredFile],
+  to: [Folder],
+});
+
 // Collection -> its root Folder: the ONE link a corpus has, and the only
 // way a document is "in" a corpus (it lives under that folder). `position`
 // and `delivery` are retired fields kept decodable; new links write
@@ -214,6 +246,15 @@ const folderSlugIndex = defineNodeIndex(Folder, {
   fields: ["slug"],
 });
 
+const fileSlugIndex = defineNodeIndex(StoredFile, {
+  name: FILE_SLUG_INDEX,
+  fields: ["slug"],
+});
+const fileHashIndex = defineNodeIndex(StoredFile, {
+  name: FILE_HASH_INDEX,
+  fields: ["contentHash"],
+});
+
 // Inferred user-defined fields for each node, suitable for downstream
 // DTO derivation (Pick / Omit) so a node's editable surface lives in
 // exactly one place — the Zod schema above. These DO NOT include
@@ -229,6 +270,7 @@ export type CollectionVersionFields = Readonly<
   z.infer<typeof CollectionVersion.schema>
 >;
 export type FolderFields = Readonly<z.infer<typeof Folder.schema>>;
+export type StoredFileFields = Readonly<z.infer<typeof StoredFile.schema>>;
 
 export const canonicalGraph = defineGraph({
   id: GRAPH_ID,
@@ -288,6 +330,17 @@ export const canonicalGraph = defineGraph({
         },
       ],
     },
+    File: {
+      type: StoredFile,
+      unique: [
+        {
+          name: FILE_BY_SLUG,
+          fields: ["slug"],
+          scope: "kind",
+          collation: "binary",
+        },
+      ],
+    },
   },
   edges: {
     includes: { type: includes, from: [Collection], to: [Document] },
@@ -298,6 +351,7 @@ export const canonicalGraph = defineGraph({
     },
     folder_child: { type: folderChild, from: [Folder], to: [Folder] },
     in_folder: { type: inFolder, from: [Document], to: [Folder] },
+    file_in_folder: { type: fileInFolder, from: [StoredFile], to: [Folder] },
     versions_of: {
       type: versionsOf,
       from: [Document],
@@ -315,6 +369,8 @@ export const canonicalGraph = defineGraph({
     collectionSlugIndex,
     collectionVersionIndex,
     folderSlugIndex,
+    fileSlugIndex,
+    fileHashIndex,
   ],
 });
 

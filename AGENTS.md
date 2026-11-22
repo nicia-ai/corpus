@@ -162,6 +162,30 @@ Entry points to read first:
    per feature. Routes import from the specific file (no barrel).
    `shared.ts` holds `storeOf` / `authedUserId` / `requireProjectOwner`.
 
+## Files (images and attachments)
+
+Design and evidence: `notes/files.md`.
+
+- **Bytes first, metadata second, never the reverse.** An upload puts the
+  object in R2 (always, even if the key exists, so `uploaded` marks the latest
+  attempt) and only then commits the `File` node in `ProjectStore.write()`.
+  Metadata without bytes is a broken file a person can see; bytes without
+  metadata are an orphan. The orphan sweep (`src/files/orphan-sweep.ts`) is safe
+  only because of its 24 h grace window and because it deletes an object only
+  when no surviving node references its hash. Keepers:
+  `test/files/file-upload.test.ts`, `test/files/file-orphan-sweep.test.ts`.
+- **Resolve `FILES` only through `objectStoreFor(env)`.** The binding is
+  optional; absent means the feature is off, quietly. R2 keys are
+  `fileObjectKey(projectId, hash)` from an authorized `ProjectId`, never from
+  request input. Keeper: `test/files/file-cross-tenant.test.ts`.
+- **A file's type comes from its bytes** (`judgeUpload`), never the client
+  header or the extension. A Hono route that changes state with the session
+  cookie must call `isSameOriginRequest` itself: only server functions get the
+  CSRF middleware.
+- **Markdown bytes are canonical.** Relative image links are resolved at
+  projection time (`documentAssetsProjection`) and never rewritten; an
+  unresolved one is a placeholder, not an error.
+
 ## Data-plane layering
 
 Four layers; keep new code in its layer.
