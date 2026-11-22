@@ -30,7 +30,8 @@ const MIRROR_WRANGLER_ENV = "mirror";
 const MIRROR_TEST_TIMEOUT_MS = 30_000;
 // Likewise the file-storage tests run against the `files` wrangler
 // environment, which adds a local R2 bucket (the `FILES` binding).
-const FILES_TESTS = "test/files/**/*.test.ts";
+// The share-link file test needs R2 too.
+const FILES_TESTS = ["test/files/**/*.test.ts", "test/embassy-files.test.ts"];
 const FILES_WRANGLER_ENV = "files";
 
 export default defineConfig(async (configEnv: ConfigEnv) => {
@@ -98,10 +99,12 @@ export default defineConfig(async (configEnv: ConfigEnv) => {
       ? {
           test: {
             projects: [
-              testProject("worker", { exclude: [MIRROR_TESTS, FILES_TESTS] }),
+              testProject("worker", {
+                exclude: [MIRROR_TESTS, ...FILES_TESTS],
+              }),
               testProject("files", {
                 environment: FILES_WRANGLER_ENV,
-                include: [FILES_TESTS],
+                include: FILES_TESTS,
               }),
               testProject("mirror", {
                 environment: MIRROR_WRANGLER_ENV,

@@ -364,7 +364,12 @@ function contentDisposition(inline: boolean, filename: string): string {
 // an SVG opened as a document inert (no script, no network, sandboxed), and
 // anything that is not being loaded as an `<img>` and could carry active
 // content (SVG) or is download-only (PDF) is an attachment. The bytes are
-// immutable and content-addressed, so they cache forever, but only privately.
+// immutable and content-addressed, so by default they cache forever, but only
+// privately. A route whose authorization can be withdrawn (a share link)
+// passes a short `cacheControl` instead, so revocation bites quickly.
+export const FILE_CACHE_IMMUTABLE = "private, max-age=31536000, immutable";
+export const FILE_CACHE_SHARE_LINK = "private, max-age=300";
+
 export function fileResponseHeaders(
   args: Readonly<{
     hash: string;
@@ -372,6 +377,7 @@ export function fileResponseHeaders(
     filename: string;
     size: number;
     fetchDest: string | null;
+    cacheControl?: string;
   }>,
 ): Headers {
   const format = formatOfContentType(args.contentType);
@@ -382,7 +388,7 @@ export function fileResponseHeaders(
     "content-type": args.contentType,
     "content-length": String(args.size),
     "content-disposition": contentDisposition(inline, args.filename),
-    "cache-control": "private, max-age=31536000, immutable",
+    "cache-control": args.cacheControl ?? FILE_CACHE_IMMUTABLE,
     etag: `"${args.hash}"`,
     vary: "Sec-Fetch-Dest",
     "x-content-type-options": "nosniff",

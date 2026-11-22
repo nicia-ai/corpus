@@ -189,9 +189,24 @@ with in-place replacement.
 
 ## Not built yet
 
-Share links (a file is authorized by being in the resolved set of the shared
-page's head), the Git mirror (`mirrorManifest` files, `chunkPlan`), the CLI
+The Git mirror (`mirrorManifest` files, `chunkPlan`), the CLI
 state `assets`, the REST file routes and `If-Match` writes, and MCP
 `read_file`. The seams they need exist: `ObjectStore` (bytes by key),
 `FileRepo` (lookups by slug, by folder and name, and by hash), and the
 `file.*` events.
+
+## Share links
+
+`GET /s/:token/f/:hash` (`embassyFile` in `src/embassy/http.ts`). Authorization
+is the live embassy (`resolveLiveEmbassy`: revoked and expired are 404) plus
+`ProjectStore.pageFileByHash(slug, hash)`: the hash must be in the set
+`pageFileRefsProjection` resolves from the page's CURRENT head, the same
+resolution the app's `assets` map uses (`documentAssetsProjection` now maps
+that set to `/api/files` URLs). Recomputed per request, so a dropped image
+stops being served. Headers are `fileResponseHeaders` with
+`cacheControl: FILE_CACHE_SHARE_LINK` (`private, max-age=300`, not
+immutable, so revocation bites). The only share-link surface is the
+server-rendered HTML (`embassyPageHtml`): the writable view is a plain
+`<textarea>`, not CodeMirror, so there is no editor `assets` map to build and
+no upload control. The HTML builds its own `ImageAssets` of token URLs and
+renders through `MarkdownContent`. Keeper: `test/embassy-files.test.ts`.

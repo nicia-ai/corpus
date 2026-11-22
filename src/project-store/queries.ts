@@ -578,6 +578,13 @@ export async function corpusOutlineProjection(
   };
 }
 
+export type PageFileRef = Readonly<{
+  contentHash: string;
+  name: string;
+  contentType: string;
+  size: number;
+}>;
+
 // The files a page's relative links point at, keyed by the link target
 // exactly as written. The page's own links (cached by content hash like every
 // link lens) are resolved against its corpus-relative path, then looked up as
@@ -590,6 +597,29 @@ export async function documentAssetsProjection(
   projectId: string,
   parsedLinksByHash: Map<string, readonly ParsedLink[]>,
 ): Promise<Readonly<Record<string, AssetRef>>> {
+  const refs = await pageFileRefsProjection(u, slug, parsedLinksByHash);
+  return Object.fromEntries(
+    Object.entries(refs).map(([target, ref]) => [
+      target,
+      {
+        url: fileUrl(projectId, ref.contentHash),
+        name: ref.name,
+        contentType: ref.contentType,
+        size: ref.size,
+      },
+    ]),
+  );
+}
+
+// The same resolution, before any URL is chosen: each surface (the app's
+// session route, a share link's token route) builds its own URL from the
+// content hash. This is the single place "which files does this page's head
+// reference" is answered.
+export async function pageFileRefsProjection(
+  u: ProjectUnit,
+  slug: DocumentSlug,
+  parsedLinksByHash: Map<string, readonly ParsedLink[]>,
+): Promise<Readonly<Record<string, PageFileRef>>> {
   const node = await u.docs.find(slug);
   if (node === undefined || node.archivedAt !== undefined) return {};
   const location = await documentLocationProjection(u, slug);
@@ -603,7 +633,7 @@ export async function documentAssetsProjection(
     node.contentHash,
     async () => (await u.blobs.get(node.contentHash)) ?? "",
   );
-  const assets: Record<string, AssetRef> = {};
+  const refs: Record<string, PageFileRef> = {};
   for (const link of links) {
     if (link.kind !== "path") continue;
     const resolved = resolveRelativePath(location.path, linkPath(link.target));
@@ -614,14 +644,14 @@ export async function documentAssetsProjection(
     const file =
       folderSlug === undefined ? undefined : await u.files.at(folderSlug, name);
     if (file === undefined) continue;
-    assets[link.target] = {
-      url: fileUrl(projectId, file.contentHash),
+    refs[link.target] = {
+      contentHash: file.contentHash,
       name: file.filename,
       contentType: file.contentType,
       size: file.size,
     };
   }
-  return assets;
+  return refs;
 }
 
 // A link destination without its query string, percent-decoded where it is
