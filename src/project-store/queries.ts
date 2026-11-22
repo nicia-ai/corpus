@@ -1,4 +1,9 @@
-import { asDocumentSlug, type CorpusSlug, type DocumentSlug } from "../ids";
+import {
+  asDocumentSlug,
+  type CorpusSlug,
+  type DocumentSlug,
+  type FolderSlug,
+} from "../ids";
 import {
   buildCorpusPathIndex,
   comparePaths,
@@ -23,6 +28,7 @@ import type {
   CorpusDocView,
   CorpusMeta,
 } from "../store/repos/collection-graph";
+import type { FileNode } from "../store/repos/file-repo";
 import { compact, estimateTokens } from "../util";
 
 import type {
@@ -636,14 +642,9 @@ export async function pageFileRefsProjection(
   const refs: Record<string, PageFileRef> = {};
   for (const link of links) {
     if (link.kind !== "path") continue;
-    const resolved = resolveRelativePath(location.path, linkPath(link.target));
-    const segments = resolved === undefined ? [] : pathSegments(resolved);
-    const name = segments.pop();
-    if (name === undefined || !hasFileExtension(name)) continue;
-    const folderSlug = await u.folders.folderAt(root, segments);
-    const file =
-      folderSlug === undefined ? undefined : await u.files.at(folderSlug, name);
-    if (file === undefined) continue;
+    const found = await fileAtTarget(u, root, location.path, link.target);
+    if (found === undefined) continue;
+    const { file } = found;
     refs[link.target] = {
       contentHash: file.contentHash,
       name: file.filename,
@@ -652,6 +653,64 @@ export async function pageFileRefsProjection(
     };
   }
   return refs;
+}
+
+// The stored file a link target names, resolved against the corpus-relative
+// path it is written in: the one resolver the editor's image lookup and the
+// MCP `read_file` share. Undefined for a target that escapes the corpus root,
+// has no file extension, or names nothing.
+async function fileAtTarget(
+  u: ProjectUnit,
+  root: FolderSlug,
+  fromPath: string,
+  target: string,
+): Promise<
+  Readonly<{ file: FileNode; path: string; folderSlug: string }> | undefined
+> {
+  const resolved = resolveRelativePath(fromPath, linkPath(target));
+  const segments = resolved === undefined ? [] : pathSegments(resolved);
+  const name = segments.pop();
+  if (resolved === undefined || name === undefined || !hasFileExtension(name)) {
+    return undefined;
+  }
+  const folderSlug = await u.folders.folderAt(root, segments);
+  const file =
+    folderSlug === undefined ? undefined : await u.files.at(folderSlug, name);
+  return file === undefined || folderSlug === undefined
+    ? undefined
+    : { file, path: resolved, folderSlug };
+}
+
+// The live file in `corpusSlug` that `target` names, for an agent. Relative
+// to the page `relativeTo` when given (the `src` exactly as written in it),
+// else to the corpus root. A page outside the corpus resolves nothing.
+export async function fileAtPathProjection(
+  u: ProjectUnit,
+  corpusSlug: CorpusSlug,
+  target: string,
+  relativeTo?: DocumentSlug,
+): Promise<FileListRow | undefined> {
+  const root = await u.cols.rootFolderSlug(corpusSlug);
+  if (root === undefined) return undefined;
+  let fromPath = "";
+  if (relativeTo !== undefined) {
+    const page = await documentLocationProjection(u, relativeTo);
+    if (page?.corpusSlug !== corpusSlug) return undefined;
+    fromPath = page.path;
+  }
+  const found = await fileAtTarget(u, root, fromPath, target);
+  if (found === undefined) return undefined;
+  const { file, path, folderSlug } = found;
+  return {
+    slug: file.slug,
+    name: file.filename,
+    path,
+    corpusSlug,
+    folderSlug: folderSlug === root ? null : folderSlug,
+    contentHash: file.contentHash,
+    contentType: file.contentType,
+    size: file.size,
+  };
 }
 
 // A link destination without its query string, percent-decoded where it is

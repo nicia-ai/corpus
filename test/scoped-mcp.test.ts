@@ -17,7 +17,7 @@ import {
   type ConnectionId,
 } from "../src/ids";
 import type { McpExecutor } from "../src/mcp";
-import { scopedExecutor } from "../src/scoped-executor";
+import { type McpInner, scopedExecutor } from "../src/scoped-executor";
 
 import {
   createConnection,
@@ -34,8 +34,10 @@ const TEST_LOCATION = {
 // — scopedExecutor unit tests — pure filtering against a stub
 //   McpExecutor, no DO. Verifies the read-side scope rules.
 
-function stubExec(): Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId"> {
+function stubExec(): McpInner {
   return {
+    listFiles: () => Promise.resolve([]),
+    fileAtPath: () => Promise.resolve(undefined),
     listCorpora: () =>
       Promise.resolve([
         { slug: "marketing", name: "Marketing" },

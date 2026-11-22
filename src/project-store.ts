@@ -212,6 +212,7 @@ import {
   listCorporaProjection,
   listDocumentRefsProjection,
   listDocumentsProjection,
+  fileAtPathProjection,
   listFilesProjection,
   listFoldersProjection,
   resolvedMembersProjection,
@@ -1239,6 +1240,21 @@ export class ProjectStore extends DurableObject<Env> {
   // Every live file with its corpus and corpus-relative path.
   async listFiles(): Promise<readonly FileListRow[]> {
     return listFilesProjection(await this.read());
+  }
+
+  // The live file in one corpus a path names, for MCP: relative to a page
+  // (`./diagram.png` as written in it) or to the corpus root.
+  async fileAtPath(
+    corpusSlug: CorpusSlug,
+    path: string,
+    relativeTo?: DocumentSlug,
+  ): Promise<FileListRow | undefined> {
+    return fileAtPathProjection(
+      await this.read(),
+      corpusSlug,
+      path,
+      relativeTo,
+    );
   }
 
   async deleteFile(

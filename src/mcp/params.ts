@@ -44,6 +44,16 @@ async function documentSlugForPath(
   return doc === undefined ? undefined : asDocumentSlug(doc.slug);
 }
 
+// A page named by Corpus path or by slug (a `document` argument): a path in
+// the Corpus wins, otherwise the value is taken as a slug and the scoped
+// executor's membership gate decides whether it is in this Corpus.
+export async function documentSlugFromRef(
+  exec: McpExecutor,
+  raw: string,
+): Promise<DocumentSlug> {
+  return (await documentSlugForPath(exec, raw)) ?? asDocumentSlug(raw);
+}
+
 export async function documentSlugFromArgs(
   exec: McpExecutor,
   args: Record<string, unknown>,

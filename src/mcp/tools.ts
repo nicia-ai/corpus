@@ -9,6 +9,7 @@ import { NEW_DOCUMENT_SLUG } from "../store/domain/paths";
 import { compact, MARKDOWN_TOO_LARGE_MESSAGE, markdownBodyZ } from "../util";
 
 import type { McpExecutor } from "./executor";
+import { listFilesTool, readFileTool } from "./files";
 import { documentSlugFromArgs, strField } from "./params";
 import {
   ERR,
@@ -144,6 +145,10 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
 
   list_documents: async ({ id, exec }) =>
     ok(id, textContent(JSON.stringify(await exec.listDocuments()))),
+
+  list_files: ({ id, exec }) => listFilesTool(id, exec),
+
+  read_file: ({ id, exec, params }) => readFileTool(id, exec, params),
 
   read_document: async ({ id, exec, params }) => {
     const requested = await documentSlugFromArgs(exec, params);

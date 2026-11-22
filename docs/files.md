@@ -74,12 +74,26 @@ Anyone who can edit the page. Credentials that can only suggest edits (share
 links set to suggest, and agent API keys with the suggest grant) cannot add
 files in this version.
 
+## Agents (MCP)
+
+A connected agent can look at the images in its corpus. `list_files` lists the
+corpus's files (path, size, type), and `read_file` returns one: PNG, JPEG, GIF
+and WebP come back as an image the agent can see. SVG and PDF files return
+only their name, size and type. Files over 5 MiB are refused with a message
+that says how large they are.
+
+`read_file` takes a corpus `path`. To use a link exactly as it is written in a
+page, pass it as `path` together with that page as `document`:
+`./diagram.png` then resolves next to the page, the way the editor resolves it.
+A path that leaves the corpus (`../` past its root, another corpus's files) is
+refused. Without file storage turned on, `read_file` answers that files are not
+enabled. Agents cannot add files.
+
 ## What is not included yet
 
 - A **project export** (Settings → Export) does not include files. It says how
   many images and attachments it left out; relative links to them stay as they
   are and show the missing-image placeholder after an import.
-- The CLI, the Git mirror and MCP do not carry files yet.
 
 ## Images on a shared page
 

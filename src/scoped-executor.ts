@@ -2,9 +2,12 @@ import {
   asDocumentSlug,
   type CallerRef,
   type CorpusSlug,
+  type DocumentSlug,
   type ProjectId,
 } from "./ids";
 import type { McpExecutor } from "./mcp";
+import type { FileListRow } from "./project-store/contracts";
+import type { ObjectStore } from "./store/repos/object-store";
 
 // The read-side scope for an MCP request. The Connection's bound
 // Corpus is the agent's entire world; every McpExecutor method is
@@ -23,12 +26,32 @@ import type { McpExecutor } from "./mcp";
 // `inner` is the raw ProjectStore DO stub — it doesn't carry the
 // per-request identity/route context, so those fields are omitted here and
 // filled from closure-bound arguments on the returned executor.
+//
+// The file methods are the DO's own, project-wide shapes (rows carry their
+// corpus); the scoped executor narrows them to the bound Corpus.
+export type McpInner = Omit<
+  McpExecutor,
+  "callerRef" | "baseUrl" | "projectId" | "objects" | "listFiles" | "getFile"
+> &
+  Readonly<{
+    listFiles: () => Promise<readonly FileListRow[]>;
+    fileAtPath: (
+      corpusSlug: CorpusSlug,
+      path: string,
+      relativeTo?: DocumentSlug,
+    ) => Promise<FileListRow | undefined>;
+  }>;
+
 export function scopedExecutor(
-  inner: Omit<McpExecutor, "callerRef" | "baseUrl" | "projectId">,
+  inner: McpInner,
   boundSlug: CorpusSlug,
   members: readonly string[],
   callerRef: CallerRef,
-  location: Readonly<{ baseUrl: string; projectId: ProjectId }>,
+  location: Readonly<{
+    baseUrl: string;
+    projectId: ProjectId;
+    objects?: ObjectStore | undefined;
+  }>,
 ): McpExecutor {
   const memberSet = new Set<string>(members);
   // An agent listing the Corpus is the freshness moment: record which
@@ -47,6 +70,38 @@ export function scopedExecutor(
     callerRef,
     baseUrl: location.baseUrl,
     projectId: location.projectId,
+    objects: location.objects,
+
+    // Files are scoped like documents: only rows whose corpus is the bound
+    // one. The corpus is checked on the row itself, never trusted from the
+    // caller.
+    listFiles: async () =>
+      (await inner.listFiles())
+        .filter((f) => f.corpusSlug === boundSlug)
+        .map((f) => ({
+          path: f.path,
+          size: f.size,
+          contentType: f.contentType,
+        })),
+
+    // The bound corpus is pinned into the lookup, so a path can only ever
+    // resolve inside it (`../` has no root to climb to; another corpus's
+    // files are not in this folder tree). A page outside the bound Corpus
+    // is refused here, like getDocument, and again in the DO.
+    getFile: async ({ path, document }) => {
+      if (document !== undefined && !memberSet.has(document)) return undefined;
+      const row = await inner.fileAtPath(boundSlug, path, document);
+      return row?.corpusSlug !== boundSlug
+        ? undefined
+        : {
+            name: row.name,
+            path: row.path,
+            size: row.size,
+            contentType: row.contentType,
+            contentHash: row.contentHash,
+          };
+    },
+
     // Only the bound Corpus is reachable. Project the inner DO's
     // `CorpusMeta` down to the MCP port shape explicitly, so a field added
     // to it later cannot leak to an agent through JSON.stringify in
